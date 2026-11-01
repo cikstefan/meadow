@@ -3,13 +3,14 @@ import { pass, vec3, uv, smoothstep, length, float, mix } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
 
-import { U, fieldsJS } from './tsl/world.js';
+import { U, fieldsJS, windFieldJS } from './tsl/world.js';
 import { Grass } from './grass.js';
 import { Flowers } from './flowers.js';
 import { Terrain } from './terrain.js';
 import { Sky } from './sky.js';
 import { Controls } from './controls.js';
 import { Pollen } from './pollen.js';
+import { MeadowAudio } from './audio.js';
 
 const QUALITY = {
 	low: { blades: 576, area: 56, flowers: 224, dpr: 1, lod: 0.8 },
@@ -173,15 +174,101 @@ async function start() {
 	} ).listen();
 	gui.add( controls, 'tour' ).name( 'auto tour' ).listen();
 
+	// ------------------------------------------------------------ sound
+	const audio = new MeadowAudio();
+	const soundBtn = document.getElementById( 'sound' );
+	const setSoundUI = () => {
+
+		soundBtn.classList.toggle( 'on', audio.enabled );
+		soundBtn.setAttribute( 'aria-pressed', audio.enabled ? 'true' : 'false' );
+		soundBtn.querySelector( 'span' ).textContent = audio.enabled ? 'sound on' : 'sound off';
+
+	};
+
+	let userMuted = params.get( 'sound' ) === '0';
+	const startAudio = async () => {
+
+		if ( userMuted || audio.enabled ) return;
+		try {
+
+			await audio.start();
+
+		} catch ( e ) {
+
+			console.warn( 'audio unavailable', e );
+
+		}
+
+		setSoundUI();
+
+	};
+
+	// browsers only allow audio after a user gesture: start on the first one
+	const firstGesture = () => {
+
+		startAudio();
+		window.removeEventListener( 'pointerdown', firstGesture );
+		window.removeEventListener( 'keydown', firstGesture );
+
+	};
+
+	window.addEventListener( 'pointerdown', firstGesture );
+	window.addEventListener( 'keydown', firstGesture );
+	soundBtn.addEventListener( 'pointerdown', ( e ) => e.stopPropagation() );
+	soundBtn.addEventListener( 'click', async ( e ) => {
+
+		e.stopPropagation();
+		if ( audio.enabled ) {
+
+			userMuted = true;
+			audio.setEnabled( false );
+
+		} else {
+
+			userMuted = false;
+			await startAudio();
+			audio.setEnabled( true );
+
+		}
+
+		setSoundUI();
+
+	} );
+	window.addEventListener( 'keydown', ( e ) => {
+
+		if ( e.code === 'KeyM' ) soundBtn.click();
+
+	} );
+
+	const sfx = gui.addFolder( 'Sound' );
+	sfx.add( audio.volumes, 'master', 0, 1, 0.01 ).onChange( () => audio.applyVolumes() );
+	sfx.add( audio.volumes, 'music', 0, 1, 0.01 ).onChange( () => audio.applyVolumes() );
+	sfx.add( audio.volumes, 'nature', 0, 1, 0.01 ).name( 'wind & wildlife' ).onChange( () => audio.applyVolumes() );
+	sfx.add( audio.volumes, 'steps', 0, 1, 0.01 ).name( 'steps & rustle' ).onChange( () => audio.applyVolumes() );
+	sfx.close();
+
+	const windSample = () => {
+
+		// average the gust field around you and slightly upwind: gusts are
+		// heard rolling in a moment before they bend the grass at your feet
+		const p = controls.pos, d = U.windDir.value;
+		let w = 0;
+		for ( const k of [ 0, 3, 6, 10 ] ) w += windFieldJS( p.x - d.x * k, p.z - d.y * k );
+		return w / 4;
+
+	};
+
 	// ------------------------------------------------------------ loop
 	const stats = { fps: 0, blades: 0, frames: 0, acc: 0 };
 
+	let baseFov = 55;
 	function resize() {
 
 		const w = window.innerWidth, h = window.innerHeight;
 		renderer.setSize( w, h );
 		camera.aspect = w / h;
-		camera.fov = w < h ? 70 : 55;
+		baseFov = w < h ? 70 : 55;
+		camera.fov = baseFov;
 		camera.updateProjectionMatrix();
 
 	}
@@ -205,6 +292,29 @@ async function start() {
 		grass.update( renderer, camera, controls.pusher );
 		if ( settings.flowers ) flowers.update( renderer, camera, controls.pusher );
 		pollen.update( camera, controls._groundY );
+
+		if ( Math.abs( camera.fov - ( baseFov + controls.fovKick ) ) > 0.01 ) {
+
+			camera.fov = baseFov + controls.fovKick;
+			camera.updateProjectionMatrix();
+
+		}
+
+		if ( audio.enabled ) {
+
+			const f = fieldsJS( controls.pos.x, controls.pos.z );
+			audio.update( {
+				wind: windSample(),
+				speed: controls.speed || 0,
+				onFoot: controls.eye < 2.5,
+				steps: controls.steps || 0,
+				bob: controls.bob || 0,
+				grass: Math.min( 1, ( 0.14 + f.tall * 0.91 ) * settings.grassHeight ),
+				hour: settings.hour,
+				eye: controls.eye,
+			} );
+
+		}
 
 		if ( settings.bloom ) pipeline.render();
 		else renderer.render( scene, camera );
@@ -264,7 +374,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { renderer, scene, camera, controls, settings, applySky, setQuality( q ) {
+	window.__meadow = { renderer, scene, camera, controls, settings, applySky, audio, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

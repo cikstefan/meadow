@@ -128,6 +128,20 @@ export const windField = Fn( ( [ xz ] ) => {
 
 } );
 
+// CPU mirror of windField (drives the wind audio)
+export function windFieldJS( x, z ) {
+
+	const t = U.time.value * U.windSpeed.value;
+	const dx = U.windDir.value.x * t, dz = U.windDir.value.y * t;
+	const n1 = vnoiseJS( ( x - dx ) / 11, ( z - dz ) / 11 );
+	const n2 = vnoiseJS( ( x - dx * 1.35 ) / 3.7 + 17, ( z - dz * 1.35 ) / 3.7 + 5 );
+	const n = n1 * 0.68 + n2 * 0.32;
+	const g = Math.min( 1, Math.max( 0, ( n - 0.28 ) / 0.54 ) );
+	const gust = g * g * ( 3 - 2 * g );
+	return U.windStrength.value * ( 0.22 + gust * 0.78 );
+
+}
+
 // 0..1 multiplier for direct sunlight under drifting cloud shadows
 export const cloudShadow = Fn( ( [ xz ] ) => {
 

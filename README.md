@@ -22,11 +22,11 @@ npm run build      # static site in dist/
 
 Needs a browser with WebGPU: Chrome / Edge 113+, Safari 26+, Firefox 141+ (Windows).
 
-**Controls:** drag to look · WASD / arrows to walk · Shift to run · wheel or Q/E to change height.
+**Controls:** drag to look · WASD / arrows to walk · Shift to run (9 m/s) · wheel or Q/E to change height · M to toggle sound.
 After 12 idle seconds the camera starts wandering on its own (auto tour).
 
 **URL options:** `?q=low|medium|high|ultra` (disables adaptive quality),
-`?hour=17.6`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?nogui`.
+`?hour=17.6`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
 
 ## How the grass works
 
@@ -64,6 +64,21 @@ frills, rounded tips) are alpha-tested.
 - **Pollen:** a few thousand specks drift with the wind and sparkle only when
   backlit. They have no buffers; each position is a pure function of hash and time.
 - **Post:** MSAA, bloom, ACES tone mapping, vignette.
+- **Sound (Web Audio, fully synthesized, no audio files):**
+  - *Music:* generative ambient in D major. Slow, lush pad chords (detuned
+    sine/triangle voices through a slowly opening filter) and sparse soft
+    mallet/bell notes drawn from the current chord, all in a long generated
+    convolution reverb.
+  - *Wind:* a low rumble, a moving whoosh and an airy grass-shimmer hiss. Their
+    levels follow the exact gust field that bends the grass (a CPU mirror of the
+    shader), sampled slightly upwind so you hear a gust roll in before it reaches you.
+  - *Wildlife:* birds (whistle phrases, trills, two-note calls) by day with a dawn
+    chorus, and crickets toward evening.
+  - *You:* footsteps synced to the head bob (a soft soil thump, a "hush" of crushed
+    grass and a cluster of crisp crunch grains), plus a continuous swish of legs
+    through the grass that pulses with your stride and gets louder in tall grass
+    and when running.
+  - Sound starts on your first click or key press, as browsers require.
 
 ## Performance notes
 - Storage buffers are packed (interleaved static data, one shared indirect-args
@@ -83,6 +98,7 @@ src/flowers.js    wildflower system
 src/terrain.js    ground mesh + distant canopy shading
 src/sky.js        sky dome, clouds, time-of-day palette
 src/pollen.js     floating pollen
+src/audio.js      procedural music, wind, wildlife, footsteps
 src/controls.js   walk / look / auto-tour camera
 src/gpu.js        storage + indirect-draw helpers
 src/tsl/noise.js  bit-exact GPU/CPU hash + value noise

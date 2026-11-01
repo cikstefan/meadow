@@ -113,7 +113,8 @@ export class Controls {
 		}
 
 		const run = k.has( 'ShiftLeft' ) || k.has( 'ShiftRight' );
-		const speed = ( run ? 4.5 : 1.4 ) * Math.max( 1, this.eye / 2 );
+		this.running = run && ! this.tour;
+		const speed = ( run ? 9.0 : 1.6 ) * Math.max( 1, this.eye / 2 );
 		const target = new THREE.Vector3();
 
 		if ( this.tour ) {
@@ -134,7 +135,7 @@ export class Controls {
 
 		}
 
-		this.vel.lerp( target, 1 - Math.exp( - dt * 5 ) );
+		this.vel.lerp( target, 1 - Math.exp( - dt * ( this.running ? 3 : 5 ) ) );
 		this.pos.addScaledVector( this.vel, dt );
 
 		this.eye += ( this.eyeTarget - this.eye ) * ( 1 - Math.exp( - dt * 4 ) );
@@ -142,10 +143,21 @@ export class Controls {
 		this._groundY += ( gy - this._groundY ) * ( this._initialised ? 1 - Math.exp( - dt * 10 ) : 1 );
 		this._initialised = true;
 
-		// gentle head bob while walking
+		// head bob synced to footsteps: cadence rises with speed (longer strides
+		// when running). One step per half bob period; `steps` counts them.
 		const sp = this.vel.length();
-		this.bob = ( this.bob || 0 ) + dt * sp * 5.5;
-		const bob = Math.sin( this.bob ) * 0.012 * Math.min( 1, sp ) * ( this.eye < 3 ? 1 : 0 );
+		this.speed = sp;
+		const onFoot = this.eye < 2.5;
+		const cadence = 1.5 + 0.2 * sp; // steps per second
+		if ( sp > 0.15 && onFoot ) this.bob = ( this.bob || 0 ) + dt * cadence * Math.PI;
+		// foot strike at the lowest point of the bob (|sin| = 1)
+		this.steps = Math.floor( ( ( this.bob || 0 ) + Math.PI / 2 ) / Math.PI );
+		const amp = THREE.MathUtils.lerp( 0.012, 0.03, THREE.MathUtils.clamp( ( sp - 1.6 ) / 6, 0, 1 ) );
+		const bob = - Math.abs( Math.sin( this.bob || 0 ) ) * amp * Math.min( 1, sp ) * ( onFoot ? 1 : 0 );
+
+		// speed feel: widen the field of view a little when running
+		const kick = THREE.MathUtils.clamp( ( sp - 2 ) / 7, 0, 1 ) * 9;
+		this.fovKick = ( this.fovKick || 0 ) + ( kick - ( this.fovKick || 0 ) ) * ( 1 - Math.exp( - dt * 3 ) );
 
 		const cam = this.camera;
 		cam.position.set( this.pos.x, this._groundY + this.eye + bob, this.pos.z );
