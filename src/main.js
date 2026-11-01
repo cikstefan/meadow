@@ -24,11 +24,11 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test( navigator.userAgent ) || ( na
 
 const settings = {
 	quality: params.get( 'q' ) || ( isMobile ? 'low' : 'high' ),
-	hour: parseFloat( params.get( 'hour' ) || '17.6' ),
+	hour: parseFloat( params.get( 'hour' ) || '17.95' ),
 	clouds: parseFloat( params.get( 'clouds' ) || '0.35' ),
 	wind: parseFloat( params.get( 'wind' ) || '0.55' ),
 	windAngle: 20,
-	grassHeight: 1.0,
+	grassHeight: parseFloat( params.get( 'grass' ) || '1.28' ),
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
 	exposure: 1.0,

@@ -26,7 +26,7 @@ Needs a browser with WebGPU: Chrome / Edge 113+, Safari 26+, Firefox 141+ (Windo
 After 12 idle seconds the camera starts wandering on its own (auto tour).
 
 **URL options:** `?q=low|medium|high|ultra` (disables adaptive quality),
-`?hour=17.6`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
+`?hour=17.95`, `?grass=1.28`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
 
 ## How the grass works
 
