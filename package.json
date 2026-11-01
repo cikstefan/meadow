@@ -1,0 +1,27 @@
+{
+  "name": "meadow",
+  "version": "0.1.0",
+  "description": "Procedural, GPU-driven meadow with WebGPU compute (three.js TSL)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cikstefan/meadow.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/cikstefan/meadow/issues"
+  },
+  "homepage": "https://github.com/cikstefan/meadow#readme",
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  },
+  "private": true,
+  "type": "module"
+}

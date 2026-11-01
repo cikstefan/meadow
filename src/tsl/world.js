@@ -1,0 +1,199 @@
+// Shared "world" functions used by every system (grass, flowers, terrain, sky):
+// terrain height, meadow patch fields, wind, cloud shadows, sky, fog and the
+// custom foliage lighting model. Keeping them in one place guarantees that the
+// grass roots sit on the terrain, that distant terrain is tinted like the grass
+// canopy, and that fog matches the sky at the horizon (no seam).
+
+import * as THREE from 'three/webgpu';
+import {
+	Fn, uniform, float, vec2, vec3, mix, smoothstep, clamp, max, pow, exp, dot, normalize, length, cameraPosition
+} from 'three/tsl';
+import { vnoise, vnoiseJS } from './noise.js';
+
+// ---------------------------------------------------------------- uniforms
+
+export const U = {
+	time: uniform( 0 ),
+
+	sunDir: uniform( new THREE.Vector3( 0.3, 0.2, - 1 ).normalize() ),
+	sunColor: uniform( new THREE.Color( 1, 0.8, 0.6 ) ),
+	zenith: uniform( new THREE.Color( 0.2, 0.4, 0.7 ) ),
+	horizon: uniform( new THREE.Color( 0.7, 0.7, 0.7 ) ),
+	horizonSun: uniform( new THREE.Color( 1.0, 0.7, 0.4 ) ),
+	skyAmb: uniform( new THREE.Color( 0.3, 0.35, 0.45 ) ),
+	groundAmb: uniform( new THREE.Color( 0.08, 0.09, 0.04 ) ),
+	fogDensity: uniform( 0.0011 ),
+	terrainFar: uniform( 560 ),
+
+	windDir: uniform( new THREE.Vector2( 1, 0.35 ).normalize() ),
+	windStrength: uniform( 0.55 ),
+	windSpeed: uniform( 3.2 ),
+
+	cloudCover: uniform( 0.5 ),
+	cloudDark: uniform( 0.45 ),
+	cloudSpeed: uniform( 4.0 ),
+};
+
+// ---------------------------------------------------------------- terrain
+
+const T1 = 150, T2 = 48, T3 = 13;
+const A1 = 16, A2 = 4, A3 = 0.6;
+
+export const terrainHeight = Fn( ( [ xz ] ) => {
+
+	const h1 = vnoise( xz.div( T1 ).add( vec2( 13.1, 7.7 ) ) ).sub( 0.5 ).mul( A1 );
+	const h2 = vnoise( xz.div( T2 ).add( vec2( 3.3, 91.2 ) ) ).sub( 0.5 ).mul( A2 );
+	const h3 = vnoise( xz.div( T3 ).add( vec2( 57.0, 21.0 ) ) ).sub( 0.5 ).mul( A3 );
+	return h1.add( h2 ).add( h3 );
+
+} );
+
+export function terrainHeightJS( x, z ) {
+
+	return ( vnoiseJS( x / T1 + 13.1, z / T1 + 7.7 ) - 0.5 ) * A1 +
+		( vnoiseJS( x / T2 + 3.3, z / T2 + 91.2 ) - 0.5 ) * A2 +
+		( vnoiseJS( x / T3 + 57.0, z / T3 + 21.0 ) - 0.5 ) * A3;
+
+}
+
+export const terrainNormal = Fn( ( [ xz ] ) => {
+
+	const e = 0.2;
+	const h = terrainHeight( xz );
+	const hx = terrainHeight( xz.add( vec2( e, 0 ) ) );
+	const hz = terrainHeight( xz.add( vec2( 0, e ) ) );
+	return normalize( vec3( h.sub( hx ), e, h.sub( hz ) ) );
+
+} );
+
+// ---------------------------------------------------------------- meadow fields
+
+// CPU mirrors (spawn-point search)
+const ss = ( a, b, x ) => {
+
+	const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) );
+	return t * t * ( 3 - 2 * t );
+
+};
+
+export function fieldsJS( x, z ) {
+
+	const tall = ss( 0.2, 0.8, vnoiseJS( x / 26 + 41, z / 26 + 3 ) ) * 0.72 + vnoiseJS( x / 6.5 + 9, z / 6.5 + 77 ) * 0.28;
+	const dry = ss( 0.6, 0.92, vnoiseJS( x / 38 + 101, z / 38 + 19 ) * 0.78 + vnoiseJS( x / 8 + 5, z / 8 + 33 ) * 0.22 );
+	const flowers = ss( 0.45, 0.9, vnoiseJS( x / 17 + 7, z / 17 + 140 ) * 0.75 + vnoiseJS( x / 5 + 66, z / 5 + 12 ) * 0.25 );
+	return { tall, dry, flowers };
+
+}
+
+// 0..1 : how tall the grass is (tussocks / mown-looking hollows)
+export const fieldTall = Fn( ( [ xz ] ) => {
+
+	const a = smoothstep( 0.2, 0.8, vnoise( xz.div( 26 ).add( vec2( 41.0, 3.0 ) ) ) );
+	const b = vnoise( xz.div( 6.5 ).add( vec2( 9.0, 77.0 ) ) );
+	return a.mul( 0.72 ).add( b.mul( 0.28 ) );
+
+} );
+
+// 0..1 : dried, straw-coloured areas
+export const fieldDry = Fn( ( [ xz ] ) => {
+
+	const a = vnoise( xz.div( 38 ).add( vec2( 101.0, 19.0 ) ) );
+	const b = vnoise( xz.div( 8.0 ).add( vec2( 5.0, 33.0 ) ) );
+	return smoothstep( 0.6, 0.92, a.mul( 0.78 ).add( b.mul( 0.22 ) ) );
+
+} );
+
+// 0..1 : wildflower density (drifts of flowers)
+export const fieldFlowers = Fn( ( [ xz ] ) => {
+
+	const a = vnoise( xz.div( 17 ).add( vec2( 7.0, 140.0 ) ) );
+	const b = vnoise( xz.div( 5.0 ).add( vec2( 66.0, 12.0 ) ) );
+	return smoothstep( 0.45, 0.9, a.mul( 0.75 ).add( b.mul( 0.25 ) ) );
+
+} );
+
+// ---------------------------------------------------------------- wind & clouds
+
+// Travelling gust field -> 0..1 strength. Gust fronts roll across the meadow
+// in the wind direction, which is what produces the "waves" in tall grass.
+export const windField = Fn( ( [ xz ] ) => {
+
+	const scroll = U.windDir.mul( U.time.mul( U.windSpeed ) );
+	const p = xz.sub( scroll );
+	const n1 = vnoise( p.div( 11.0 ) );
+	const n2 = vnoise( xz.sub( scroll.mul( 1.35 ) ).div( 3.7 ).add( vec2( 17.0, 5.0 ) ) );
+	const n = n1.mul( 0.68 ).add( n2.mul( 0.32 ) );
+	const gust = smoothstep( 0.28, 0.82, n );
+	return U.windStrength.mul( float( 0.22 ).add( gust.mul( 0.78 ) ) );
+
+} );
+
+// 0..1 multiplier for direct sunlight under drifting cloud shadows
+export const cloudShadow = Fn( ( [ xz ] ) => {
+
+	const p = xz.sub( U.windDir.mul( U.time.mul( U.cloudSpeed ) ) );
+	const c = vnoise( p.div( 85.0 ) ).mul( 0.7 ).add( vnoise( p.div( 27.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) );
+	const lit = smoothstep( U.cloudCover.sub( 0.1 ), U.cloudCover.add( 0.1 ), c );
+	return mix( float( 1.0 ).sub( U.cloudDark ), float( 1.0 ), lit );
+
+} );
+
+// ---------------------------------------------------------------- sky & fog
+
+// Sky radiance for a view direction, without sun disk / clouds.
+export const skyColor = Fn( ( [ dir ] ) => {
+
+	const y = max( dir.y, 0.0 );
+	const col = mix( U.zenith, U.horizon, pow( float( 1.0 ).sub( y ), 4.0 ) ).toVar();
+	const mu = max( dot( dir, U.sunDir ), 0.0 );
+	// warm horizon glow on the sun side
+	col.assign( mix( col, U.horizonSun, pow( mu, 5.0 ).mul( pow( float( 1.0 ).sub( y ), 4.0 ) ).mul( 0.85 ) ) );
+	// mie halo
+	col.addAssign( U.sunColor.mul( pow( mu, 12.0 ).mul( 0.045 ).add( pow( mu, 110.0 ).mul( 0.2 ) ) ) );
+	return col;
+
+} );
+
+// Aerial perspective: blend toward the sky colour seen in that direction.
+export const applyFog = Fn( ( [ color, worldPos ] ) => {
+
+	const d = worldPos.sub( cameraPosition );
+	const dist = length( d );
+	const dir = d.div( max( dist, 0.001 ) );
+	const fogDir = normalize( vec3( dir.x, max( dir.y, 0.0 ).mul( 0.35 ).add( 0.015 ), dir.z ) );
+	const fogCol = skyColor( fogDir );
+	const amt = float( 1.0 ).sub( exp( dist.mul( U.fogDensity ).negate() ) );
+	const edge = smoothstep( U.terrainFar.mul( 0.62 ), U.terrainFar, dist );
+	return mix( color, fogCol, max( amt, edge ) );
+
+} );
+
+// ---------------------------------------------------------------- lighting
+
+// Foliage lighting model: wrapped diffuse, sky/ground ambient, translucency
+// (light transmitted through thin leaves when the sun is behind them),
+// a waxy specular sheen, cloud shadows and fog.
+export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt, wrap ] ) => {
+
+	const V = normalize( cameraPosition.sub( P ) );
+	const L = U.sunDir;
+	const NdL = dot( N, L );
+	const diff = clamp( NdL.add( wrap ).div( float( 1.0 ).add( wrap ) ), 0.0, 1.0 );
+
+	const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) );
+	const direct = U.sunColor.mul( diff ).mul( sunVis );
+	const ambient = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( ao );
+
+	// translucency: strongest looking toward the sun through the leaf
+	const back = pow( clamp( dot( V.negate(), L ), 0.0, 1.0 ), 3.0 );
+	const thru = back.mul( 1.4 ).add( clamp( NdL.negate(), 0.0, 1.0 ).mul( 0.35 ) );
+	const transCol = albedo.mul( vec3( 1.25, 1.3, 0.55 ) ).mul( U.sunColor ).mul( thru ).mul( transmit ).mul( sunVis );
+
+	const H = normalize( L.add( V ) );
+	const spec = pow( clamp( dot( N, H ), 0.0, 1.0 ), 48.0 ).mul( specAmt ).mul( sunVis );
+
+	const col = albedo.mul( direct.add( ambient ) ).add( transCol ).add( U.sunColor.mul( spec ) );
+	return applyFog( col, P );
+
+} );
+
