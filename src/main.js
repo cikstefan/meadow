@@ -13,10 +13,11 @@ import { Pollen } from './pollen.js';
 import { MeadowAudio } from './audio.js';
 
 const QUALITY = {
-	low: { blades: 576, area: 56, flowers: 224, dpr: 1, lod: 0.8 },
-	medium: { blades: 896, area: 76, flowers: 304, dpr: 1.25, lod: 1 },
-	high: { blades: 1280, area: 96, flowers: 384, dpr: 1.5, lod: 1.15 },
-	ultra: { blades: 1664, area: 120, flowers: 480, dpr: 2, lod: 1.4 },
+	// blades/area: dense near field; far/farArea: coarse ring of wide blades out to the hills
+	low: { blades: 576, area: 56, far: 384, farArea: 240, flowers: 224, dpr: 1, lod: 0.8 },
+	medium: { blades: 896, area: 76, far: 512, farArea: 300, flowers: 304, dpr: 1.25, lod: 1 },
+	high: { blades: 1280, area: 96, far: 640, farArea: 360, flowers: 384, dpr: 1.5, lod: 1.15 },
+	ultra: { blades: 1664, area: 120, far: 896, farArea: 440, flowers: 480, dpr: 2, lod: 1.4 },
 };
 
 const params = new URLSearchParams( location.search );
@@ -24,15 +25,17 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test( navigator.userAgent ) || ( na
 
 const settings = {
 	quality: params.get( 'q' ) || ( isMobile ? 'low' : 'high' ),
-	hour: parseFloat( params.get( 'hour' ) || '17.95' ),
-	clouds: parseFloat( params.get( 'clouds' ) || '0.35' ),
-	wind: parseFloat( params.get( 'wind' ) || '0.55' ),
-	windAngle: 20,
-	grassHeight: parseFloat( params.get( 'grass' ) || '1.28' ),
+	hour: parseFloat( params.get( 'hour' ) || '6' ),
+	clouds: parseFloat( params.get( 'clouds' ) || '0.5' ),
+	wind: parseFloat( params.get( 'wind' ) || '1.2' ),
+	windAngle: parseFloat( params.get( 'winddir' ) || '108' ),
+	grassHeight: parseFloat( params.get( 'grass' ) || '1.6' ),
+	dryPatches: parseFloat( params.get( 'dry' ) || '0' ),
+	flowerGlow: 1.0,
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
 	exposure: 1.0,
-	tour: params.get( 'tour' ) !== '0',
+	tour: params.get( 'tour' ) === '1',
 	adaptive: ! params.has( 'q' ),
 };
 
@@ -85,18 +88,28 @@ async function start() {
 
 	}
 
-	let grass = null, flowers = null, terrain = null;
+	let grass = null, farGrass = null, flowers = null, terrain = null;
 
 	function buildWorld() {
 
 		const q = QUALITY[ settings.quality ];
 		if ( grass ) grass.dispose();
+		if ( farGrass ) farGrass.dispose();
 		if ( flowers ) flowers.dispose();
 		if ( terrain ) terrain.mesh.removeFromParent();
 
 		grass = new Grass( { bladesPerAxis: q.blades, area: q.area, lodScale: q.lod } );
 		grass.u.heightScale.value = settings.grassHeight;
 		scene.add( grass.group );
+
+		// waving grass all the way to the hills: a coarse ring of wide blades that
+		// fades in exactly where the dense near field fades out
+		farGrass = new Grass( {
+			bladesPerAxis: q.far, area: q.farArea, innerRadius: q.area * 0.5, widthScale: 3.2, renderOrder: 3,
+			lods: [ { segments: 3, maxDistance: 90 }, { segments: 1, maxDistance: Infinity } ],
+		} );
+		farGrass.u.heightScale.value = settings.grassHeight;
+		scene.add( farGrass.group );
 
 		flowers = new Flowers( { perAxis: q.flowers, area: q.area * 0.92, grassArea: q.area } );
 		flowers.u.heightScale.value = settings.grassHeight;
@@ -108,7 +121,7 @@ async function start() {
 
 		renderer.setPixelRatio( Math.min( window.devicePixelRatio, q.dpr ) );
 		resize();
-		stats.blades = q.blades * q.blades;
+		stats.blades = q.blades * q.blades + q.far * q.far;
 
 	}
 
@@ -136,6 +149,10 @@ async function start() {
 		const el = 58 * Math.sin( Math.PI * ( h - 6 ) / 12 ) - ( h < 6 || h > 18 ? 4 : 0 );
 		const az = 90 + ( h - 6 ) / 12 * 180;
 		sky.setAtmosphere( el, az, settings.clouds );
+		// eyes adapt at night: lift exposure so the moonlit meadow stays readable
+		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * 0.7 );
+		U.dry.value = settings.dryPatches;
+		U.glow.value = settings.flowerGlow;
 		sky.az = az;
 		const wa = THREE.MathUtils.degToRad( settings.windAngle );
 		U.windDir.value.set( Math.cos( wa ), Math.sin( wa ) );
@@ -151,20 +168,30 @@ async function start() {
 	// ------------------------------------------------------------ gui
 	const gui = new GUI( { title: 'Meadow' } );
 	if ( isMobile || params.has( 'nogui' ) ) gui.close();
-	gui.add( settings, 'hour', 4.5, 20.5, 0.05 ).name( 'time of day' ).onChange( applySky );
+	gui.add( settings, 'hour', 0, 24, 0.05 ).name( 'time of day' ).onChange( applySky );
 	gui.add( settings, 'clouds', 0, 1, 0.01 ).onChange( applySky );
-	gui.add( settings, 'wind', 0, 1.2, 0.01 ).onChange( applySky );
+	gui.add( settings, 'wind', 0, 1.6, 0.01 ).onChange( applySky );
 	gui.add( settings, 'windAngle', 0, 360, 1 ).name( 'wind direction' ).onChange( applySky );
-	gui.add( settings, 'grassHeight', 0.3, 1.6, 0.01 ).name( 'grass height' ).onChange( ( v ) => {
+	gui.add( settings, 'grassHeight', 0.3, 3.0, 0.01 ).name( 'grass height' ).onChange( ( v ) => {
 
 		grass.u.heightScale.value = v;
+		farGrass.u.heightScale.value = v;
 		flowers.u.heightScale.value = v;
 		grass.invalidate();
+		farGrass.invalidate();
 		flowers.invalidate();
 
 	} );
+	gui.add( settings, 'dryPatches', 0, 1, 0.01 ).name( 'dry patches' ).onChange( () => {
+
+		applySky();
+		grass.invalidate();
+		farGrass.invalidate();
+
+	} );
+	gui.add( settings, 'flowerGlow', 0, 3, 0.01 ).name( 'night glow' ).onChange( applySky );
 	gui.add( settings, 'flowers' ).onChange( ( v ) => ( flowers.group.visible = v ) );
-	gui.add( settings, 'exposure', 0.4, 2.0, 0.01 ).onChange( ( v ) => ( renderer.toneMappingExposure = v ) );
+	gui.add( settings, 'exposure', 0.4, 2.0, 0.01 ).onChange( applySky );
 	gui.add( settings, 'bloom' );
 	gui.add( settings, 'quality', Object.keys( QUALITY ) ).onChange( () => {
 
@@ -290,6 +317,7 @@ async function start() {
 		sky.update( camera );
 		terrain.update( camera );
 		grass.update( renderer, camera, controls.pusher );
+		farGrass.update( renderer, camera, null );
 		if ( settings.flowers ) flowers.update( renderer, camera, controls.pusher );
 		pollen.update( camera, controls._groundY );
 

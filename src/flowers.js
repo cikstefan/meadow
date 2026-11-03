@@ -433,7 +433,15 @@ export class Flowers {
 			const spec = select( type.greaterThan( 0.5 ).and( type.lessThan( 1.5 ) ).and( isPetal ), float( 0.9 ), float( 0.12 ) );
 			const ao = select( part.lessThan( 0.5 ), mix( 0.2, 1.0, pu ), float( 1.0 ) );
 
-			return shadeFoliage( albedo, N, vWorld, ao, cloud, transmit, spec, float( 0.5 ) );
+			// night: bioluminescent blue petals, brighter centres (picked up by bloom)
+			const twinkle = sin( U.time.mul( mix( 0.6, 1.4, seed ) ).add( seed.mul( 50.0 ) ) ).mul( 0.25 ).add( 0.85 );
+			const glowAmt = select( part.lessThan( 0.5 ), float( 0.06 ),
+				select( part.lessThan( 1.5 ), mix( 0.75, 0.35, pu ), float( 1.1 ) ) );
+			const emit = U.glowColor.mul( U.night.mul( U.glow ).mul( glowAmt ).mul( twinkle ) );
+			// petals lose their day colour at night: the glow is the colour
+			const nightAlbedo = mix( albedo, albedo.mul( vec3( 0.1, 0.25, 0.6 ) ), U.night.mul( 0.9 ) );
+
+			return shadeFoliage( nightAlbedo, N, vWorld, ao, cloud, transmit, spec, float( 0.5 ), emit );
 
 		} )();
 

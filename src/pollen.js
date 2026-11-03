@@ -67,7 +67,10 @@ export class Pollen {
 			const V = normalize( cameraPosition.sub( vWorld ) );
 			const back = pow( clamp( dot( V.negate(), U.sunDir ), 0, 1 ), 6.0 );
 			const lit = smoothstep( - 0.02, 0.08, U.sunDir.y );
-			const col = U.sunColor.mul( back.mul( 1.6 ).add( 0.05 ) ).mul( lit ).add( U.skyAmb.mul( 0.15 ) );
+			const col = U.sunColor.mul( back.mul( 1.6 ).add( 0.05 ) ).mul( lit ).add( U.skyAmb.mul( 0.15 ) ).toVar();
+			// night: drifting blue spores, gently pulsing
+			const pulse = sin( U.time.mul( 1.7 ).add( vWorld.x.mul( 3.1 ) ).add( vWorld.z.mul( 2.3 ) ) ).mul( 0.4 ).add( 0.6 );
+			col.addAssign( U.glowColor.mul( U.night.mul( U.glow ).mul( pulse ).mul( 0.6 ) ) );
 			return vec4( col.mul( disc ).mul( vFade ), 1.0 );
 
 		} )();

@@ -9,7 +9,7 @@ import {
 	Fn, uniform, float, vec2, vec3, positionLocal, varying, mix, smoothstep, length, abs, dot, cameraPosition, normalize
 } from 'three/tsl';
 import { vnoise } from './tsl/noise.js';
-import { U, terrainHeight, terrainNormal, fieldDry, fieldTall, cloudShadow, shadeFoliage } from './tsl/world.js';
+import { U, terrainHeight, terrainNormal, fieldDry, fieldTall, fieldFlowers, windField, cloudShadow, shadeFoliage, gustSheen, flowerGlowLight } from './tsl/world.js';
 
 export class Terrain {
 
@@ -27,7 +27,7 @@ export class Terrain {
 
 		const vWorld = varying( vec3( 0 ), 'vTWorld' );
 		const vNormal = varying( vec3( 0, 1, 0 ), 'vTNormal' );
-		const vField = varying( vec2( 0 ), 'vTField' ); // dry, tall (low frequency -> per vertex)
+		const vField = varying( vec3( 0 ), 'vTField' ); // dry, tall, flowers (low frequency -> per vertex)
 		const mat = new THREE.MeshBasicNodeMaterial();
 		mat.fog = false;
 
@@ -41,7 +41,7 @@ export class Terrain {
 			const w = vec3( xz.x, y, xz.y );
 			vWorld.assign( w );
 			vNormal.assign( terrainNormal( xz ) );
-			vField.assign( vec2( fieldDry( xz ), fieldTall( xz ) ) );
+			vField.assign( vec3( fieldDry( xz ), fieldTall( xz ), fieldFlowers( xz ) ) );
 			return w;
 
 		} )();
@@ -80,12 +80,15 @@ export class Terrain {
 			const steep = smoothstep( 0.15, 0.85, abs( dot( V, N ) ) );
 
 			const toCanopy = smoothstep( this.u.grassRadius.mul( 0.35 ), this.u.grassRadius.mul( 0.8 ), dist );
-			const albedo = mix( thatch, canopy, toCanopy );
+			// wind waves rolling across the distant canopy
+			const sheen = mix( float( 1.0 ), gustSheen( windField( xz ) ), toCanopy );
+			const albedo = mix( thatch, canopy, toCanopy ).mul( sheen );
+			const emit = flowerGlowLight( vField.z, toCanopy.mul( 0.8 ) ).mul( albedo.mul( 3.0 ).add( 0.1 ) );
 			const ao = mix( 0.4, mix( 0.65, 0.95, tex ).mul( mix( 1.0, 0.55, steep ) ), toCanopy );
 
 			// far: treat the canopy as a rough volume lit from above
 			const Nf = normalize( mix( N, vec3( 0, 1, 0 ), toCanopy.mul( 0.25 ) ) );
-			return shadeFoliage( albedo, Nf, P, ao, cloudShadow( xz ).mul( mix( 0.4, 1.0, toCanopy ) ), toCanopy.mul( mix( 0.75, 0.35, steep ) ), toCanopy.mul( 0.06 ), float( 0.4 ) );
+			return shadeFoliage( albedo, Nf, P, ao, cloudShadow( xz ).mul( mix( 0.4, 1.0, toCanopy ) ), toCanopy.mul( mix( 0.75, 0.35, steep ) ), toCanopy.mul( 0.06 ).mul( sheen ), float( 0.4 ), emit );
 
 		} )();
 

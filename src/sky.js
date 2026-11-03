@@ -4,14 +4,18 @@
 
 import * as THREE from 'three/webgpu';
 import {
-	Fn, uniform, float, vec2, vec3, positionWorld, cameraPosition, normalize, mix, smoothstep, max, pow, dot, clamp
+	Fn, uniform, float, int, vec2, vec3, positionWorld, cameraPosition, normalize, mix, smoothstep, max, pow, dot, clamp,
+	floor, fract, length, exp, sin, select
 } from 'three/tsl';
-import { vnoise } from './tsl/noise.js';
+import { vnoise, hash2i } from './tsl/noise.js';
 import { U, skyColor } from './tsl/world.js';
 
 // elevation (deg) -> palette. Colours are linear-ish, hand tuned.
 const KEYS = [
-	{ e: - 8, zen: [ 0.012, 0.018, 0.05 ], hor: [ 0.06, 0.06, 0.1 ], hsun: [ 0.25, 0.1, 0.08 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.025, 0.03, 0.06 ] },
+	// night: deep blue sky, cool blue ambient everywhere (the moon is handled separately)
+	{ e: - 16, zen: [ 0.002, 0.005, 0.018 ], hor: [ 0.009, 0.016, 0.042 ], hsun: [ 0.01, 0.018, 0.045 ], sun: [ 0, 0, 0 ], amb: [ 0.016, 0.03, 0.075 ] },
+	{ e: - 8, zen: [ 0.006, 0.012, 0.038 ], hor: [ 0.035, 0.04, 0.075 ], hsun: [ 0.16, 0.07, 0.06 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.03, 0.042, 0.095 ] },
+	{ e: - 4, zen: [ 0.02, 0.04, 0.11 ], hor: [ 0.2, 0.15, 0.18 ], hsun: [ 0.7, 0.26, 0.12 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.065, 0.07, 0.13 ] },
 	{ e: - 1, zen: [ 0.04, 0.07, 0.17 ], hor: [ 0.35, 0.24, 0.26 ], hsun: [ 1.1, 0.4, 0.14 ], sun: [ 0.9, 0.25, 0.05 ], amb: [ 0.08, 0.08, 0.13 ] },
 	{ e: 3, zen: [ 0.05, 0.11, 0.3 ], hor: [ 0.55, 0.42, 0.36 ], hsun: [ 1.35, 0.66, 0.28 ], sun: [ 2.6, 1.25, 0.45 ], amb: [ 0.14, 0.15, 0.22 ] },
 	{ e: 9, zen: [ 0.07, 0.17, 0.46 ], hor: [ 0.6, 0.55, 0.52 ], hsun: [ 1.25, 0.78, 0.42 ], sun: [ 3.4, 2.15, 1.15 ], amb: [ 0.2, 0.24, 0.32 ] },
@@ -72,13 +76,39 @@ export class Sky {
 			const litCol = U.sunColor.mul( 0.32 ).add( U.horizon.mul( 0.55 ) );
 			const cloudCol = mix( litCol, shadowCol, core.mul( 0.75 ) )
 				.add( U.sunColor.mul( pow( mu, 6.0 ).mul( 0.35 ).mul( float( 1.0 ).sub( core ) ) ) );
+			// --- night sky: stars + a faint milky way, hidden by clouds and haze
+			const above = smoothstep( 0.0, 0.12, y );
+			const bandN = normalize( vec3( 0.35, 0.5, 0.79 ) );
+			const bandA = normalize( vec3( 0.79, 0.0, - 0.35 ) ); // in the band plane
+			const bandB = normalize( vec3( - 0.175, 0.7, - 0.4 ).sub( bandN.mul( dot( vec3( - 0.175, 0.7, - 0.4 ), bandN ) ) ) );
+			const band = exp( pow( dot( dir, bandN ).mul( 4.5 ), 2.0 ).negate() );
+			const bandUV = vec2( dot( dir, bandA ), dot( dir, bandB ) );
+			const sp = dir.mul( 230.0 );
+			const ip = floor( sp );
+			const ix = int( ip.x ), iy = int( ip.y ), iz = int( ip.z );
+			const h = hash2i( ix.add( iz.mul( 4099 ) ), iy );
+			const h2 = hash2i( ix.add( 17 ), iy.add( iz.mul( 131 ) ) );
+			const h3 = hash2i( iz.add( 7 ), ix.add( iy.mul( 977 ) ) );
+			const off = vec3( h2, h3, fract( h.mul( 31.7 ) ) ).sub( 0.5 ).mul( 0.6 );
+			const dStar = length( fract( sp ).sub( 0.5 ).sub( off ) );
+			const thr = float( 0.986 ).sub( band.mul( 0.012 ) );
+			const mag = clamp( h.sub( thr ).div( float( 1.0 ).sub( thr ) ), 0.0, 1.0 );
+			const tw = sin( U.time.mul( mix( 1.5, 4.0, h2 ) ).add( h3.mul( 60.0 ) ) ).mul( 0.3 ).add( 0.8 );
+			const starTint = mix( vec3( 1.0, 0.85, 0.7 ), vec3( 0.75, 0.85, 1.1 ), h3 );
+			const star = smoothstep( 0.38, 0.0, dStar ).mul( select( mag.greaterThan( 0.0 ), pow( mag, 1.5 ).mul( 3.0 ).add( 0.25 ), float( 0.0 ) ) ).mul( tw );
+			const mwTex = vnoise( bandUV.mul( 7.0 ).add( dot( dir, bandN ).mul( 9.0 ) ) ).mul( 0.6 ).add( vnoise( bandUV.mul( 21.0 ).add( vec2( 5, 3 ) ) ).mul( 0.4 ) );
+			const milky = vec3( 0.014, 0.018, 0.034 ).mul( band ).mul( smoothstep( 0.35, 0.9, mwTex ).mul( 1.5 ).add( 0.25 ) );
+			const nightSky = starTint.mul( star ).add( milky ).mul( U.night ).mul( above ).mul( float( 1.0 ).sub( dens ) );
+			col.addAssign( nightSky );
+
 			// distant clouds dissolve into the horizon haze
 			const haze = smoothstep( 0.0, 0.35, y );
 			col.assign( mix( col, mix( U.horizon, cloudCol, haze ), dens.mul( 0.92 ) ) );
 
 			// sun disk (HDR, picked up by bloom), dimmed behind clouds
-			const disk = smoothstep( 0.99985, 0.99995, mu ).mul( float( 1.0 ).sub( dens.mul( 0.85 ) ) );
-			col.addAssign( U.sunColor.mul( disk ).mul( 18.0 ) );
+			// (at night the "sun" uniforms carry the moon: bigger, relatively brighter disk)
+			const disk = smoothstep( mix( 0.99985, 0.99975, U.night ), mix( 0.99995, 0.9999, U.night ), mu ).mul( float( 1.0 ).sub( dens.mul( 0.85 ) ) );
+			col.addAssign( U.sunColor.mul( disk ).mul( mix( 18.0, 30.0, U.night ) ) );
 
 			// below horizon
 			const below = smoothstep( 0.0, - 0.08, y );
@@ -102,12 +132,27 @@ export class Sky {
 	 */
 	setAtmosphere( elevationDeg, azimuthDeg, cloudiness ) {
 
-		const el = THREE.MathUtils.degToRad( elevationDeg );
-		const az = THREE.MathUtils.degToRad( azimuthDeg );
+		// Below -4 deg the sun contributes nothing, so the directional light is
+		// handed to the moon (opposite side of the sky) without a visible pop.
+		const night = THREE.MathUtils.smoothstep( - elevationDeg, 2, 12 );
+		U.night.value = night;
+		const isMoon = elevationDeg < - 4;
+		const lightEl = isMoon ? 32 : elevationDeg;
+		const lightAz = isMoon ? azimuthDeg + 180 + 25 : azimuthDeg;
+		const el = THREE.MathUtils.degToRad( lightEl );
+		const az = THREE.MathUtils.degToRad( lightAz );
 		this.sunDir.set( Math.sin( az ) * Math.cos( el ), Math.sin( el ), - Math.cos( az ) * Math.cos( el ) ).normalize();
 		U.sunDir.value.copy( this.sunDir );
 
 		const p = samplePalette( elevationDeg );
+		if ( isMoon ) {
+
+			const k = THREE.MathUtils.smoothstep( - elevationDeg, 4, 10 );
+			p.sun = [ 0.09, 0.13, 0.24 ].map( ( v ) => v * k );
+			// moon-side horizon glow stays cool
+			p.hsun = p.hor.map( ( v, i ) => v + [ 0.01, 0.02, 0.04 ][ i ] * k );
+
+		}
 		const overcast = cloudiness * cloudiness * 0.5;
 		const grey = ( c, k ) => {
 

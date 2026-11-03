@@ -14,8 +14,8 @@ export class Controls {
 		this.pos = new THREE.Vector3( 0, 0, 0 );
 		this.yaw = 0;
 		this.pitch = - 0.06;
-		this.eye = 1.15;
-		this.eyeTarget = 1.15;
+		this.eye = 1.5;
+		this.eyeTarget = 1.5;
 		this.keys = new Set();
 		this.tour = true;
 		this.idle = 0;

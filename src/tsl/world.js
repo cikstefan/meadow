@@ -32,6 +32,11 @@ export const U = {
 	cloudCover: uniform( 0.5 ),
 	cloudDark: uniform( 0.45 ),
 	cloudSpeed: uniform( 4.0 ),
+
+	dry: uniform( 0 ), // amount of dry straw patches (0 = lush everywhere)
+	night: uniform( 0 ), // 0 day .. 1 full night
+	glowColor: uniform( new THREE.Color( 0.04, 0.32, 1.0 ) ), // bioluminescent flowers
+	glow: uniform( 1 ),
 };
 
 // ---------------------------------------------------------------- terrain
@@ -79,7 +84,7 @@ const ss = ( a, b, x ) => {
 export function fieldsJS( x, z ) {
 
 	const tall = ss( 0.2, 0.8, vnoiseJS( x / 26 + 41, z / 26 + 3 ) ) * 0.72 + vnoiseJS( x / 6.5 + 9, z / 6.5 + 77 ) * 0.28;
-	const dry = ss( 0.6, 0.92, vnoiseJS( x / 38 + 101, z / 38 + 19 ) * 0.78 + vnoiseJS( x / 8 + 5, z / 8 + 33 ) * 0.22 );
+	const dry = ss( 0.6, 0.92, vnoiseJS( x / 38 + 101, z / 38 + 19 ) * 0.78 + vnoiseJS( x / 8 + 5, z / 8 + 33 ) * 0.22 ) * U.dry.value;
 	const flowers = ss( 0.45, 0.9, vnoiseJS( x / 17 + 7, z / 17 + 140 ) * 0.75 + vnoiseJS( x / 5 + 66, z / 5 + 12 ) * 0.25 );
 	return { tall, dry, flowers };
 
@@ -99,7 +104,7 @@ export const fieldDry = Fn( ( [ xz ] ) => {
 
 	const a = vnoise( xz.div( 38 ).add( vec2( 101.0, 19.0 ) ) );
 	const b = vnoise( xz.div( 8.0 ).add( vec2( 5.0, 33.0 ) ) );
-	return smoothstep( 0.6, 0.92, a.mul( 0.78 ).add( b.mul( 0.22 ) ) );
+	return smoothstep( 0.6, 0.92, a.mul( 0.78 ).add( b.mul( 0.22 ) ) ).mul( U.dry );
 
 } );
 
@@ -120,9 +125,11 @@ export const windField = Fn( ( [ xz ] ) => {
 
 	const scroll = U.windDir.mul( U.time.mul( U.windSpeed ) );
 	const p = xz.sub( scroll );
+	// big rolling waves (visible across the whole valley) + gusts + flutter
+	const n0 = vnoise( xz.sub( scroll.mul( 0.85 ) ).div( 38.0 ).add( vec2( 31.0, 7.0 ) ) );
 	const n1 = vnoise( p.div( 11.0 ) );
 	const n2 = vnoise( xz.sub( scroll.mul( 1.35 ) ).div( 3.7 ).add( vec2( 17.0, 5.0 ) ) );
-	const n = n1.mul( 0.68 ).add( n2.mul( 0.32 ) );
+	const n = n0.mul( 0.4 ).add( n1.mul( 0.42 ) ).add( n2.mul( 0.18 ) );
 	const gust = smoothstep( 0.28, 0.82, n );
 	return U.windStrength.mul( float( 0.22 ).add( gust.mul( 0.78 ) ) );
 
@@ -133,9 +140,10 @@ export function windFieldJS( x, z ) {
 
 	const t = U.time.value * U.windSpeed.value;
 	const dx = U.windDir.value.x * t, dz = U.windDir.value.y * t;
+	const n0 = vnoiseJS( ( x - dx * 0.85 ) / 38 + 31, ( z - dz * 0.85 ) / 38 + 7 );
 	const n1 = vnoiseJS( ( x - dx ) / 11, ( z - dz ) / 11 );
 	const n2 = vnoiseJS( ( x - dx * 1.35 ) / 3.7 + 17, ( z - dz * 1.35 ) / 3.7 + 5 );
-	const n = n1 * 0.68 + n2 * 0.32;
+	const n = n0 * 0.4 + n1 * 0.42 + n2 * 0.18;
 	const g = Math.min( 1, Math.max( 0, ( n - 0.28 ) / 0.54 ) );
 	const gust = g * g * ( 3 - 2 * g );
 	return U.windStrength.value * ( 0.22 + gust * 0.78 );
@@ -151,6 +159,15 @@ export const cloudShadow = Fn( ( [ xz ] ) => {
 	return mix( float( 1.0 ).sub( U.cloudDark ), float( 1.0 ), lit );
 
 } );
+
+// Brightness lift of the canopy as a gust passes: bent blades expose their
+// glossier, lighter faces. This is what makes wind waves readable far away.
+export const gustSheen = ( wind ) => mix( 0.86, 1.22, clamp( wind.div( max( U.windStrength, 0.05 ) ).sub( 0.22 ).div( 0.78 ), 0.0, 1.0 ) );
+
+// Light thrown onto grass / ground by glowing flowers at night.
+// `flowers` is the flower-density field at that spot.
+export const flowerGlowLight = ( flowers, height01 ) =>
+	U.glowColor.mul( U.night.mul( U.glow ).mul( flowers.mul( flowers ) ).mul( mix( 0.02, 0.07, height01 ) ) );
 
 // ---------------------------------------------------------------- sky & fog
 
@@ -187,7 +204,7 @@ export const applyFog = Fn( ( [ color, worldPos ] ) => {
 // Foliage lighting model: wrapped diffuse, sky/ground ambient, translucency
 // (light transmitted through thin leaves when the sun is behind them),
 // a waxy specular sheen, cloud shadows and fog.
-export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt, wrap ] ) => {
+export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt, wrap, emit ] ) => {
 
 	const V = normalize( cameraPosition.sub( P ) );
 	const L = U.sunDir;
@@ -206,7 +223,7 @@ export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt,
 	const H = normalize( L.add( V ) );
 	const spec = pow( clamp( dot( N, H ), 0.0, 1.0 ), 48.0 ).mul( specAmt ).mul( sunVis );
 
-	const col = albedo.mul( direct.add( ambient ) ).add( transCol ).add( U.sunColor.mul( spec ) );
+	const col = albedo.mul( direct.add( ambient ) ).add( transCol ).add( U.sunColor.mul( spec ) ).add( emit );
 	return applyFog( col, P );
 
 } );

@@ -19,7 +19,7 @@ import {
 } from 'three/tsl';
 import { hash2i, hash2i2, pcg } from './tsl/noise.js';
 import {
-	U, terrainHeight, terrainNormal, fieldTall, fieldDry, windField, cloudShadow, shadeFoliage
+	U, terrainHeight, terrainNormal, fieldTall, fieldDry, fieldFlowers, windField, cloudShadow, shadeFoliage, gustSheen, flowerGlowLight
 } from './tsl/world.js';
 import { storageVec, createLODs, createResetCompute, routeLOD, visibleSlot, disposeStorage } from './gpu.js';
 
@@ -41,7 +41,7 @@ function bladeGeometry( segments ) {
 
 export class Grass {
 
-	constructor( { bladesPerAxis, area, lodScale = 1 } ) {
+	constructor( { bladesPerAxis, area, lodScale = 1, innerRadius = 0, widthScale = 1, lods = null, renderOrder = RENDER_ORDER } ) {
 
 		this.N = bladesPerAxis;
 		this.area = area;
@@ -60,6 +60,8 @@ export class Grass {
 			widthScale: uniform( GRASS_DEFAULTS.widthScale ),
 			clumpSize: uniform( GRASS_DEFAULTS.clumpSize ),
 			epoch: uniform( 0 ),
+			inner: uniform( innerRadius ), // > 0: ring system that starts where a nearer one ends
+			widthMul: uniform( widthScale ),
 		};
 
 		const count = this.count;
@@ -68,11 +70,11 @@ export class Grass {
 		this.dyn = storageVec( count, 4, 'vec4' ); // wind, cloud shadow, push.xz
 
 		const R = area * 0.5;
-		this.lods = createLODs( [
-			{ geometry: bladeGeometry( 12 ), maxDistance: Math.min( 7 * lodScale, R ) },
-			{ geometry: bladeGeometry( 5 ), maxDistance: Math.min( 20 * lodScale, R ) },
-			{ geometry: bladeGeometry( 2 ), maxDistance: Infinity },
-		], count );
+		this.lods = createLODs( ( lods || [
+			{ segments: 12, maxDistance: Math.min( 7 * lodScale, R ) },
+			{ segments: 5, maxDistance: Math.min( 20 * lodScale, R ) },
+			{ segments: 2, maxDistance: Infinity },
+		] ).map( ( l ) => ( { geometry: bladeGeometry( l.segments ), maxDistance: l.maxDistance } ) ), count );
 
 		this.resetCompute = createResetCompute( this.lods );
 		this.mainCompute = this.buildCompute().compute( count );
@@ -83,7 +85,7 @@ export class Grass {
 			const mesh = new THREE.Mesh( lod.geometry, this.buildMaterial( lod ) );
 			mesh.frustumCulled = false;
 			mesh.count = count;
-			mesh.renderOrder = RENDER_ORDER + i;
+			mesh.renderOrder = renderOrder + i;
 			this.group.add( mesh );
 			return mesh;
 
@@ -158,7 +160,7 @@ export class Grass {
 				.mul( mix( 0.78, 1.0, clamp( float( 1.0 ).sub( dC.mul( 1.1 ) ), 0, 1 ) ) )
 				.mul( u.heightScale );
 
-			const w = mix( 0.009, 0.024, cW ).mul( mix( 0.7, 1.3, b1 ) ).mul( mix( 1.0, 0.8, dry ) ).mul( u.widthScale );
+			const w = mix( 0.009, 0.024, cW ).mul( mix( 0.7, 1.3, b1 ) ).mul( mix( 1.0, 0.8, dry ) ).mul( u.widthScale ).mul( u.widthMul );
 			const bend = mix( 0.15, 0.6, cB ).mul( mix( 0.6, 1.35, b2 ) ).mul( float( 0.55 ).add( dC.mul( 0.9 ) ) ).add( dry.mul( 0.15 ) );
 
 			// yaw: lean outward from clump centre, randomised near clump borders
@@ -169,7 +171,7 @@ export class Grass {
 			st.element( idx.mul( 4 ).add( 0 ) ).assign( vec4( xz.x, y, xz.y, h ) );
 			st.element( idx.mul( 4 ).add( 1 ) ).assign( vec4( w, bend, yaw, dry ) );
 			st.element( idx.mul( 4 ).add( 2 ) ).assign( vec4( n.x, n.z, cSeed, b0 ) );
-			st.element( idx.mul( 4 ).add( 3 ) ).assign( vec4( float( gx ), float( gz ), u.epoch, 0 ) );
+			st.element( idx.mul( 4 ).add( 3 ) ).assign( vec4( float( gx ), float( gz ), u.epoch, fieldFlowers( xz ) ) );
 
 		};
 
@@ -195,7 +197,7 @@ export class Grass {
 
 			const rel = pos.sub( u.cullPos );
 			const distXZ = length( rel.xz );
-			const inRadius = distXZ.lessThan( u.radius );
+			const inRadius = distXZ.lessThan( u.radius ).and( distXZ.greaterThan( u.inner.mul( 0.7 ) ) );
 
 			// sphere-vs-frustum test in clip space (conservative)
 			const centre = vec3( pos.x, pos.y.add( h.mul( 0.5 ) ), pos.z );
@@ -242,6 +244,7 @@ export class Grass {
 		const vWorld = varying( vec3( 0 ), 'vWorld' );
 		const vGround = varying( vec3( 0, 1, 0 ), 'vGround' );
 		const vInfo = varying( vec4( 0 ), 'vInfo' ); // dry, clumpSeed, bladeSeed, cloud
+		const vExtra = varying( vec2( 0 ), 'vExtra' ); // wind, flower density
 		const vDist = varying( float( 0 ), 'vDist' );
 
 		const mat = new THREE.MeshBasicNodeMaterial( { side: THREE.DoubleSide } );
@@ -253,6 +256,7 @@ export class Grass {
 			const A = st.element( id.mul( 4 ).add( 0 ) );
 			const B = st.element( id.mul( 4 ).add( 1 ) );
 			const C = st.element( id.mul( 4 ).add( 2 ) );
+			const K = st.element( id.mul( 4 ).add( 3 ) );
 			const D = dyn.element( id );
 
 			const root = A.xyz;
@@ -261,7 +265,10 @@ export class Grass {
 			const seed = C.w;
 
 			// fade the outer ring by shrinking blades -> no visible boundary
-			const edge = smoothstep( u.radius, u.radius.mul( 0.8 ), distXZ.mul( float( 0.94 ).add( seed.mul( 0.12 ) ) ) );
+			const dj = distXZ.mul( float( 0.94 ).add( seed.mul( 0.12 ) ) );
+			// outer fade, and (ring systems) inner fade-in where the nearer system fades out
+			const edge = smoothstep( u.radius, u.radius.mul( 0.8 ), dj )
+				.mul( clamp( dj.sub( u.inner.mul( 0.72 ) ).div( u.inner.mul( 0.26 ).add( 1e-3 ) ), 0.0, 1.0 ) );
 			const h = A.w.mul( edge );
 			const bend = B.y;
 			const yaw = B.z;
@@ -339,6 +346,7 @@ export class Grass {
 			vWorld.assign( world );
 			vGround.assign( gn );
 			vInfo.assign( vec4( B.w, C.z, seed, D.y ) );
+			vExtra.assign( vec2( D.x, K.w ) );
 			vDist.assign( camDist );
 
 			return world;
@@ -386,7 +394,15 @@ export class Grass {
 			const transmit = mix( 0.55, 1.0, t ).mul( mix( 1.0, 0.45, dryness ) );
 			const spec = mix( 0.03, 0.18, t ).mul( mix( 1.0, 0.4, dryness ) );
 
-			return shadeFoliage( albedo, N, vWorld, ao, cloud.mul( mix( 0.55, 1.0, t ) ), transmit, spec, float( 0.4 ) );
+			// wind waves: canopy brightens as a gust bends it
+			const sheen = gustSheen( vExtra.x );
+			albedo.mulAssign( sheen );
+
+			// night: blue light from nearby glowing flowers, strongest mid-blade
+			const glow = flowerGlowLight( vExtra.y, smoothstep( 0.0, 0.7, t ).mul( smoothstep( 1.0, 0.6, t ) ) );
+			const emit = glow.mul( albedo.mul( 3.0 ).add( 0.12 ) );
+
+			return shadeFoliage( albedo, N, vWorld, ao, cloud.mul( mix( 0.55, 1.0, t ) ), transmit, spec.mul( sheen ), float( 0.4 ), emit );
 
 		} )();
 

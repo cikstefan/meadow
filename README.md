@@ -23,10 +23,10 @@ npm run build      # static site in dist/
 Needs a browser with WebGPU: Chrome / Edge 113+, Safari 26+, Firefox 141+ (Windows).
 
 **Controls:** drag to look · WASD / arrows to walk · Shift to run (9 m/s) · wheel or Q/E to change height · M to toggle sound.
-After 12 idle seconds the camera starts wandering on its own (auto tour).
+Auto tour (the camera wandering on its own) is off by default; enable it in the panel or with `?tour=1`.
 
 **URL options:** `?q=low|medium|high|ultra` (disables adaptive quality),
-`?hour=17.95`, `?grass=1.28`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
+`?hour=6`, `?grass=1.6`, `?winddir=108`, `?dry=0`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
 
 ## How the grass works
 
@@ -43,6 +43,22 @@ Meadow-scale variation comes from low-frequency fields shared by every system:
 tall vs short grass, dry straw patches, and flower drifts. Within those,
 Voronoi **clumps** (tussocks) vary blade height, width, bend and colour, and
 blades lean outward from each clump centre.
+
+### Grass to the horizon
+A second instance of the same system covers a ring out to ~180–220 m with a
+coarse lattice of wide, low-segment blades. It fades in exactly where the dense
+near field fades out, so real waving blades reach the hills. A large-scale
+octave in the gust field plus a gust-driven *sheen* (bent blades show their
+lighter faces) on blades and on the distant canopy makes wind waves readable
+across the whole valley.
+
+### Night
+Below −4° the directional light is handed to a cool moon on the opposite side of
+the sky (no pop, since the sun contributes nothing by then). The sky gets a hashed
+star field with twinkle, a faint Milky Way band, and a deep-blue palette with blue
+ambient light. Flowers become bioluminescent: their petals and centres emit blue
+light (with bloom), and grass and terrain in flower drifts receive that light.
+Pollen turns into slowly pulsing blue spores.
 
 ### Wildflowers
 They use the same slot, compute, LOD and indirect pipeline with a sparser lattice.
