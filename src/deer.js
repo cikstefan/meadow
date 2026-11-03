@@ -270,7 +270,8 @@ export class Deer {
 		for ( const t of ctx.threats ) {
 
 			const d = Math.hypot( t.pos.x - this.pos.x, t.pos.z - this.pos.z );
-			const eff = d / ( t.isPredator ? ( t.speed > 5 ? 1.8 : 1.15 ) : 1 ); // a running jaguar is scarier
+			// a running jaguar is scarier; a person on foot is tolerated much closer
+			const eff = t.isPredator ? d / ( t.speed > 5 ? 1.8 : 1.15 ) : d * 1.6;
 			if ( eff < td ) {
 
 				td = eff; threat = t;
@@ -426,10 +427,13 @@ export class Deer {
 
 		// 1) artist idle clip, faded toward the neutral stance while moving
 		this.mixer.update( dt );
+		// behaviour poses own the neck/head: fade the clip out there while grazing or alert
+		const own = Math.max( m, this.grazeW.v, this.alertW.v );
 		for ( const n in this.joints ) {
 
 			const j = this.joints[ n ];
-			if ( m > 1e-3 ) j.bone.quaternion.slerp( j.neutral, m );
+			const w = /Neck|Head/.test( n ) ? own : m;
+			if ( w > 1e-3 ) j.bone.quaternion.slerp( j.neutral, Math.min( 1, w ) );
 
 		}
 

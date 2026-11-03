@@ -85,6 +85,18 @@ False Earth's character controller (speed → 1D blend weights → footstep even
   (seams pinned) and welded smooth normals; fur strand micro-texture, matte sheen coat,
   silver-blue eyes; scaled to ~2.5x real size
 
+### The red deer
+Model: [“Deer (Demo Free Download)” by All For $19.99](https://sketchfab.com/3d-models/deer-demo-free-download-034f40010b1341e5bc352fd97c5254d6),
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); converted from spec-gloss to
+metal-rough, WebP + meshopt (10 MB → 0.88 MB). A herd of three (a stag and two smaller deer):
+- base layer: the artist's 22.5 s idle clip (ears, blinks, weight shifts), faded to a neutral
+  stance while moving and out of the neck while grazing or alert
+- procedural walk / trot / gallop on the 80-bone rig, speed-blended, no-slip stride
+- behaviours: graze (head in the grass, chewing), look around, wander with the herd; **alert**
+  (head high, ears forward, watching the threat) when the jaguar or you come near; **flee** at a
+  gallop with a raised tail when they come closer (sooner if the jaguar is running); calm down after
+- each deer parts the grass and casts a soft shadow, like the jaguar
+
 ### Wildflowers
 They use the same slot, compute, LOD and indirect pipeline with a sparser lattice.
 Each flower is a single parametric mesh whose vertices are tagged as stem, petal
