@@ -77,6 +77,13 @@ False Earth's character controller (speed → 1D blend weights → footstep even
 - footfalls drive soft paw-step audio; the body parts the grass and casts a soft shadow
 - in first person the jaguar wanders around you on its own; in third person you steer
   it camera-relative (W runs where you look)
+- gaits: walk → trot → **canter** (Shift; hind leg and opposite fore land together) →
+  **rotary gallop** (Shift+Space; four spread footfalls); the head locks forward when moving
+- rest behaviour: calm look-around on critically damped springs with long holds,
+  breathing, ear flicks, tail flicks; **sits after 10 s, lies down after 20 s**
+- refined at load: one level of subdivision with blended skin weights, Taubin smoothing
+  (seams pinned) and welded smooth normals; fur strand micro-texture, matte sheen coat,
+  silver-blue eyes; scaled to ~2.5x real size
 
 ### Wildflowers
 They use the same slot, compute, LOD and indirect pipeline with a sparser lattice.

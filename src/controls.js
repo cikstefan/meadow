@@ -17,8 +17,8 @@ export class Controls {
 		this.eye = 2.3;
 		this.eyeTarget = 2.3;
 		this.mode = 'first'; // 'first' | 'third'
-		this.dist = 5.5;
-		this.distTarget = 5.5;
+		this.dist = 10;
+		this.distTarget = 10;
 		this.orbitTarget = new THREE.Vector3();
 		this._orbitInit = false;
 		this.keys = new Set();
@@ -81,7 +81,7 @@ export class Controls {
 
 		dom.addEventListener( 'wheel', ( e ) => {
 
-			if ( this.mode === 'third' ) this.distTarget = THREE.MathUtils.clamp( this.distTarget * Math.exp( e.deltaY * 0.0012 ), 1.6, 40 );
+			if ( this.mode === 'third' ) this.distTarget = THREE.MathUtils.clamp( this.distTarget * Math.exp( e.deltaY * 0.0012 ), 3, 60 );
 			else this.eyeTarget = THREE.MathUtils.clamp( this.eyeTarget * Math.exp( e.deltaY * 0.0012 ), 0.25, 40 );
 			this.poke();
 			e.preventDefault();
@@ -185,6 +185,7 @@ export class Controls {
 
 		const cam = this.camera;
 		cam.position.set( this.pos.x, this._groundY + this.eye + bob, this.pos.z );
+		if ( window.__fixedCam ) cam.position.set( window.__fixedCam.x, window.__fixedCam.y, window.__fixedCam.z ); // test hook
 		cam.rotation.set( this.pitch, this.yaw, 0, 'YXZ' );
 		cam.updateMatrixWorld();
 
@@ -213,7 +214,7 @@ export class Controls {
 
 		}
 
-		return { x, y, run: k.has( 'ShiftLeft' ) || k.has( 'ShiftRight' ) };
+		return { x, y, run: k.has( 'ShiftLeft' ) || k.has( 'ShiftRight' ), sprint: k.has( 'Space' ) };
 
 	}
 
@@ -221,8 +222,8 @@ export class Controls {
 	updateThird( dt, target, targetSpeed = 0 ) {
 
 		const k = this.keys;
-		if ( k.has( 'KeyQ' ) ) this.distTarget = Math.max( 1.6, this.distTarget * Math.exp( - dt * 1.5 ) );
-		if ( k.has( 'KeyE' ) ) this.distTarget = Math.min( 40, this.distTarget * Math.exp( dt * 1.5 ) );
+		if ( k.has( 'KeyQ' ) ) this.distTarget = Math.max( 3, this.distTarget * Math.exp( - dt * 1.5 ) );
+		if ( k.has( 'KeyE' ) ) this.distTarget = Math.min( 60, this.distTarget * Math.exp( dt * 1.5 ) );
 		this.tour = false;
 		this.idle = 0;
 

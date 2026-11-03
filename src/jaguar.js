@@ -1,29 +1,33 @@
 // Black jaguar: a skinned, textured big-cat model driven by procedural
-// quadruped locomotion.
+// quadruped locomotion and a calm idle behaviour.
 //
 // Model: "black panther" by kenchoo (Sketchfab), CC-BY-4.0
 //   https://sketchfab.com/3d-models/black-panther-7fca11c89cca4362a525c891a8345112
-//   (optimised: WebP textures + meshopt, 6.9 MB -> 0.54 MB)
+//   optimised (WebP textures + meshopt), refined at load (subdivision with
+//   blended skin weights, Taubin smoothing, welded smooth normals).
 //
-// The model ships with a single showcase clip (idle, lie down, get up) but no
-// walk / run cycles, so locomotion is generated here on its real 47-bone rig:
-//   - a 1D blend tree on speed (idle / walk / trot / gallop), as in False Earth's
-//     character controller, but blending *gaits* instead of baked clips
-//   - per-leg phase offsets for each gait (lateral-sequence walk, diagonal trot,
-//     rotary gallop), stance/swing timing, joint flexion during swing
-//   - stride amplitude solved from speed and leg length so paws don't slide
-//   - spine flexion (gallop), lateral sway (walk), head stabilisation, a tail
-//     that lags behind the body, banking into turns, slope following
-//   - footfall events (for audio) when each paw starts its stance
-// Joint rotations are applied about the animal's side / up axes expressed in
-// each bone's parent space, which keeps signs consistent on the Biped rig.
+// Locomotion (the model has no walk/run clips) follows the structure of False
+// Earth's character controller: speed -> 1D blend weights -> poses + footstep
+// events, but the "clips" are procedural gaits on the real 47-bone rig:
+//   walk   4-beat lateral sequence            LH  LF  RH  RF
+//   trot   diagonal pairs                     LH+RF / RH+LF
+//   canter 3-beat, diagonal pair together     RH, LH+RF, LF   (Shift)
+//   gallop 4-beat rotary, footfalls spread    LH, RH, RF, LF  (Shift+Space)
+// Stride amplitude is solved from speed and leg length (no foot sliding).
+// At rest: slow look-around with long holds (critically damped springs, no
+// clip loops -> no head snaps), breathing, ear flicks, tail; after 10 s it
+// sits, after 20 s it lies down (sphinx), and stands up when asked to move.
 
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { vec4, output, positionWorld, normalWorld, cameraPosition, normalize, dot, pow, clamp, float, max, mix } from 'three/tsl';
-import { U, applyFog } from './tsl/world.js';
-import { terrainHeightJS } from './tsl/world.js';
+import {
+	vec2, vec3, vec4, output, positionWorld, positionGeometry, normalWorld, cameraPosition, normalize, dot, pow, clamp,
+	float, max, mix, smoothstep, texture, uv, fwidth, length, materialColor
+} from 'three/tsl';
+import { U, applyFog, terrainHeightJS } from './tsl/world.js';
+import { vnoise } from './tsl/noise.js';
+import { subdivideSkinned, smoothNormals } from './meshsmooth.js';
 
 const TAU = Math.PI * 2;
 const lerp = THREE.MathUtils.lerp;
@@ -37,36 +41,72 @@ const smooth = ( a, b, x ) => {
 
 const angleDiff = ( a, b ) => Math.atan2( Math.sin( b - a ), Math.cos( b - a ) );
 
-// Gaits: stance fraction, stride frequency f(v), phase offsets per leg
-// (LH, RH, LF, RF), swing lift and body motion amounts.
-const GAITS = {
-	walk: { beta: 0.64, freq: ( v ) => 0.75 + 0.32 * v, off: [ 0.0, 0.5, 0.25, 0.75 ], lift: 0.9, bob: 0.012, sway: 0.05, flex: 0.0 },
-	trot: { beta: 0.46, freq: ( v ) => 1.25 + 0.14 * v, off: [ 0.0, 0.5, 0.5, 0.0 ], lift: 1.0, bob: 0.02, sway: 0.025, flex: 0.06 },
-	gallop: { beta: 0.32, freq: ( v ) => 1.9 + 0.045 * v, off: [ 0.0, 0.1, 0.52, 0.62 ], lift: 1.15, bob: 0.05, sway: 0.0, flex: 0.3 },
-};
+// critically damped spring toward a target (smooth, never overshoots/snaps)
+class Spring {
 
-const SPEED = { walk: 1.7, run: 12.0 };
+	constructor( v = 0 ) {
+
+		this.v = v; this.vel = 0;
+
+	}
+
+	step( target, dt, halfLife ) {
+
+		const w = 1.386 / Math.max( halfLife, 1e-3 ); // ln(4)/halflife ~ critically damped
+		const x = this.v - target;
+		const e = Math.exp( - w * dt );
+		const tmp = ( this.vel + w * x ) * dt;
+		this.vel = ( this.vel - w * tmp ) * e;
+		this.v = target + ( x + tmp ) * e;
+		return this.v;
+
+	}
+
+}
+
+const SIZE = 3.0; // model scale (~2.5x a real jaguar, as requested)
+const CAD = 1 / Math.sqrt( SIZE / 1.2 ); // bigger animals step more slowly
+
+// leg order: LH, RH, LF, RF
+const GAITS = {
+	walk: { beta: 0.64, freq: ( v ) => ( 0.75 + 0.3 * v / SIZE * 1.2 ) * CAD, off: [ 0.0, 0.5, 0.25, 0.75 ], lift: 0.9, bob: 0.010, sway: 0.05, flex: 0.0 },
+	trot: { beta: 0.46, freq: ( v ) => ( 1.2 + 0.13 * v / SIZE * 1.2 ) * CAD, off: [ 0.0, 0.5, 0.5, 0.0 ], lift: 1.0, bob: 0.018, sway: 0.02, flex: 0.05 },
+	canter: { beta: 0.42, freq: ( v ) => ( 1.45 + 0.07 * v / SIZE * 1.2 ) * CAD, off: [ 0.33, 0.0, 0.66, 0.33 ], lift: 1.05, bob: 0.035, sway: 0.0, flex: 0.16 },
+	gallop: { beta: 0.32, freq: ( v ) => ( 1.8 + 0.04 * v / SIZE * 1.2 ) * CAD, off: [ 0.0, 0.18, 0.7, 0.52 ], lift: 1.15, bob: 0.05, sway: 0.0, flex: 0.3 },
+};
+const GAIT_NAMES = [ 'walk', 'trot', 'canter', 'gallop' ];
+
+const SPEED = { walk: 2.8, canter: 10.5, gallop: 19 };
 
 export class Jaguar {
 
 	constructor() {
 
 		this.group = new THREE.Group(); // world placement (yaw)
-		this.body = new THREE.Group(); // slope pitch / roll
+		this.body = new THREE.Group(); // slope pitch / roll / pose drop
 		this.group.add( this.body );
 		this.ready = false;
 
 		this.pos = new THREE.Vector3();
-		this.heading = 0; // radians, 0 = facing -Z (same convention as the camera yaw)
+		this.heading = 0; // 0 = facing -Z (camera yaw convention)
 		this.speed = 0;
 		this.targetSpeed = 0;
 		this.turnRate = 0;
 		this.phase = 0;
 		this.steps = 0;
-		this.weights = { idle: 1, walk: 0, trot: 0, gallop: 0 };
+		this.weights = { idle: 1, walk: 0, trot: 0, canter: 0, gallop: 0 };
 		this.lean = 0;
 		this.pitch = 0;
 		this._prevPhase = [ 0, 0, 0, 0 ];
+
+		// rest behaviour
+		this.restTime = 0;
+		this.sitW = 0;
+		this.lieW = 0;
+		this.look = { yaw: new Spring(), pitch: new Spring(), tYaw: 0, tPitch: 0, timer: 2 };
+		this.ear = { L: new Spring(), R: new Spring(), timer: 3 };
+		this.tailFlick = { s: new Spring(), timer: 4 };
+		this.time = 0;
 
 		// autonomous wandering when not player-controlled
 		this.wander = { target: new THREE.Vector3(), timer: 0, run: false, pause: 0 };
@@ -86,42 +126,83 @@ export class Jaguar {
 		const gltf = await loader.parseAsync( bytes.buffer, '' );
 		const model = gltf.scene;
 
-		// real jaguar: ~1.6 m nose-to-rump, ~0.7 m at the shoulder
-		const scale = 1.2;
-		model.scale.setScalar( scale );
-		this.scale = scale;
+		model.scale.setScalar( SIZE );
+		this.scale = SIZE;
 		this.body.add( model );
+		model.updateMatrixWorld( true );
 
-		// --- materials: velvety black fur with a sheen rim, fogged like the scene
+		// --- geometry refinement: rounder silhouette + seam-free smooth shading
+		const skinned = [];
+		model.traverse( ( o ) => {
+
+			if ( o.isSkinnedMesh ) skinned.push( o );
+
+		} );
+		const eyes = skinned.find( ( o ) => o.name === 'Object_7' );
+		for ( const m of skinned ) {
+
+			const tris = ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3;
+			if ( m === eyes || tris < 1000 ) continue;
+			const g = subdivideSkinned( m.geometry, { iterations: 2 } );
+			m.geometry.dispose();
+			m.geometry = g;
+
+		}
+
+		smoothNormals( skinned.filter( ( m ) => m !== eyes ), model );
+
+		// --- materials
 		model.traverse( ( o ) => {
 
 			if ( ! o.isMesh ) return;
 			o.frustumCulled = false;
 			const src = o.material;
 			const m = new THREE.MeshPhysicalNodeMaterial();
-			m.map = src.map;
-			m.emissiveMap = null;
-			// melanistic coat: near-black albedo; rosettes survive faintly in the texture
-			m.color.copy( src.color ).multiplyScalar( 0.16 );
-			m.roughness = 0.64;
-			m.metalness = 0.0;
-			m.sheen = 1.0;
-			m.sheenRoughness = 0.35;
-			m.sheenColor = new THREE.Color( 0.1, 0.11, 0.14 );
-			m.specularIntensity = 0.3;
-			// fur rim light when backlit + bioluminescent blue fill at night
-			const V = normalize( cameraPosition.sub( positionWorld ) );
-			const rim = pow( clamp( float( 1.0 ).sub( max( dot( normalWorld, V ), 0.0 ) ), 0.0, 1.0 ), 3.0 );
-			const back = clamp( dot( V.negate(), U.sunDir ).mul( 0.5 ).add( 0.5 ), 0.0, 1.0 );
-			m.emissiveNode = U.sunColor.mul( rim.mul( mix( 0.015, 0.22, back ) ) )
-				.add( U.glowColor.mul( U.night.mul( U.glow ).mul( rim ).mul( 0.06 ) ) );
-			m.outputNode = vec4( applyFog( output.rgb, positionWorld ), output.a );
 			m.fog = false;
+
+			if ( o === eyes ) {
+
+				// silver-blue eyes: bright iris with a wet, mirror-like cornea
+				m.color = new THREE.Color( 0.42, 0.56, 0.7 );
+				m.map = src.map;
+				m.colorNode = texture( src.map, uv() ).rgb.mul( 0.35 ).add( vec3( 0.36, 0.5, 0.66 ) );
+				m.roughness = 0.12;
+				m.clearcoat = 1.0;
+				m.clearcoatRoughness = 0.02;
+				m.emissiveNode = vec3( 0.06, 0.1, 0.16 ).add( U.glowColor.mul( U.night.mul( 0.25 ) ) );
+
+			} else {
+
+				m.map = src.map;
+				// melanistic coat: near-black albedo with fine fur strands; rosettes survive faintly
+				m.color.copy( src.color ).multiplyScalar( 0.15 );
+				const pg = positionGeometry;
+				const arg = vec2( pg.x.add( pg.y.mul( 0.3 ) ).mul( 520.0 ), pg.z.mul( 46.0 ).add( pg.y.mul( 40.0 ) ) );
+				const fade = float( 1.0 ).sub( smoothstep( 0.4, 1.2, length( fwidth( arg ) ) ) );
+				const strands = mix( float( 1.0 ), mix( 0.72, 1.18, vnoise( arg ) ), fade );
+				m.colorNode = texture( src.map, uv() ).mul( materialColor ).mul( strands );
+				m.roughness = 0.78;
+				m.roughnessNode = mix( float( 0.72 ), float( 0.86 ), vnoise( arg.mul( 0.5 ) ) );
+				m.metalness = 0.0;
+				m.sheen = 0.7;
+				m.sheenRoughness = 0.55;
+				m.sheenColor = new THREE.Color( 0.07, 0.075, 0.09 );
+				m.specularIntensity = 0.16;
+				// soft fur silhouette (fuzz) when backlit + faint bioluminescent fill at night
+				const V = normalize( cameraPosition.sub( positionWorld ) );
+				const rim = pow( clamp( float( 1.0 ).sub( max( dot( normalWorld, V ), 0.0 ) ), 0.0, 1.0 ), 2.6 );
+				const back = clamp( dot( V.negate(), U.sunDir ).mul( 0.5 ).add( 0.5 ), 0.0, 1.0 );
+				m.emissiveNode = U.sunColor.mul( rim.mul( mix( 0.01, 0.16, back ) ) )
+					.add( U.glowColor.mul( U.night.mul( U.glow ).mul( rim ).mul( 0.05 ) ) );
+
+			}
+
+			m.outputNode = vec4( applyFog( output.rgb, positionWorld ), output.a );
 			o.material = m;
 
 		} );
 
-		// --- bones
+		// --- bones / joints
 		const bones = {};
 		model.traverse( ( o ) => {
 
@@ -129,30 +210,14 @@ export class Jaguar {
 
 		} );
 		this.bones = bones;
-
-		// --- idle: first part of the baked clip, without root drift
-		this.mixer = new THREE.AnimationMixer( model );
-		const full = gltf.animations[ 0 ];
-		this.fullClip = full;
-		if ( full ) {
-
-			const idle = THREE.AnimationUtils.subclip( full, 'idle', 0, Math.round( 5.4 * 24 ), 24 );
-			idle.tracks = idle.tracks.filter( ( t ) => ! ( /Bip001_48\.position|rootJoint/.test( t.name ) ) );
-			const action = this.mixer.clipAction( idle );
-			action.play();
-			this.mixer.update( 0 );
-
-		}
-
 		model.updateMatrixWorld( true );
 
-		// joint controls: rotation axes (side = +X, up = +Y, fwd = +Z in model space)
-		// expressed in each bone's parent space
-		const modelInv = new THREE.Quaternion().copy( model.getWorldQuaternion( new THREE.Quaternion() ) ).invert();
-		const axisIn = ( bone, worldAxis ) => {
+		// rotation axes (side = +X, up = +Y, fwd = +Z in model space) in each bone's parent space
+		const modelInv = model.getWorldQuaternion( new THREE.Quaternion() ).invert();
+		const axisIn = ( bone, a ) => {
 
 			const pq = bone.parent.getWorldQuaternion( new THREE.Quaternion() ).premultiply( modelInv );
-			return worldAxis.clone().applyQuaternion( pq.invert() ).normalize();
+			return a.clone().applyQuaternion( pq.invert() ).normalize();
 
 		};
 
@@ -162,6 +227,7 @@ export class Jaguar {
 			'Bip001', 'Bip001_Spine', 'Bip001_Spine1', 'Bip001_Spine2', 'Bip001_Spine3',
 			'Bip001_Neck', 'Bip001_Neck1', 'Bip001_Neck2', 'Bip001_Head',
 			'Bone001', 'Bone002', 'Bone003', 'Bone004', 'Bone005', 'Bone006',
+			'Bip001_Ponytail1', 'Bip001_Ponytail2',
 		];
 		for ( const s of [ 'L', 'R' ] ) {
 
@@ -178,18 +244,17 @@ export class Jaguar {
 
 		}
 
-		// leg length (hip -> paw) for no-slip stride amplitude
-		const wp = ( n ) => bones[ n ].getWorldPosition( new THREE.Vector3() );
-		this.hindLen = wp( 'Bip001_L_Thigh' ).y - wp( 'Bip001_L_Toe0' ).y;
-		this.foreLen = wp( 'Bip001_L_UpperArm' ).y - wp( 'Bip001_L_Finger0' ).y;
-		this.bodyLen = wp( 'Bip001_Head' ).z - wp( 'Bip001_Pelvis' ).z;
+		const wp = ( n ) => bones[ n ].getWorldPosition( new THREE.Vector3() ).sub( this.body.getWorldPosition( new THREE.Vector3() ) );
+		this.hindLen = ( wp( 'Bip001_L_Thigh' ).y - wp( 'Bip001_L_Toe0' ).y ) / SIZE;
+		this.foreLen = ( wp( 'Bip001_L_UpperArm' ).y - wp( 'Bip001_L_Finger0' ).y ) / SIZE;
+		this.hip = wp( 'Bip001_Pelvis' ); // pivot for sitting (model at origin)
 
 		this._q = new THREE.Quaternion();
 		this.ready = true;
 
 	}
 
-	// rotate a joint by angles (rad) about side (x), up (y) and forward (z) axes
+	// rotate a joint about side (x), up (y) and forward (z) axes (radians)
 	rot( name, ax, ay = 0, az = 0 ) {
 
 		const j = this.joints[ name ];
@@ -228,19 +293,19 @@ export class Jaguar {
 	// ------------------------------------------------------------------ control
 
 	/**
-	 * @param dt seconds
-	 * @param input null (wander on its own) or { x, y, run } where (x,y) is the
-	 *              desired move direction in world XZ (already camera-relative)
+	 * @param input null (wander on its own) or { x, y, run, sprint } with (x,y)
+	 *              the desired world-XZ move direction (camera-relative)
 	 */
 	update( dt, input, wanderCentre ) {
 
 		if ( ! this.ready ) return;
+		this.time += dt;
 
-		let desired = null, run = false;
+		let desired = null, run = false, sprint = false;
 		if ( input ) {
 
 			if ( input.x * input.x + input.y * input.y > 0.01 ) desired = Math.atan2( - input.x, - input.y );
-			run = input.run;
+			run = input.run; sprint = input.sprint && input.run;
 
 		} else {
 
@@ -249,17 +314,18 @@ export class Jaguar {
 			if ( w.timer <= 0 ) {
 
 				const c = wanderCentre || this.pos;
-				const a = Math.random() * TAU, r = 6 + Math.random() * 18;
+				const a = Math.random() * TAU, r = 10 + Math.random() * 30;
 				w.target.set( c.x + Math.cos( a ) * r, 0, c.z + Math.sin( a ) * r );
-				w.run = Math.random() < 0.15;
-				w.timer = 8 + Math.random() * 10;
-				w.pause = Math.random() < 0.4 ? 2 + Math.random() * 5 : 0;
+				w.run = Math.random() < 0.12;
+				w.timer = 10 + Math.random() * 14;
+				// often rests long enough to sit or lie down
+				w.pause = Math.random() < 0.55 ? 6 + Math.random() * 30 : 0;
 
 			}
 
 			const dx = w.target.x - this.pos.x, dz = w.target.z - this.pos.z;
 			if ( w.pause > 0 ) w.pause -= dt;
-			else if ( dx * dx + dz * dz > 1.5 ) {
+			else if ( dx * dx + dz * dz > 4 ) {
 
 				desired = Math.atan2( - dx, - dz );
 				run = w.run;
@@ -268,25 +334,35 @@ export class Jaguar {
 
 		}
 
-		// steering (camera-relative in third person, like False Earth's solveCam)
+		// getting up from sitting / lying takes a moment before walking off
+		const seated = Math.max( this.sitW, this.lieW );
 		const prevHeading = this.heading;
 		if ( desired !== null ) {
 
+			this.restTime = 0;
 			const d = angleDiff( this.heading, desired );
-			const rate = lerp( 3.2, 1.6, smooth( 3, 12, this.speed ) );
+			const rate = lerp( 2.4, 1.1, smooth( 4, 16, this.speed ) ) * ( 1 - seated * 0.9 );
 			this.heading += Math.sign( d ) * Math.min( Math.abs( d ), rate * dt );
-			// slow down for sharp turns
 			const turnPenalty = lerp( 1, 0.35, smooth( 0.6, 2.2, Math.abs( d ) ) );
-			this.targetSpeed = ( run ? SPEED.run : SPEED.walk ) * ( input ? 1 : 0.8 ) * turnPenalty;
+			const top = sprint ? SPEED.gallop : run ? SPEED.canter : SPEED.walk;
+			this.targetSpeed = top * ( input ? 1 : 0.85 ) * turnPenalty * ( 1 - smooth( 0.05, 0.6, seated ) );
 
 		} else this.targetSpeed = 0;
 
-		const accel = this.targetSpeed > this.speed ? ( run ? 5.5 : 2.5 ) : 4.0;
+		const accel = this.targetSpeed > this.speed ? ( run ? 5 : 2.4 ) : 4.5;
 		this.speed += Math.sign( this.targetSpeed - this.speed ) * Math.min( Math.abs( this.targetSpeed - this.speed ), accel * dt );
-		this.turnRate = lerp( this.turnRate, angleDiff( prevHeading, this.heading ) / Math.max( dt, 1e-3 ), 1 - Math.exp( - dt * 8 ) );
+		this.turnRate = lerp( this.turnRate, angleDiff( prevHeading, this.heading ) / Math.max( dt, 1e-3 ), 1 - Math.exp( - dt * 6 ) );
 
 		this.pos.x += - Math.sin( this.heading ) * this.speed * dt;
 		this.pos.z += - Math.cos( this.heading ) * this.speed * dt;
+
+		// rest states: sit after 10 s still, lie down after 20 s
+		if ( this.speed < 0.05 && desired === null ) this.restTime += dt;
+		else this.restTime = 0;
+		const wantSit = this.restTime > 10 ? 1 : 0, wantLie = this.restTime > 20 ? 1 : 0;
+		const kDown = 1 - Math.exp( - dt * 1.1 ), kUp = 1 - Math.exp( - dt * 3.2 );
+		this.sitW += ( wantSit - this.sitW ) * ( wantSit > this.sitW ? kDown : kUp );
+		this.lieW += ( wantLie - this.lieW ) * ( wantLie > this.lieW ? kDown * 0.8 : kUp );
 
 		this.animate( dt );
 
@@ -296,28 +372,30 @@ export class Jaguar {
 
 	blendWeights( v ) {
 
-		// 1D blend tree on speed: idle -> walk -> trot -> gallop
-		const t = { idle: 0, walk: 0, trot: 0, gallop: 0 };
-		if ( v < 0.08 ) t.idle = 1;
-		else if ( v < 0.9 ) {
+		// 1D blend tree on speed: idle -> walk -> trot -> canter -> gallop
+		const t = { idle: 0, walk: 0, trot: 0, canter: 0, gallop: 0 };
+		const bands = [ [ 'idle', 0 ], [ 'walk', 1.2 ], [ 'walk', 3.0 ], [ 'trot', 4.6 ], [ 'trot', 6.5 ], [ 'canter', 8.5 ], [ 'canter', 12.5 ], [ 'gallop', 15.5 ] ];
+		if ( v <= 0.08 ) {
 
-			t.walk = smooth( 0.08, 0.9, v );
-			t.idle = 1 - t.walk;
-
-		} else if ( v < 2.6 ) t.walk = 1;
-		else if ( v < 4.2 ) {
-
-			t.trot = smooth( 2.6, 4.2, v );
-			t.walk = 1 - t.trot;
-
-		} else if ( v < 6.0 ) t.trot = 1;
-		else {
-
-			t.gallop = smooth( 6.0, 8.0, v );
-			t.trot = 1 - t.gallop;
+			t.idle = 1;
+			return t;
 
 		}
 
+		for ( let i = 0; i < bands.length - 1; i ++ ) {
+
+			const [ a, va ] = bands[ i ], [ b, vb ] = bands[ i + 1 ];
+			if ( v <= vb ) {
+
+				const k = smooth( va, vb, v );
+				t[ a ] += 1 - k; t[ b ] += k;
+				return t;
+
+			}
+
+		}
+
+		t.gallop = 1;
 		return t;
 
 	}
@@ -325,54 +403,50 @@ export class Jaguar {
 	animate( dt ) {
 
 		const v = this.speed;
-		const k = 1 - Math.exp( - dt * 6 );
+		const k = 1 - Math.exp( - dt * 5 );
 		const tw = this.blendWeights( v );
 		for ( const g in this.weights ) this.weights[ g ] = lerp( this.weights[ g ], tw[ g ], k );
 		const W = this.weights;
 		const moveW = 1 - W.idle;
+		const m = moveW;
 
-		// idle base pose from the baked clip (slowed down when moving). Joints the
-		// clip doesn't animate are reset first so procedural deltas never accumulate.
 		for ( const n in this.joints ) this.joints[ n ].bone.quaternion.copy( this.joints[ n ].rest );
-		this.mixer.update( dt * ( 1 - moveW * 0.8 ) );
 
-		// shared phase: blended stride frequency
+		// ---- shared phase, blended stride frequency
 		let f = 0, wsum = 0;
-		for ( const g of [ 'walk', 'trot', 'gallop' ] ) {
+		for ( const g of GAIT_NAMES ) {
 
-			f += W[ g ] * GAITS[ g ].freq( Math.max( v, 0.6 ) );
+			f += W[ g ] * GAITS[ g ].freq( Math.max( v, 0.8 ) );
 			wsum += W[ g ];
 
 		}
 
-		f = wsum > 1e-3 ? f / wsum : 1;
+		f = wsum > 1e-3 ? f / wsum : GAITS.walk.freq( 1 );
 		this.phase = ( this.phase + dt * f ) % 1;
 		const P = this.phase;
 
-		// per-gait leg angles, blended
 		const legs = [ 'LH', 'RH', 'LF', 'RF' ];
 		const ang = {};
 		for ( const l of legs ) ang[ l ] = { swing: 0, lift: 0, push: 0 };
-		let bob = 0, sway = 0, flex = 0, stanceStart = [ 0, 0, 0, 0 ];
+		let bob = 0, sway = 0, flex = 0;
 
-		for ( const g of [ 'walk', 'trot', 'gallop' ] ) {
+		for ( const g of GAIT_NAMES ) {
 
 			const w = W[ g ];
 			if ( w < 1e-3 ) continue;
 			const G = GAITS[ g ];
-			// no-slip amplitude: paw travel during stance == body travel
-			const travel = v * G.beta / Math.max( f, 0.3 );
+			const travel = v * G.beta / Math.max( f, 0.3 ); // paw travel during stance == body travel
 			for ( let i = 0; i < 4; i ++ ) {
 
 				const p = ( P + G.off[ i ] ) % 1;
-				const len = ( i < 2 ? this.hindLen : this.foreLen ) * this.scale;
-				const A = Math.asin( Math.min( 0.75, travel / ( 2 * len ) ) );
+				const len = ( i < 2 ? this.hindLen : this.foreLen ) * SIZE;
+				const A = Math.asin( Math.min( 0.72, travel / ( 2 * len ) ) );
 				let swing, lift = 0, push = 0;
 				if ( p < G.beta ) {
 
 					const u = p / G.beta;
 					swing = A * ( 1 - 2 * u );
-					push = smooth( 0.6, 1.0, u ); // toe-off
+					push = smooth( 0.6, 1.0, u );
 
 				} else {
 
@@ -384,54 +458,36 @@ export class Jaguar {
 				}
 
 				const a = ang[ legs[ i ] ];
-				a.swing += swing * w;
-				a.lift += lift * w;
-				a.push += push * w;
-				if ( p < 0.5 ) stanceStart[ i ] += w; // dominant-gait footfall bookkeeping
+				a.swing += swing * w; a.lift += lift * w; a.push += push * w;
 
 			}
 
-			bob += w * G.bob * ( g === 'gallop' ? Math.sin( TAU * P ) : Math.sin( TAU * P * 2 ) );
+			const bound = g === 'gallop' || g === 'canter';
+			bob += w * G.bob * ( bound ? Math.sin( TAU * P ) : Math.sin( TAU * P * 2 ) );
 			sway += w * G.sway * Math.sin( TAU * P );
 			flex += w * G.flex * Math.sin( TAU * ( P - 0.15 ) );
 
 		}
 
-		// footfall events: a paw entering stance (phase wraps to 0 in its cycle)
-		const dom = [ 'walk', 'trot', 'gallop' ].reduce( ( a, b ) => ( W[ b ] > W[ a ] ? b : a ), 'walk' );
-		if ( moveW > 0.3 ) {
+		// footfall events (dominant gait)
+		const dom = GAIT_NAMES.reduce( ( a, b ) => ( W[ b ] > W[ a ] ? b : a ), 'walk' );
+		for ( let i = 0; i < 4; i ++ ) {
 
-			for ( let i = 0; i < 4; i ++ ) {
-
-				const p = ( P + GAITS[ dom ].off[ i ] ) % 1;
-				if ( p < this._prevPhase[ i ] ) {
-
-					this.steps ++;
-					this.lastStepSide = i % 2 ? 1 : - 1;
-
-				}
-
-				this._prevPhase[ i ] = p;
-
-			}
+			const p = ( P + GAITS[ dom ].off[ i ] ) % 1;
+			if ( m > 0.3 && p < this._prevPhase[ i ] ) this.steps ++;
+			this._prevPhase[ i ] = p;
 
 		}
 
-		// ---- apply (angles: +x = paw / tip moves backward or nose down)
-		const m = moveW;
-		const turn = THREE.MathUtils.clamp( this.turnRate, - 2, 2 );
-		const gal = W.gallop;
-
+		// ---- legs (+x = distal end moves backward)
 		for ( const s of [ 'L', 'R' ] ) {
 
 			const H = ang[ s + 'H' ], F = ang[ s + 'F' ];
-			// hind: hip swing, knee flexes forward, hock flexes back, paw follows
 			this.rot( `Bip001_${ s }_Thigh`, m * ( - H.swing - H.lift * 0.25 ) );
 			this.rot( `Bip001_${ s }_Calf`, m * ( - H.lift * 0.75 ) );
 			this.rot( `Bip001_${ s }_HorseLink`, m * ( H.lift * 1.0 + H.push * 0.25 ) );
 			this.rot( `Bip001_${ s }_Foot`, m * ( H.lift * 0.5 + H.swing * 0.4 ) );
 			this.rot( `Bip001_${ s }_Toe0`, m * ( H.lift * 0.4 ) );
-			// fore: shoulder blade + upper arm swing, elbow and wrist fold during swing
 			this.rot( `Bip001_${ s }_Clavicle`, m * ( - F.swing * 0.35 ) );
 			this.rot( `Bip001_${ s }_UpperArm`, m * ( - F.swing * 0.8 - F.lift * 0.15 ) );
 			this.rot( `Bip001_${ s }_Forearm`, m * ( F.lift * 0.9 ) );
@@ -440,46 +496,167 @@ export class Jaguar {
 
 		}
 
-		// spine: gallop flexion / extension wave, walk side-to-side, bend into turns
-		const bend = turn * 0.06 * m;
+		// ---- spine: bound-gait flexion wave, walk sway, bend into turns
+		const turn = THREE.MathUtils.clamp( this.turnRate, - 1.5, 1.5 );
+		const bend = turn * 0.07 * m;
 		this.rot( 'Bip001_Spine', m * flex * 0.5, sway * m + bend );
 		this.rot( 'Bip001_Spine1', m * flex * 0.8, - sway * 0.5 * m + bend );
 		this.rot( 'Bip001_Spine2', m * - flex * 0.5, bend );
 		this.rot( 'Bip001_Spine3', m * - flex * 0.6, bend );
 
-		// head stays level and looks into the turn; lower, stalking head when galloping
-		const headPitch = - flex * 0.6 + gal * 0.12 - bob * 2.0;
-		this.rot( 'Bip001_Neck', m * headPitch * 0.4, turn * 0.08 * m );
-		this.rot( 'Bip001_Neck1', m * headPitch * 0.3, turn * 0.06 * m );
-		this.rot( 'Bip001_Head', m * headPitch * 0.3, turn * 0.05 * m );
+		// ---- rest behaviour: calm look-around, breathing, ears, tail
+		this.restBehaviour( dt, m );
 
-		// tail: lags behind the body, rises for balance at speed
-		const tailT = performance.now() / 1000;
+		// ---- head: when moving it looks straight ahead, leaning a little into turns
+		const gal = W.gallop + W.canter * 0.6;
+		const headPitch = - flex * 0.6 + gal * 0.1 - bob * 1.5;
+		const lookYaw = this.look.yaw.v * ( 1 - m ), lookPitch = this.look.pitch.v * ( 1 - m );
+		const turnLook = turn * 0.12 * m;
+		this.rot( 'Bip001_Neck', m * headPitch * 0.4 + lookPitch * 0.35, lookYaw * 0.35 + turnLook * 0.5 );
+		this.rot( 'Bip001_Neck1', m * headPitch * 0.3 + lookPitch * 0.3, lookYaw * 0.35 + turnLook * 0.3 );
+		this.rot( 'Bip001_Neck2', lookPitch * 0.15, lookYaw * 0.15 );
+		this.rot( 'Bip001_Head', m * headPitch * 0.3 + lookPitch * 0.2, lookYaw * 0.15 + turnLook * 0.2, - lookYaw * 0.12 );
+
+		// ---- tail: carried, lags behind the body, rises at speed, slow sway at rest
 		for ( let i = 1; i <= 6; i ++ ) {
 
 			const lag = i * 0.55;
-			const swayT = Math.sin( TAU * P - lag ) * ( 0.05 + 0.04 * i / 6 ) * m + Math.sin( tailT * 0.7 - i * 0.4 ) * 0.04 * ( 1 - m );
-			// base of the tail is carried clear of the ground, tip curls up a little
 			const carry = i === 1 ? - 0.28 : ( i === 2 ? - 0.1 : ( i >= 5 ? - 0.06 : 0 ) );
-			const lift = carry - gal * 0.12 + Math.sin( TAU * P * 2 - lag ) * 0.04 * m;
-			this.rot( `Bone00${ i }`, lift, swayT - turn * 0.05 * m );
+			const rest = Math.max( this.sitW, this.lieW );
+			const swayT = Math.sin( TAU * P - lag ) * ( 0.05 + 0.04 * i / 6 ) * m
+				+ Math.sin( this.time * 0.55 - i * 0.45 ) * 0.035 * ( 1 - m )
+				+ this.tailFlick.s.v * ( i / 6 ) * 0.35;
+			// resting: tail lies on the ground curled around
+			const restCurl = rest * ( i === 1 ? 0.55 : ( i <= 3 ? 0.08 : - 0.05 ) );
+			const restSide = rest * ( i >= 2 ? 0.16 : 0 );
+			const lift = carry * ( 1 - rest ) - gal * 0.12 + Math.sin( TAU * P * 2 - lag ) * 0.04 * m + restCurl;
+			this.rot( `Bone00${ i }`, lift, swayT - turn * 0.05 * m + restSide );
 
 		}
 
-		// ---- body placement: follow terrain slope, bob, bank into turns
+		// ---- sit / lie poses (applied as joint deltas + body drop/pitch)
+		this.restPose();
+		if ( this.debugRot ) for ( const n in this.debugRot ) this.rot( n, this.debugRot[ n ] );
+
+		// ---- body placement: terrain slope, bob, banking, pose drop
 		const fwdX = - Math.sin( this.heading ), fwdZ = - Math.cos( this.heading );
-		const half = 0.55 * this.scale;
+		const half = 0.55 * SIZE;
 		const hF = terrainHeightJS( this.pos.x + fwdX * half, this.pos.z + fwdZ * half );
 		const hB = terrainHeightJS( this.pos.x - fwdX * half, this.pos.z - fwdZ * half );
 		const ground = ( hF + hB ) * 0.5;
 		this.pos.y = lerp( this.pos.y, ground, 1 - Math.exp( - dt * 12 ) );
 		this.pitch = lerp( this.pitch, Math.atan2( hF - hB, 2 * half ), 1 - Math.exp( - dt * 8 ) );
-		this.lean = lerp( this.lean, - turn * this.speed * 0.025, 1 - Math.exp( - dt * 5 ) );
+		this.lean = lerp( this.lean, - turn * this.speed * 0.012, 1 - Math.exp( - dt * 4 ) );
 
 		this.group.position.copy( this.pos );
-		this.group.rotation.set( 0, this.heading + Math.PI, 0 ); // model faces +Z
-		this.body.rotation.set( - this.pitch, 0, THREE.MathUtils.clamp( this.lean, - 0.3, 0.3 ) );
-		this.body.position.y = bob * this.scale * m - gal * 0.04;
+		this.group.rotation.set( 0, this.heading + Math.PI, 0 );
+
+		// sitting tips the body up around the hips
+		const sitPitch = this.sitW * ( 1 - this.lieW ) * 0.34;
+		const drop = ( this.sitW * ( 1 - this.lieW ) * 0.2 + this.lieW * 0.36 ) * SIZE;
+		const bodyPitch = - this.pitch - sitPitch;
+		this.body.rotation.set( bodyPitch, 0, THREE.MathUtils.clamp( this.lean, - 0.25, 0.25 ) );
+		// rotate about the hip pivot instead of the feet
+		const hy = this.hip.y, hz = this.hip.z;
+		const c = Math.cos( bodyPitch ), s = Math.sin( bodyPitch );
+		const py = hy - ( hy * c - hz * s ), pz = hz - ( hy * s + hz * c );
+		this.body.position.set( 0, py + bob * SIZE * m - gal * 0.03 * SIZE - drop, pz );
+
+	}
+
+	restBehaviour( dt, m ) {
+
+		const L = this.look, still = 1 - m;
+		L.timer -= dt;
+		if ( L.timer <= 0 ) {
+
+			// pick a new point of interest; sometimes hold a gaze for a long time
+			const r = Math.random();
+			if ( r < 0.35 ) {
+
+				L.tYaw = 0; L.tPitch = ( Math.random() - 0.5 ) * 0.1; // forward
+
+			} else {
+
+				L.tYaw = ( Math.random() < 0.5 ? - 1 : 1 ) * ( 0.25 + Math.random() * 0.6 );
+				L.tPitch = ( Math.random() - 0.6 ) * 0.25;
+
+			}
+
+			L.timer = r < 0.25 ? 9 + Math.random() * 9 : 3.5 + Math.random() * 5;
+
+		}
+
+		// slower, heavier motion when lying down
+		const hl = lerp( 0.85, 1.4, this.lieW );
+		L.yaw.step( L.tYaw * still, dt, hl );
+		L.pitch.step( L.tPitch * still, dt, hl );
+
+		// breathing
+		const br = Math.sin( this.time * TAU * 0.24 ) * 0.012 * still;
+		this.rot( 'Bip001_Spine1', br );
+		this.rot( 'Bip001_Spine2', - br * 0.6 );
+
+		// occasional ear flicks
+		const E = this.ear;
+		E.timer -= dt;
+		if ( E.timer <= 0 ) {
+
+			E.target = Math.random() < 0.5 ? 'L' : 'R';
+			E.until = this.time + 0.18;
+			E.timer = 2.5 + Math.random() * 6;
+
+		}
+
+		for ( const s of [ 'L', 'R' ] ) {
+
+			const tgt = E.target === s && this.time < E.until ? 0.45 : 0;
+			E[ s ].step( tgt, dt, 0.06 );
+
+		}
+
+		this.rot( 'Bip001_Ponytail1', 0, E.R.v * still );
+		this.rot( 'Bip001_Ponytail2', 0, - E.L.v * still );
+
+		// occasional slow tail flick
+		const T = this.tailFlick;
+		T.timer -= dt;
+		if ( T.timer <= 0 ) {
+
+			T.until = this.time + 0.9;
+			T.dir = Math.random() < 0.5 ? - 1 : 1;
+			T.timer = 5 + Math.random() * 9;
+
+		}
+
+		T.s.step( this.time < T.until ? T.dir * still : 0, dt, 0.35 );
+
+	}
+
+	restPose() {
+
+		const sit = this.sitW * ( 1 - this.lieW ), lie = this.lieW;
+		if ( sit + lie < 1e-3 ) return;
+		for ( const s of [ 'L', 'R' ] ) {
+
+			// hind legs folded under the hips (both poses)
+			const h = Math.min( 1, sit + lie );
+			this.rot( `Bip001_${ s }_Thigh`, h * - 1.05 - lie * 0.25 );
+			this.rot( `Bip001_${ s }_Calf`, h * 1.9 + lie * 0.25 );
+			this.rot( `Bip001_${ s }_HorseLink`, h * - 1.35 - lie * 0.1 );
+			this.rot( `Bip001_${ s }_Foot`, h * 0.45 );
+			// sit: front legs straight and vertical despite the raised chest
+			this.rot( `Bip001_${ s }_UpperArm`, sit * 0.34 + lie * 1.05 );
+			// lie: forearms stretched forward on the ground, paws flat
+			this.rot( `Bip001_${ s }_Forearm`, lie * - 2.15 );
+			this.rot( `Bip001_${ s }_Hand`, lie * 1.1 );
+
+		}
+
+		// keep the head level (+ = nose down): undo the sitting body pitch
+		this.rot( 'Bip001_Neck', sit * 0.16 - lie * 0.32 );
+		this.rot( 'Bip001_Neck1', sit * 0.12 - lie * 0.12 );
+		this.rot( 'Bip001_Head', sit * 0.06 + lie * 0.22 );
 
 	}
 

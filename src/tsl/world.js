@@ -184,7 +184,7 @@ export const actorPush = ( xz, y ) => {
 
 // Soft contact / cast shadow of the jaguar on the meadow (multiplies direct light).
 export const actorShadowAt = ( xz ) => float( 1.0 ).sub(
-	U.actorShadow.z.mul( smoothstep( 1.05, 0.15, length( xz.sub( U.actorShadow.xy ) ) ) ) );
+	U.actorShadow.z.mul( smoothstep( U.actor.w.mul( 1.05 ), U.actor.w.mul( 0.15 ), length( xz.sub( U.actorShadow.xy ) ) ) ) );
 
 // Brightness lift of the canopy as a gust passes: bent blades expose their
 // glossier, lighter faces. This is what makes wind waves readable far away.

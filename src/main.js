@@ -232,7 +232,7 @@ async function start() {
 	jaguar.load().then( () => {
 
 		const f = new THREE.Vector3( - Math.sin( controls.yaw ), 0, - Math.cos( controls.yaw ) );
-		jaguar.place( controls.pos.x + f.x * 7, controls.pos.z + f.z * 7, controls.yaw + Math.PI / 2 );
+		jaguar.place( controls.pos.x + f.x * 14, controls.pos.z + f.z * 14, controls.yaw + Math.PI / 2 );
 		if ( settings.view.startsWith( 'third' ) ) setView( settings.view );
 
 	} ).catch( ( e ) => console.warn( 'jaguar failed to load', e ) );
@@ -246,7 +246,7 @@ async function start() {
 			controls._orbitInit = false;
 			controls.yaw = jaguar.heading;
 			controls.pitch = - 0.22;
-			controls.distTarget = controls.dist = 5.5;
+			controls.distTarget = controls.dist = 10;
 
 		} else {
 
@@ -425,7 +425,7 @@ async function start() {
 		if ( third ) {
 
 			jaguar.update( dt, window.__jaguarInput || controls.moveInput() );
-			controls.updateThird( dt, new THREE.Vector3( jaguar.pos.x, jaguar.pos.y + 0.8, jaguar.pos.z ), jaguar.speed );
+			controls.updateThird( dt, new THREE.Vector3( jaguar.pos.x, jaguar.pos.y + 1.7, jaguar.pos.z ), jaguar.speed );
 
 		} else {
 
@@ -437,9 +437,9 @@ async function start() {
 		if ( jaguar.ready ) {
 
 			// body pushes grass; soft shadow cast along the sun direction
-			U.actor.value.set( jaguar.pos.x, jaguar.pos.y, jaguar.pos.z, 0.95 + Math.min( jaguar.speed, 10 ) * 0.03 );
+			U.actor.value.set( jaguar.pos.x, jaguar.pos.y, jaguar.pos.z, 2.2 + Math.min( jaguar.speed, 15 ) * 0.04 );
 			const sd = U.sunDir.value;
-			const k = Math.min( 3, 0.45 / Math.max( sd.y, 0.15 ) );
+			const k = Math.min( 6, 1.2 / Math.max( sd.y, 0.2 ) );
 			U.actorShadow.value.set( jaguar.pos.x - sd.x * k, jaguar.pos.z - sd.z * k,
 				0.6 * THREE.MathUtils.smoothstep( sd.y, - 0.02, 0.12 ) * ( 1 - settings.clouds * 0.4 ) );
 
