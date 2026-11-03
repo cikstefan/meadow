@@ -19,7 +19,7 @@ import {
 } from 'three/tsl';
 import { hash2i, hash2i2, pcg } from './tsl/noise.js';
 import {
-	U, terrainHeight, terrainNormal, fieldTall, fieldDry, fieldFlowers, windField, cloudShadow, shadeFoliage, gustSheen, flowerGlowLight
+	U, terrainHeight, terrainNormal, fieldTall, fieldDry, fieldFlowers, windField, cloudShadow, shadeFoliage, gustSheen, flowerGlowLight, actorPush, actorShadowAt
 } from './tsl/world.js';
 import { storageVec, createLODs, createResetCompute, routeLOD, visibleSlot, disposeStorage } from './gpu.js';
 
@@ -229,9 +229,11 @@ export class Grass {
 				const pl = length( pd );
 				const near = smoothstep( 1.6, 0.6, abs( u.pusher.y.sub( pos.y ) ) );
 				const amt = smoothstep( u.pushRadius, 0.0, pl ).mul( near );
-				const push = select( pl.greaterThan( 0.001 ), pd.div( pl ), vec2( 0 ) ).mul( amt );
+				const push0 = select( pl.greaterThan( 0.001 ), pd.div( pl ), vec2( 0 ) ).mul( amt ).add( actorPush( xz, pos.y ) );
+				const pushL = length( push0 );
+				const push = select( pushL.greaterThan( 1.0 ), push0.div( pushL ), push0 );
 
-				dyn.element( idx ).assign( vec4( wind, cloud, push.x, push.y ) );
+				dyn.element( idx ).assign( vec4( wind, cloud.mul( actorShadowAt( xz ) ), push.x, push.y ) );
 
 				const jitter = pcg( idx ).sub( 0.5 ).mul( 0.18 ).add( 1.0 );
 				routeLOD( lods, length( rel ).mul( jitter ), idx );

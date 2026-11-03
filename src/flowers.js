@@ -11,7 +11,7 @@ import {
 	cameraPosition, faceDirection, positionGeometry, PI
 } from 'three/tsl';
 import { hash2i, hash2i2, pcg, vnoise } from './tsl/noise.js';
-import { U, terrainHeight, fieldTall, fieldFlowers, windField, cloudShadow, shadeFoliage } from './tsl/world.js';
+import { U, terrainHeight, fieldTall, fieldFlowers, windField, cloudShadow, shadeFoliage, actorPush, actorShadowAt } from './tsl/world.js';
 import { storageVec, createLODs, createResetCompute, routeLOD, visibleSlot, disposeStorage } from './gpu.js';
 
 const TYPES = 5;
@@ -227,8 +227,10 @@ export class Flowers {
 				const pl = length( pd );
 				const near = smoothstep( 1.6, 0.6, abs( u.pusher.y.sub( pos.y ) ) );
 				const amt = smoothstep( 0.9, 0.0, pl ).mul( near );
-				const push = select( pl.greaterThan( 0.001 ), pd.div( pl ), vec2( 0 ) ).mul( amt );
-				dyn.element( idx ).assign( vec4( windField( xz ), cloudShadow( xz ), push.x, push.y ) );
+				const push0 = select( pl.greaterThan( 0.001 ), pd.div( pl ), vec2( 0 ) ).mul( amt ).add( actorPush( xz, pos.y ) );
+				const pushL = length( push0 );
+				const push = select( pushL.greaterThan( 1.0 ), push0.div( pushL ), push0 );
+				dyn.element( idx ).assign( vec4( windField( xz ), cloudShadow( xz ).mul( actorShadowAt( xz ) ), push.x, push.y ) );
 				const jitter = pcg( idx ).sub( 0.5 ).mul( 0.2 ).add( 1.0 );
 				routeLOD( lods, length( rel ).mul( jitter ), idx );
 

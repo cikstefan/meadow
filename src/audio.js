@@ -531,7 +531,8 @@ export class MeadowAudio {
 
 			if ( s.onFoot && s.speed > 0.15 ) {
 
-				const intensity = Math.min( 1.25, 0.45 + s.speed * 0.12 );
+				// paws are soft: fewer crunches, gentler thump, more of them per second
+				const intensity = Math.min( 1.25, 0.45 + s.speed * 0.12 ) * ( s.soft ? 0.5 : 1 );
 				this.step( intensity, s.grass, s.steps % 2 ? 1 : - 1 );
 
 			}

@@ -12,6 +12,7 @@ import { Controls } from './controls.js';
 import { Pollen } from './pollen.js';
 import { MeadowAudio } from './audio.js';
 import { Weather, sunElevation } from './weather.js';
+import { Jaguar } from './jaguar.js';
 
 const QUALITY = {
 	// three nested grass rings, each coarser (wider blades) than the last:
@@ -37,6 +38,7 @@ const settings = {
 	mist: parseFloat( params.get( 'mist' ) || '0.35' ),
 	particles: parseFloat( params.get( 'particles' ) || '0.6' ),
 	autoTime: params.get( 'auto' ) === '1',
+	view: params.get( 'view' ) === 'third' ? 'third person (jaguar)' : 'first person',
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
 	exposure: 1.0,
@@ -72,6 +74,16 @@ async function start() {
 
 	const sky = new Sky();
 	scene.add( sky.mesh );
+
+	// Lights only affect the jaguar (everything else uses the custom foliage
+	// model); they mirror the sky uniforms. Intensity PI matches three's
+	// Lambert normalisation to our albedo * irradiance convention.
+	const sunLight = new THREE.DirectionalLight( 0xffffff, Math.PI );
+	const hemiLight = new THREE.HemisphereLight( 0xffffff, 0x000000, Math.PI );
+	scene.add( sunLight, sunLight.target, hemiLight );
+
+	const jaguar = new Jaguar();
+	scene.add( jaguar.group );
 
 	const pollen = new Pollen( isMobile ? 2500 : 6000 );
 	const weather = new Weather();
@@ -171,6 +183,10 @@ async function start() {
 		U.glow.value = settings.flowerGlow;
 		U.mist.value = settings.mist;
 		U.particles.value = settings.particles;
+		sunLight.color.copy( U.sunColor.value );
+		sunLight.position.copy( U.sunDir.value ).multiplyScalar( 100 );
+		hemiLight.color.copy( U.skyAmb.value );
+		hemiLight.groundColor.copy( U.groundAmb.value );
 		sky.az = az;
 		const wa = THREE.MathUtils.degToRad( settings.windAngle );
 		U.windDir.value.set( Math.cos( wa ), Math.sin( wa ) );
@@ -182,6 +198,42 @@ async function start() {
 	applySky();
 	// start facing the sun: backlit translucent blades are the money shot
 	controls.lookAtAzimuth( sky.az + 12 );
+
+	// the jaguar appears a few metres ahead, crossing the view
+	jaguar.load( './models/jaguar.glb' ).then( () => {
+
+		const f = new THREE.Vector3( - Math.sin( controls.yaw ), 0, - Math.cos( controls.yaw ) );
+		jaguar.place( controls.pos.x + f.x * 7, controls.pos.z + f.z * 7, controls.yaw + Math.PI / 2 );
+		if ( settings.view.startsWith( 'third' ) ) setView( settings.view );
+
+	} ).catch( ( e ) => console.warn( 'jaguar failed to load', e ) );
+
+	function setView( v ) {
+
+		settings.view = v;
+		if ( v.startsWith( 'third' ) ) {
+
+			controls.mode = 'third';
+			controls._orbitInit = false;
+			controls.yaw = jaguar.heading;
+			controls.pitch = - 0.22;
+			controls.distTarget = controls.dist = 5.5;
+
+		} else {
+
+			controls.mode = 'first';
+			controls.eye = controls.eyeTarget = 2.3;
+			controls._initialised = false;
+
+		}
+
+	}
+
+	window.addEventListener( 'keydown', ( e ) => {
+
+		if ( e.code === 'KeyV' && jaguar.ready ) setView( settings.view.startsWith( 'third' ) ? 'first person' : 'third person (jaguar)' );
+
+	} );
 
 	// ------------------------------------------------------------ gui
 	const gui = new GUI( { title: 'Meadow' } );
@@ -223,6 +275,7 @@ async function start() {
 
 	} ).listen();
 	gui.add( controls, 'tour' ).name( 'auto tour' ).listen();
+	gui.add( settings, 'view', [ 'first person', 'third person (jaguar)' ] ).name( 'view (V)' ).onChange( setView ).listen();
 
 	// ------------------------------------------------------------ sound
 	const audio = new MeadowAudio();
@@ -338,7 +391,29 @@ async function start() {
 		if ( weather.update( dt, settings ) ) applySky();
 		advanceWind( dt );
 
-		controls.update( dt, settings.tour );
+		const third = controls.mode === 'third' && jaguar.ready && ! window.__jaguarFreeze;
+		if ( third ) {
+
+			jaguar.update( dt, window.__jaguarInput || controls.moveInput() );
+			controls.updateThird( dt, new THREE.Vector3( jaguar.pos.x, jaguar.pos.y + 0.8, jaguar.pos.z ), jaguar.speed );
+
+		} else {
+
+			controls.update( dt, settings.tour );
+			if ( jaguar.ready && ! window.__jaguarFreeze ) jaguar.update( dt, null, controls.pos );
+
+		}
+
+		if ( jaguar.ready ) {
+
+			// body pushes grass; soft shadow cast along the sun direction
+			U.actor.value.set( jaguar.pos.x, jaguar.pos.y, jaguar.pos.z, 0.95 + Math.min( jaguar.speed, 10 ) * 0.03 );
+			const sd = U.sunDir.value;
+			const k = Math.min( 3, 0.45 / Math.max( sd.y, 0.15 ) );
+			U.actorShadow.value.set( jaguar.pos.x - sd.x * k, jaguar.pos.z - sd.z * k,
+				0.6 * THREE.MathUtils.smoothstep( sd.y, - 0.02, 0.12 ) * ( 1 - settings.clouds * 0.4 ) );
+
+		}
 		sky.update( camera );
 		terrain.update( camera );
 		grass.update( renderer, camera, controls.pusher );
@@ -356,13 +431,15 @@ async function start() {
 
 		if ( audio.enabled ) {
 
-			const f = fieldsJS( controls.pos.x, controls.pos.z );
+			const who = third ? jaguar.pos : controls.pos;
+			const f = fieldsJS( who.x, who.z );
 			audio.update( {
 				wind: windSample(),
-				speed: controls.speed || 0,
-				onFoot: controls.eye < 2.5,
-				steps: controls.steps || 0,
-				bob: controls.bob || 0,
+				speed: third ? jaguar.speed : ( controls.speed || 0 ),
+				onFoot: third || controls.eye < 2.5,
+				steps: third ? jaguar.steps : ( controls.steps || 0 ),
+				bob: third ? jaguar.phase * Math.PI * 4 : ( controls.bob || 0 ),
+				soft: third,
 				grass: Math.min( 1, ( 0.14 + f.tall * 0.91 ) * settings.grassHeight ),
 				hour: settings.hour,
 				eye: controls.eye,
@@ -428,7 +505,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { renderer, scene, camera, controls, settings, applySky, audio, setQuality( q ) {
+	window.__meadow = { THREE, renderer, scene, camera, controls, settings, applySky, audio, jaguar, setView, jaguarMod: () => import( './jaguar.js' ), setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

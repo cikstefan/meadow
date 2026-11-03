@@ -38,6 +38,8 @@ export const U = {
 	particles: uniform( 0.6 ), // fraction of floating particles shown
 	mist: uniform( 0.35 ), // morning inversion / valley mist amount
 	twilight: uniform( 0 ), // 0..1 peaks around sunrise / sunset (belt of Venus, afterglow)
+	actor: uniform( new THREE.Vector4( 0, - 1e4, 0, 1.2 ) ), // jaguar body: xyz + push radius
+	actorShadow: uniform( new THREE.Vector3( 0, 0, 0 ) ), // ground shadow centre xz + strength
 
 	cloudCover: uniform( 0.5 ),
 	cloudDark: uniform( 0.45 ),
@@ -168,6 +170,21 @@ export const cloudShadow = Fn( ( [ xz ] ) => {
 	return mix( float( 1.0 ).sub( U.cloudDark ), float( 1.0 ), lit );
 
 } );
+
+// Push vector (xz, 0..1) that the jaguar's body applies to a plant at `xz`.
+export const actorPush = ( xz, y ) => {
+
+	const pd = xz.sub( U.actor.xz );
+	const pl = length( pd );
+	const near = smoothstep( 2.0, 0.8, abs( U.actor.y.sub( y ) ) );
+	const amt = smoothstep( U.actor.w, 0.0, pl ).mul( near );
+	return select( pl.greaterThan( 0.001 ), pd.div( pl ), vec2( 0 ) ).mul( amt );
+
+};
+
+// Soft contact / cast shadow of the jaguar on the meadow (multiplies direct light).
+export const actorShadowAt = ( xz ) => float( 1.0 ).sub(
+	U.actorShadow.z.mul( smoothstep( 1.05, 0.15, length( xz.sub( U.actorShadow.xy ) ) ) ) );
 
 // Brightness lift of the canopy as a gust passes: bent blades expose their
 // glossier, lighter faces. This is what makes wind waves readable far away.

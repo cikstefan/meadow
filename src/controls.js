@@ -16,6 +16,11 @@ export class Controls {
 		this.pitch = - 0.06;
 		this.eye = 2.3;
 		this.eyeTarget = 2.3;
+		this.mode = 'first'; // 'first' | 'third'
+		this.dist = 5.5;
+		this.distTarget = 5.5;
+		this.orbitTarget = new THREE.Vector3();
+		this._orbitInit = false;
 		this.keys = new Set();
 		this.tour = true;
 		this.idle = 0;
@@ -59,7 +64,8 @@ export class Controls {
 
 		dom.addEventListener( 'wheel', ( e ) => {
 
-			this.eyeTarget = THREE.MathUtils.clamp( this.eyeTarget * Math.exp( e.deltaY * 0.0012 ), 0.25, 40 );
+			if ( this.mode === 'third' ) this.distTarget = THREE.MathUtils.clamp( this.distTarget * Math.exp( e.deltaY * 0.0012 ), 1.6, 40 );
+			else this.eyeTarget = THREE.MathUtils.clamp( this.eyeTarget * Math.exp( e.deltaY * 0.0012 ), 0.25, 40 );
 			this.poke();
 			e.preventDefault();
 
@@ -167,6 +173,69 @@ export class Controls {
 		// the walker's "legs": a bit ahead of the eye, on the ground
 		const ahead = new THREE.Vector3( - Math.sin( this.yaw ), 0, - Math.cos( this.yaw ) ).multiplyScalar( 0.55 );
 		this.pusher.set( this.pos.x + ahead.x, this.eye < 2.5 ? this._groundY : - 1e4, this.pos.z + ahead.z );
+
+	}
+
+
+	// ------------------------------------------------------------ third person
+
+	/** Camera-relative move intent for the followed character: { x, y, run }. */
+	moveInput() {
+
+		const k = this.keys;
+		const fwd = ( k.has( 'KeyW' ) || k.has( 'ArrowUp' ) || this.touches.size >= 2 ? 1 : 0 ) - ( k.has( 'KeyS' ) || k.has( 'ArrowDown' ) ? 1 : 0 );
+		const str = ( k.has( 'KeyD' ) || k.has( 'ArrowRight' ) ? 1 : 0 ) - ( k.has( 'KeyA' ) || k.has( 'ArrowLeft' ) ? 1 : 0 );
+		const fx = - Math.sin( this.yaw ), fz = - Math.cos( this.yaw );
+		const rx = Math.cos( this.yaw ), rz = - Math.sin( this.yaw );
+		let x = fx * fwd + rx * str, y = fz * fwd + rz * str;
+		const l = Math.hypot( x, y );
+		if ( l > 1e-3 ) {
+
+			x /= l; y /= l;
+
+		}
+
+		return { x, y, run: k.has( 'ShiftLeft' ) || k.has( 'ShiftRight' ) };
+
+	}
+
+	/** Orbit camera around `target` (drag = orbit, wheel / Q E = distance). */
+	updateThird( dt, target, targetSpeed = 0 ) {
+
+		const k = this.keys;
+		if ( k.has( 'KeyQ' ) ) this.distTarget = Math.max( 1.6, this.distTarget * Math.exp( - dt * 1.5 ) );
+		if ( k.has( 'KeyE' ) ) this.distTarget = Math.min( 40, this.distTarget * Math.exp( dt * 1.5 ) );
+		this.tour = false;
+		this.idle = 0;
+
+		if ( ! this._orbitInit ) {
+
+			this.orbitTarget.copy( target );
+			this._orbitInit = true;
+
+		}
+
+		this.orbitTarget.lerp( target, 1 - Math.exp( - dt * 9 ) );
+		this.dist += ( this.distTarget - this.dist ) * ( 1 - Math.exp( - dt * 5 ) );
+		this.pitch = THREE.MathUtils.clamp( this.pitch, - 1.35, 0.35 );
+
+		const cp = Math.cos( this.pitch );
+		const look = new THREE.Vector3( - Math.sin( this.yaw ) * cp, Math.sin( this.pitch ), - Math.cos( this.yaw ) * cp );
+		const cam = this.camera;
+		cam.position.copy( this.orbitTarget ).addScaledVector( look, - this.dist );
+		const gy = terrainHeightJS( cam.position.x, cam.position.z ) + 0.35;
+		if ( cam.position.y < gy ) cam.position.y = gy;
+		cam.rotation.set( this.pitch, this.yaw, 0, 'YXZ' );
+		cam.updateMatrixWorld();
+
+		this.pos.set( cam.position.x, 0, cam.position.z );
+		this._groundY = terrainHeightJS( cam.position.x, cam.position.z );
+		this.eye = cam.position.y - this._groundY;
+		this.pusher.set( 0, - 1e4, 0 );
+		this.speed = 0;
+
+		const kick = THREE.MathUtils.clamp( ( targetSpeed - 4 ) / 8, 0, 1 ) * 8;
+		this.fovKick = ( this.fovKick || 0 ) + ( kick - ( this.fovKick || 0 ) ) * ( 1 - Math.exp( - dt * 3 ) );
 
 	}
 
