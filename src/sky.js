@@ -5,7 +5,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, uniform, float, int, vec2, vec3, positionWorld, cameraPosition, normalize, mix, smoothstep, max, pow, dot, clamp,
-	floor, fract, length, exp, sin, select
+	floor, fract, length, exp, sin, select, fwidth
 } from 'three/tsl';
 import { vnoise, hash2i } from './tsl/noise.js';
 import { U, skyColor } from './tsl/world.js';
@@ -87,7 +87,7 @@ export class Sky {
 			const bandB = normalize( vec3( - 0.175, 0.7, - 0.4 ).sub( bandN.mul( dot( vec3( - 0.175, 0.7, - 0.4 ), bandN ) ) ) );
 			const band = exp( pow( dot( dir, bandN ).mul( 4.5 ), 2.0 ).negate() );
 			const bandUV = vec2( dot( dir, bandA ), dot( dir, bandB ) );
-			const sp = dir.mul( 230.0 );
+			const sp = dir.mul( 420.0 );
 			const ip = floor( sp );
 			const ix = int( ip.x ), iy = int( ip.y ), iz = int( ip.z );
 			const h = hash2i( ix.add( iz.mul( 4099 ) ), iy );
@@ -95,13 +95,21 @@ export class Sky {
 			const h3 = hash2i( iz.add( 7 ), ix.add( iy.mul( 977 ) ) );
 			const off = vec3( h2, h3, fract( h.mul( 31.7 ) ) ).sub( 0.5 ).mul( 0.6 );
 			const dStar = length( fract( sp ).sub( 0.5 ).sub( off ) );
-			const thr = float( 0.986 ).sub( band.mul( 0.012 ) );
+			// many faint stars, few bright ones (power law), denser in the milky way
+			const thr = float( 0.984 ).sub( band.mul( 0.012 ) );
 			const mag = clamp( h.sub( thr ).div( float( 1.0 ).sub( thr ) ), 0.0, 1.0 );
-			const tw = sin( U.time.mul( mix( 1.5, 4.0, h2 ) ).add( h3.mul( 60.0 ) ) ).mul( 0.3 ).add( 0.8 );
-			const starTint = mix( vec3( 1.0, 0.85, 0.7 ), vec3( 0.75, 0.85, 1.1 ), h3 );
-			const star = smoothstep( 0.38, 0.0, dStar ).mul( select( mag.greaterThan( 0.0 ), pow( mag, 1.5 ).mul( 3.0 ).add( 0.25 ), float( 0.0 ) ) ).mul( tw );
+			const tw = sin( U.time.mul( mix( 1.2, 3.5, h2 ) ).add( h3.mul( 60.0 ) ) ).mul( 0.18 ).add( 0.85 );
+			const starTint = mix( vec3( 1.0, 0.86, 0.72 ), vec3( 0.78, 0.86, 1.08 ), h3 );
+			// pixel-sized gaussian points: radius from screen-space derivatives -> fine, round, antialiased
+			const px = length( fwidth( sp ) ).mul( 0.55 );
+			const r = max( px, 0.02 );
+			const starCore = exp( dStar.div( r ).pow( 2.0 ).negate() );
+			const bright = pow( mag, 3.0 ).mul( 1.5 ).add( mag.mul( 0.1 ) );
+			const star = starCore.mul( select( mag.greaterThan( 0.0 ), bright, float( 0.0 ) ) ).mul( tw );
 			const mwTex = vnoise( bandUV.mul( 7.0 ).add( dot( dir, bandN ).mul( 9.0 ) ) ).mul( 0.6 ).add( vnoise( bandUV.mul( 21.0 ).add( vec2( 5, 3 ) ) ).mul( 0.4 ) );
-			const milky = vec3( 0.014, 0.018, 0.034 ).mul( band ).mul( smoothstep( 0.35, 0.9, mwTex ).mul( 1.5 ).add( 0.25 ) );
+			// faint glow with darker dust lanes along the band
+			const lanes = smoothstep( 0.45, 0.75, vnoise( bandUV.mul( 13.0 ).add( vec2( 11, 2 ) ) ) );
+			const milky = vec3( 0.011, 0.014, 0.026 ).mul( band ).mul( smoothstep( 0.35, 0.9, mwTex ).mul( 1.4 ).add( 0.3 ) ).mul( float( 1.0 ).sub( lanes.mul( 0.6 ) ) );
 			const nightSky = starTint.mul( star ).add( milky ).mul( U.night ).mul( above ).mul( float( 1.0 ).sub( dens ) );
 			col.addAssign( nightSky );
 

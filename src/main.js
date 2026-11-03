@@ -27,7 +27,7 @@ const params = new URLSearchParams( location.search );
 const isMobile = /Android|iPhone|iPad|iPod/i.test( navigator.userAgent ) || ( navigator.maxTouchPoints > 1 && window.innerWidth < 1100 );
 
 const settings = {
-	quality: params.get( 'q' ) || ( isMobile ? 'low' : 'high' ),
+	quality: params.get( 'q' ) || ( isMobile ? 'low' : 'high' ), // desktop may start at ultra (see below)
 	hour: parseFloat( params.get( 'hour' ) || '6' ),
 	clouds: parseFloat( params.get( 'clouds' ) || '0.5' ),
 	wind: parseFloat( params.get( 'wind' ) || '1.2' ),
@@ -74,6 +74,8 @@ async function start() {
 	} catch ( e ) { /* fall back to defaults */ }
 
 	const renderer = new THREE.WebGPURenderer( { antialias: true, powerPreference: 'high-performance', requiredLimits } );
+	// capable desktop GPUs start at ultra; adaptive quality steps down if it struggles
+	if ( ! params.has( 'q' ) && ! isMobile && ( requiredLimits.maxStorageBufferBindingSize || 0 ) >= 512 * 1024 * 1024 ) settings.quality = 'ultra';
 	await renderer.init();
 	if ( ! renderer.backend.isWebGPUBackend ) return fail( 'WebGPU adapter unavailable (fell back to WebGL). Compute + indirect draw need a WebGPU device.' );
 
@@ -202,7 +204,10 @@ async function start() {
 		const az = 90 + ( h - 6 ) / 12 * 180;
 		sky.setAtmosphere( el, az, settings.clouds );
 		// eyes adapt at night: lift exposure so the moonlit meadow stays readable
-		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * 0.7 );
+		// daylight is bright: settle at ~0.8 exposure once the sun is up; dawn,
+		// dusk and night keep their exposure (night is lifted for readability)
+		const day = THREE.MathUtils.smoothstep( el, 4, 16 );
+		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * 0.7 ) * THREE.MathUtils.lerp( 1, 0.8, day );
 		U.dry.value = settings.dryPatches;
 		U.glow.value = settings.flowerGlow;
 		U.mist.value = settings.mist;

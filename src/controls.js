@@ -33,7 +33,7 @@ export class Controls {
 		let dragging = false, lx = 0, ly = 0;
 
 		// cursor steering: the view follows the mouse without clicking
-		this.mouseSteer = true;
+		this.mouseSteer = false;
 		this.cursor = { x: 0, y: 0, active: false };
 		this._dragging = () => dragging;
 		dom.addEventListener( 'pointermove', ( e ) => {
