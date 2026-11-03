@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
-import { pass, vec3, uv, smoothstep, length, float, mix } from 'three/tsl';
+import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
 
 import { U, fieldsJS, windFieldJS, advanceWind } from './tsl/world.js';
@@ -14,6 +15,7 @@ import { MeadowAudio } from './audio.js';
 import { Weather, sunElevation } from './weather.js';
 import { Jaguar, POSE } from './jaguar.js';
 import { DeerHerd } from './deer.js';
+import { WindSpirits } from './spirits.js';
 
 const QUALITY = {
 	// three nested grass rings, each coarser (wider blades) than the last:
@@ -39,6 +41,9 @@ const settings = {
 	mist: parseFloat( params.get( 'mist' ) || '0.35' ),
 	particles: parseFloat( params.get( 'particles' ) || '0.6' ),
 	autoTime: params.get( 'auto' ) === '1',
+	windSpirits: params.get( 'spirits' ) === '1',
+	sunShafts: params.get( 'shafts' ) === '1',
+	painterly: params.get( 'grade' ) === '1',
 	view: params.get( 'view' ) === 'third' ? 'third person (jaguar)' : 'first person',
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
@@ -102,6 +107,9 @@ async function start() {
 	scene.add( jaguar.group );
 	const herd = new DeerHerd();
 	scene.add( herd.group );
+	const spirits = new WindSpirits( isMobile ? 90 : 170 );
+	spirits.mesh.visible = settings.windSpirits;
+	scene.add( spirits.mesh );
 
 	const pollen = new Pollen( isMobile ? 2500 : 6000 );
 	const weather = new Weather();
@@ -184,16 +192,49 @@ async function start() {
 
 	// ------------------------------------------------------------ post
 	let pipeline = null;
+	const post = { sunUV: uniform( new THREE.Vector2( 0.5, 0.5 ) ), shaftAmt: uniform( 0 ), aspect: uniform( 1 ) };
+
+	// Giant Squid-style painterly grade: richer colour, cool shadows, warm highlights
+	const painterly = Fn( ( [ c ] ) => {
+
+		const lum = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+		const sat = mix( vec3( lum ), c, 1.22 );
+		const shadowTint = vec3( 0.9, 0.98, 1.1 ), highTint = vec3( 1.08, 1.0, 0.9 );
+		const t = smoothstep( 0.02, 0.6, lum );
+		return sat.mul( mix( shadowTint, highTint, t ) ).mul( 1.04 );
+
+	} );
+
 	function buildPost() {
 
+		if ( pipeline ) pipeline.dispose();
 		pipeline = new THREE.RenderPipeline( renderer );
 		const scenePass = pass( scene, camera );
 		const color = scenePass.getTextureNode( 'output' );
+		let col = color.rgb;
 		const glow = bloom( color, 0.22, 0.55, 1.1 );
+		col = col.add( glow.rgb );
+
+		if ( settings.sunShafts ) {
+
+			// light shafts: bright sky near the sun, radially smeared toward the sun;
+			// grass blades and animals cut dark rays into it
+			const depth = scenePass.getTextureNode( 'depth' ).x;
+			const sky = step( 0.99997, depth );
+			const d = length( uv().sub( post.sunUV ).mul( vec2( post.aspect, 1.0 ) ) );
+			const near = smoothstep( 0.55, 0.0, d );
+			const src = vec4( color.rgb.mul( sky ).mul( near ), 1.0 );
+			const rays = radialBlur( src, { center: post.sunUV, weight: float( 0.6 ), decay: float( 0.965 ), count: 48, exposure: float( 1 ) } );
+			col = col.add( rays.rgb.mul( post.shaftAmt ).mul( U.sunColor.mul( 0.25 ).add( 0.2 ) ) );
+
+		}
+
+		if ( settings.painterly ) col = painterly( col );
+
 		// subtle optical vignette
-		const d = length( uv().sub( 0.5 ).mul( vec3( 1.0, 0.8, 0 ).xy ) );
-		const vig = mix( float( 1.0 ), float( 0.78 ), smoothstep( 0.35, 0.85, d ) );
-		pipeline.outputNode = color.add( glow ).mul( vig );
+		const dv = length( uv().sub( 0.5 ).mul( vec3( 1.0, 0.8, 0 ).xy ) );
+		const vig = mix( float( 1.0 ), float( 0.78 ), smoothstep( 0.35, 0.85, dv ) );
+		pipeline.outputNode = vec4( col.mul( vig ), 1.0 );
 
 	}
 
@@ -331,6 +372,21 @@ async function start() {
 	gui.add( controls, 'mouseSteer' ).name( 'look follows cursor' );
 	gui.add( settings, 'view', [ 'first person', 'third person (jaguar)' ] ).name( 'view (V)' ).onChange( setView ).listen();
 	gui.add( herd.group, 'visible' ).name( 'deer' );
+
+	const squid = gui.addFolder( '✦ Sword of the Sea mode (prototype)' );
+	squid.add( settings, 'windSpirits' ).name( 'wind spirits' ).onChange( ( v ) => ( spirits.mesh.visible = v ) );
+	squid.add( spirits.u.amount, 'value', 0, 1, 0.01 ).name( 'spirit amount' );
+	squid.add( settings, 'sunShafts' ).name( 'sun shafts' ).onChange( buildPost );
+	squid.add( settings, 'painterly' ).name( 'painterly grade' ).onChange( buildPost );
+	squid.add( { all: () => {
+
+		const on = ! ( settings.windSpirits && settings.sunShafts && settings.painterly );
+		settings.windSpirits = settings.sunShafts = settings.painterly = on;
+		spirits.mesh.visible = on;
+		buildPost();
+		squid.controllersRecursive().forEach( ( c ) => c.updateDisplay() );
+
+	} }, 'all' ).name( 'toggle all' );
 
 	// ------------------------------------------------------------ sound
 	const audio = new MeadowAudio();
@@ -513,7 +569,18 @@ async function start() {
 
 		}
 
-		if ( settings.bloom ) pipeline.render();
+		if ( settings.sunShafts ) {
+
+			const sp = U.sunDir.value.clone().multiplyScalar( 1000 ).add( camera.position ).project( camera );
+			post.sunUV.value.set( sp.x * 0.5 + 0.5, 1 - ( sp.y * 0.5 + 0.5 ) );
+			post.aspect.value = camera.aspect;
+			const facing = U.sunDir.value.dot( camera.getWorldDirection( new THREE.Vector3() ) );
+			const low = 1 - THREE.MathUtils.smoothstep( U.sunDir.value.y, 0.25, 0.7 );
+			post.shaftAmt.value = THREE.MathUtils.smoothstep( facing, 0.05, 0.45 ) * ( 0.35 + 0.65 * low ) * ( 1 - U.night.value ) * 0.9;
+
+		}
+
+		if ( settings.bloom || settings.sunShafts || settings.painterly ) pipeline.render();
 		else renderer.render( scene, camera );
 
 		if ( firstFrame ) {
@@ -571,7 +638,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { THREE, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, POSE, setQuality( q ) {
+	window.__meadow = { THREE, U, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, POSE, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

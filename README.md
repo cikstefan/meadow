@@ -133,6 +133,17 @@ frills, rounded tips) are alpha-tested.
     and when running.
   - Sound starts on your first click or key press, as browsers require.
 
+## ✦ Sword of the Sea mode (prototype)
+An homage to Giant Squid's flowing worlds (Abzû, Sword of the Sea), in its own GUI folder,
+all off by default (`?spirits=1&shafts=1&grade=1` turns everything on):
+- **wind spirits:** ~170 luminous ribbons riding the wind over the meadow. Fully analytic:
+  each follows a closed-form flight path (wind drift, weave, ripple, occasional loops,
+  terrain-hugging height); its tail is the same path sampled at earlier times, rebuilt in the
+  vertex shader. Warm filaments by day, rose-gold at dusk, bioluminescent blue at night.
+- **sun shafts:** sky pixels near the sun radially blurred toward it, so grass blades and
+  animals cut rays into the light (strongest with a low sun).
+- **painterly grade:** richer saturation, cool shadows and warm highlights.
+
 ## Performance notes
 - Storage buffers are packed (interleaved static data, one shared indirect-args
   buffer and one shared visible-index buffer per system), so each pass stays well
