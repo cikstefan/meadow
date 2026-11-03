@@ -22,7 +22,7 @@ npm run build      # static site in dist/
 
 Needs a browser with WebGPU: Chrome / Edge 113+, Safari 26+, Firefox 141+ (Windows).
 
-**Controls:** drag to look · WASD / arrows to walk · Shift to run (9 m/s) · wheel or Q/E to change height · M to toggle sound.
+**Controls:** move the mouse to look (the view follows the cursor; drag also works) · WASD / arrows to move · Shift to run · wheel or Q/E for height (first person) or camera distance (third person) · **V** toggles first person / third person following the jaguar · M toggles sound.
 Auto tour (the camera wandering on its own) is off by default; enable it in the panel or with `?tour=1`.
 
 **URL options:** `?q=low|medium|high|ultra` (disables adaptive quality),
@@ -59,6 +59,24 @@ star field with twinkle, a faint Milky Way band, and a deep-blue palette with bl
 ambient light. Flowers become bioluminescent: their petals and centres emit blue
 light (with bloom), and grass and terrain in flower drifts receive that light.
 Pollen turns into slowly pulsing blue spores.
+
+### The jaguar
+Model: [“black panther” by kenchoo](https://sketchfab.com/3d-models/black-panther-7fca11c89cca4362a525c891a8345112),
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); textures converted to WebP and the
+mesh meshopt-compressed (6.9 MB → 0.54 MB), shipped as a lazily loaded chunk.
+
+No freely licensed jaguar with walk/run clips was available for direct download, and this
+model only has a showcase clip (idle, lie down, get up). So the idle comes from the baked
+clip and **locomotion is procedural** on its 47-bone rig, following the structure of
+False Earth's character controller (speed → 1D blend weights → footstep events):
+- walk (lateral sequence), trot (diagonal) and rotary gallop, each with per-leg phase
+  offsets, stance/swing timing and joint flexion; gaits are blended by speed
+- stride amplitude solved from speed and leg length so the paws don't slide
+- spine flexion/extension in the gallop, lateral sway in the walk, a stabilised head,
+  a carried tail that lags behind the body, banking into turns, slope following
+- footfalls drive soft paw-step audio; the body parts the grass and casts a soft shadow
+- in first person the jaguar wanders around you on its own; in third person you steer
+  it camera-relative (W runs where you look)
 
 ### Wildflowers
 They use the same slot, compute, LOD and indirect pipeline with a sparser lattice.

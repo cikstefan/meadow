@@ -275,6 +275,7 @@ async function start() {
 
 	} ).listen();
 	gui.add( controls, 'tour' ).name( 'auto tour' ).listen();
+	gui.add( controls, 'mouseSteer' ).name( 'look follows cursor' );
 	gui.add( settings, 'view', [ 'first person', 'third person (jaguar)' ] ).name( 'view (V)' ).onChange( setView ).listen();
 
 	// ------------------------------------------------------------ sound

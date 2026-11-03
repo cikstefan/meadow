@@ -31,6 +31,23 @@ export class Controls {
 		this._groundY = 0;
 
 		let dragging = false, lx = 0, ly = 0;
+
+		// cursor steering: the view follows the mouse without clicking
+		this.mouseSteer = true;
+		this.cursor = { x: 0, y: 0, active: false };
+		this._dragging = () => dragging;
+		dom.addEventListener( 'pointermove', ( e ) => {
+
+			if ( e.pointerType !== 'mouse' ) return;
+			const r = dom.getBoundingClientRect();
+			this.cursor.x = ( ( e.clientX - r.left ) / r.width ) * 2 - 1;
+			this.cursor.y = ( ( e.clientY - r.top ) / r.height ) * 2 - 1;
+			if ( ! this.cursor.active && this.mouseSteer ) this.poke();
+			this.cursor.active = true;
+
+		} );
+		dom.addEventListener( 'pointerleave', () => ( this.cursor.active = false ) );
+		window.addEventListener( 'blur', () => ( this.cursor.active = false ) );
 		const touches = new Map();
 
 		dom.addEventListener( 'pointerdown', ( e ) => {
@@ -110,6 +127,7 @@ export class Controls {
 		if ( k.has( 'KeyQ' ) ) this.eyeTarget = Math.max( 0.25, this.eyeTarget * Math.exp( - dt * 1.5 ) );
 		if ( k.has( 'KeyE' ) ) this.eyeTarget = Math.min( 40, this.eyeTarget * Math.exp( dt * 1.5 ) );
 
+		this.steer( dt, 0 );
 		this.idle += dt;
 		if ( autoTour && ! this.tour && this.idle > 12 ) {
 
@@ -217,6 +235,7 @@ export class Controls {
 
 		this.orbitTarget.lerp( target, 1 - Math.exp( - dt * 9 ) );
 		this.dist += ( this.distTarget - this.dist ) * ( 1 - Math.exp( - dt * 5 ) );
+		this.steer( dt, - 0.22 );
 		this.pitch = THREE.MathUtils.clamp( this.pitch, - 1.35, 0.35 );
 
 		const cp = Math.cos( this.pitch );
@@ -236,6 +255,23 @@ export class Controls {
 
 		const kick = THREE.MathUtils.clamp( ( targetSpeed - 4 ) / 8, 0, 1 ) * 8;
 		this.fovKick = ( this.fovKick || 0 ) + ( kick - ( this.fovKick || 0 ) ) * ( 1 - Math.exp( - dt * 3 ) );
+
+	}
+
+
+	// Cursor steering: horizontal offset from the centre turns (dead zone in the
+	// middle, faster toward the edges); vertical position sets the look pitch.
+	steer( dt, pitchBase ) {
+
+		const c = this.cursor;
+		if ( ! this.mouseSteer || ! c.active || this._dragging() ) return;
+		const ax = Math.abs( c.x );
+		const t = Math.min( 1, Math.max( 0, ( ax - 0.16 ) / 0.84 ) );
+		const rate = t * t * ( 3 - 2 * t ) * 2.4; // rad/s at the very edge
+		this.yaw -= Math.sign( c.x ) * rate * dt;
+		const targetPitch = pitchBase - c.y * 0.75;
+		this.pitch += ( targetPitch - this.pitch ) * ( 1 - Math.exp( - dt * 3.5 ) );
+		if ( rate > 0.05 ) this.idle = 0;
 
 	}
 
