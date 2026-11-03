@@ -133,6 +133,7 @@ export class Jaguar {
 		// --- idle: first part of the baked clip, without root drift
 		this.mixer = new THREE.AnimationMixer( model );
 		const full = gltf.animations[ 0 ];
+		this.fullClip = full;
 		if ( full ) {
 
 			const idle = THREE.AnimationUtils.subclip( full, 'idle', 0, Math.round( 5.4 * 24 ), 24 );

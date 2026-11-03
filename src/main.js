@@ -60,7 +60,20 @@ async function start() {
 
 	if ( ! navigator.gpu ) return fail( 'This meadow is rendered entirely on the GPU with <b>WebGPU</b> compute shaders and indirect drawing. Your browser does not expose WebGPU. Try a recent Chrome, Edge, Safari 26+ or Firefox 141+.' );
 
-	const renderer = new THREE.WebGPURenderer( { antialias: true, powerPreference: 'high-performance' } );
+	// Ask for the adapter's real buffer limits: the default 128 MiB storage
+	// binding is too small for the ultra grass buffers (that made ultra render black).
+	let requiredLimits = {};
+	try {
+
+		const adapter = await navigator.gpu.requestAdapter( { powerPreference: 'high-performance' } );
+		if ( adapter ) requiredLimits = {
+			maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+			maxBufferSize: adapter.limits.maxBufferSize,
+		};
+
+	} catch ( e ) { /* fall back to defaults */ }
+
+	const renderer = new THREE.WebGPURenderer( { antialias: true, powerPreference: 'high-performance', requiredLimits } );
 	await renderer.init();
 	if ( ! renderer.backend.isWebGPUBackend ) return fail( 'WebGPU adapter unavailable (fell back to WebGL). Compute + indirect draw need a WebGPU device.' );
 
@@ -111,7 +124,18 @@ async function start() {
 
 	function buildWorld() {
 
-		const q = QUALITY[ settings.quality ];
+		const q = { ...QUALITY[ settings.quality ] };
+		// keep every storage buffer inside the device limit (64 B of static data per blade)
+		const lim = Math.min( renderer.backend.device.limits.maxStorageBufferBindingSize, renderer.backend.device.limits.maxBufferSize );
+		const maxAxis = ( n ) => Math.floor( Math.sqrt( lim * 0.98 / 64 ) / 16 ) * 16;
+		for ( const k of [ 'blades', 'mid', 'far' ] ) if ( q[ k ] > maxAxis() ) {
+
+			const r = maxAxis() / q[ k ];
+			console.warn( `grass ${ k }: ${ q[ k ] }² exceeds GPU buffer limit, using ${ maxAxis() }²` );
+			if ( k === 'blades' ) q.area *= r; // keep blade spacing, shrink the near radius slightly
+			q[ k ] = maxAxis();
+
+		}
 		for ( const g of grassRings() ) g.dispose();
 		if ( flowers ) flowers.dispose();
 		if ( terrain ) terrain.mesh.removeFromParent();
