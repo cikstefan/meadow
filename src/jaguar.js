@@ -69,14 +69,22 @@ const CAD = 1 / Math.sqrt( SIZE / 1.2 ); // bigger animals step more slowly
 
 // leg order: LH, RH, LF, RF
 const GAITS = {
-	walk: { beta: 0.64, freq: ( v ) => ( 0.75 + 0.3 * v / SIZE * 1.2 ) * CAD, off: [ 0.0, 0.5, 0.25, 0.75 ], lift: 0.9, bob: 0.010, sway: 0.05, flex: 0.0 },
-	trot: { beta: 0.46, freq: ( v ) => ( 1.2 + 0.13 * v / SIZE * 1.2 ) * CAD, off: [ 0.0, 0.5, 0.5, 0.0 ], lift: 1.0, bob: 0.018, sway: 0.02, flex: 0.05 },
-	canter: { beta: 0.42, freq: ( v ) => ( 1.45 + 0.07 * v / SIZE * 1.2 ) * CAD, off: [ 0.33, 0.0, 0.66, 0.33 ], lift: 1.05, bob: 0.035, sway: 0.0, flex: 0.16 },
-	gallop: { beta: 0.32, freq: ( v ) => ( 1.8 + 0.04 * v / SIZE * 1.2 ) * CAD, off: [ 0.0, 0.18, 0.7, 0.52 ], lift: 1.15, bob: 0.05, sway: 0.0, flex: 0.3 },
+	// stride frequencies (Hz) for a ~2.5x-scale cat (Froude scaling: slower cadence, longer strides)
+	walk: { beta: 0.64, freq: ( v ) => 0.55 + 0.17 * v, off: [ 0.0, 0.5, 0.25, 0.75 ], lift: 0.9, bob: 0.010, sway: 0.05, flex: 0.0 },
+	trot: { beta: 0.46, freq: ( v ) => 1.0 + 0.08 * v, off: [ 0.0, 0.5, 0.5, 0.0 ], lift: 1.0, bob: 0.018, sway: 0.02, flex: 0.05 },
+	canter: { beta: 0.42, freq: ( v ) => 1.25 + 0.03 * v, off: [ 0.33, 0.0, 0.66, 0.33 ], lift: 1.05, bob: 0.035, sway: 0.0, flex: 0.16 },
+	gallop: { beta: 0.32, freq: ( v ) => 1.5 + 0.025 * v, off: [ 0.0, 0.18, 0.7, 0.52 ], lift: 1.15, bob: 0.05, sway: 0.0, flex: 0.3 },
 };
 const GAIT_NAMES = [ 'walk', 'trot', 'canter', 'gallop' ];
 
-const SPEED = { walk: 2.8, canter: 10.5, gallop: 19 };
+const SPEED = { walk: 2.8, canter: 9.0, gallop: 17 };
+
+// rest poses (joint deltas in radians, drop as a fraction of model scale), solved so
+// that paws, hocks and hips rest on the ground (see README: pose fitting)
+export const POSE = {
+	sit: { thigh: - 1.005, calf: 1.254, hock: - 0.976, foot: 2.196, ua: 0.273, fa: 0, hand: 0, pitch: 0.47, drop: 0.432 },
+	lie: { thigh: - 1.071, calf: 1.352, hock: - 1.405, foot: 0.088, ua: 0.275, fa: - 1.659, hand: 0.274, pitch: 0.074, drop: 0.399 },
+};
 
 export class Jaguar {
 
@@ -349,7 +357,7 @@ export class Jaguar {
 
 		} else this.targetSpeed = 0;
 
-		const accel = this.targetSpeed > this.speed ? ( run ? 5 : 2.4 ) : 4.5;
+		const accel = this.targetSpeed > this.speed ? ( sprint ? 10 : run ? 7.5 : 2.6 ) : 5.5;
 		this.speed += Math.sign( this.targetSpeed - this.speed ) * Math.min( Math.abs( this.targetSpeed - this.speed ), accel * dt );
 		this.turnRate = lerp( this.turnRate, angleDiff( prevHeading, this.heading ) / Math.max( dt, 1e-3 ), 1 - Math.exp( - dt * 6 ) );
 
@@ -374,7 +382,7 @@ export class Jaguar {
 
 		// 1D blend tree on speed: idle -> walk -> trot -> canter -> gallop
 		const t = { idle: 0, walk: 0, trot: 0, canter: 0, gallop: 0 };
-		const bands = [ [ 'idle', 0 ], [ 'walk', 1.2 ], [ 'walk', 3.0 ], [ 'trot', 4.6 ], [ 'trot', 6.5 ], [ 'canter', 8.5 ], [ 'canter', 12.5 ], [ 'gallop', 15.5 ] ];
+		const bands = [ [ 'idle', 0 ], [ 'walk', 1.2 ], [ 'walk', 3.0 ], [ 'trot', 4.4 ], [ 'trot', 5.8 ], [ 'canter', 7.5 ], [ 'canter', 11.5 ], [ 'gallop', 14.5 ] ];
 		if ( v <= 0.08 ) {
 
 			t.idle = 1;
@@ -440,7 +448,7 @@ export class Jaguar {
 
 				const p = ( P + G.off[ i ] ) % 1;
 				const len = ( i < 2 ? this.hindLen : this.foreLen ) * SIZE;
-				const A = Math.asin( Math.min( 0.72, travel / ( 2 * len ) ) );
+				const A = Math.asin( Math.min( 0.85, travel / ( 2 * len ) ) );
 				let swing, lift = 0, push = 0;
 				if ( p < G.beta ) {
 
@@ -552,8 +560,9 @@ export class Jaguar {
 		this.group.rotation.set( 0, this.heading + Math.PI, 0 );
 
 		// sitting tips the body up around the hips
-		const sitPitch = this.sitW * ( 1 - this.lieW ) * 0.34;
-		const drop = ( this.sitW * ( 1 - this.lieW ) * 0.2 + this.lieW * 0.36 ) * SIZE;
+		const sitW = this.sitW * ( 1 - this.lieW );
+		const sitPitch = sitW * POSE.sit.pitch + this.lieW * POSE.lie.pitch;
+		const drop = ( sitW * POSE.sit.drop + this.lieW * POSE.lie.drop ) * SIZE;
 		const bodyPitch = - this.pitch - sitPitch;
 		this.body.rotation.set( bodyPitch, 0, THREE.MathUtils.clamp( this.lean, - 0.25, 0.25 ) );
 		// rotate about the hip pivot instead of the feet
@@ -637,19 +646,19 @@ export class Jaguar {
 
 		const sit = this.sitW * ( 1 - this.lieW ), lie = this.lieW;
 		if ( sit + lie < 1e-3 ) return;
+		const S = POSE.sit, L = POSE.lie;
+		const mixp = ( k ) => sit * S[ k ] + lie * L[ k ];
 		for ( const s of [ 'L', 'R' ] ) {
 
-			// hind legs folded under the hips (both poses)
-			const h = Math.min( 1, sit + lie );
-			this.rot( `Bip001_${ s }_Thigh`, h * - 1.05 - lie * 0.25 );
-			this.rot( `Bip001_${ s }_Calf`, h * 1.9 + lie * 0.25 );
-			this.rot( `Bip001_${ s }_HorseLink`, h * - 1.35 - lie * 0.1 );
-			this.rot( `Bip001_${ s }_Foot`, h * 0.45 );
-			// sit: front legs straight and vertical despite the raised chest
-			this.rot( `Bip001_${ s }_UpperArm`, sit * 0.34 + lie * 1.05 );
-			// lie: forearms stretched forward on the ground, paws flat
-			this.rot( `Bip001_${ s }_Forearm`, lie * - 2.15 );
-			this.rot( `Bip001_${ s }_Hand`, lie * 1.1 );
+			// hind legs folded under the hips, hocks and paws on the ground
+			this.rot( `Bip001_${ s }_Thigh`, mixp( 'thigh' ) );
+			this.rot( `Bip001_${ s }_Calf`, mixp( 'calf' ) );
+			this.rot( `Bip001_${ s }_HorseLink`, mixp( 'hock' ) );
+			this.rot( `Bip001_${ s }_Foot`, mixp( 'foot' ) );
+			// front legs: vertical when sitting, forearms forward on the ground when lying
+			this.rot( `Bip001_${ s }_UpperArm`, mixp( 'ua' ) );
+			this.rot( `Bip001_${ s }_Forearm`, mixp( 'fa' ) );
+			this.rot( `Bip001_${ s }_Hand`, mixp( 'hand' ) );
 
 		}
 

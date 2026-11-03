@@ -12,7 +12,8 @@ import { Controls } from './controls.js';
 import { Pollen } from './pollen.js';
 import { MeadowAudio } from './audio.js';
 import { Weather, sunElevation } from './weather.js';
-import { Jaguar } from './jaguar.js';
+import { Jaguar, POSE } from './jaguar.js';
+import { DeerHerd } from './deer.js';
 
 const QUALITY = {
 	// three nested grass rings, each coarser (wider blades) than the last:
@@ -99,6 +100,8 @@ async function start() {
 
 	const jaguar = new Jaguar();
 	scene.add( jaguar.group );
+	const herd = new DeerHerd();
+	scene.add( herd.group );
 
 	const pollen = new Pollen( isMobile ? 2500 : 6000 );
 	const weather = new Weather();
@@ -237,6 +240,27 @@ async function start() {
 
 	} ).catch( ( e ) => console.warn( 'jaguar failed to load', e ) );
 
+	// a small herd of red deer grazing ahead and to the side
+	{
+
+		const a = controls.yaw + 0.5;
+		const f = new THREE.Vector3( - Math.sin( a ), 0, - Math.cos( a ) );
+		herd.load( new THREE.Vector3( controls.pos.x + f.x * 55, 0, controls.pos.z + f.z * 55 ), 3 )
+			.catch( ( e ) => console.warn( 'deer failed to load', e ) );
+
+	}
+
+	// an animal pushes plants aside and casts a soft shadow along the sun direction
+	function setActor( i, p, radius, bodyHeight ) {
+
+		U.actors[ i ].value.set( p.x, p.y, p.z, radius );
+		const sd = U.sunDir.value;
+		const k = Math.min( 6, bodyHeight / Math.max( sd.y, 0.2 ) );
+		U.actorShadows[ i ].value.set( p.x - sd.x * k, p.z - sd.z * k,
+			0.6 * THREE.MathUtils.smoothstep( sd.y, - 0.02, 0.12 ) * ( 1 - settings.clouds * 0.4 ), radius * 1.05 );
+
+	}
+
 	function setView( v ) {
 
 		settings.view = v;
@@ -306,6 +330,7 @@ async function start() {
 	gui.add( controls, 'tour' ).name( 'auto tour' ).listen();
 	gui.add( controls, 'mouseSteer' ).name( 'look follows cursor' );
 	gui.add( settings, 'view', [ 'first person', 'third person (jaguar)' ] ).name( 'view (V)' ).onChange( setView ).listen();
+	gui.add( herd.group, 'visible' ).name( 'deer' );
 
 	// ------------------------------------------------------------ sound
 	const audio = new MeadowAudio();
@@ -437,13 +462,24 @@ async function start() {
 		if ( jaguar.ready ) {
 
 			// body pushes grass; soft shadow cast along the sun direction
-			U.actor.value.set( jaguar.pos.x, jaguar.pos.y, jaguar.pos.z, 2.2 + Math.min( jaguar.speed, 15 ) * 0.04 );
-			const sd = U.sunDir.value;
-			const k = Math.min( 6, 1.2 / Math.max( sd.y, 0.2 ) );
-			U.actorShadow.value.set( jaguar.pos.x - sd.x * k, jaguar.pos.z - sd.z * k,
-				0.6 * THREE.MathUtils.smoothstep( sd.y, - 0.02, 0.12 ) * ( 1 - settings.clouds * 0.4 ) );
+			setActor( 0, jaguar.pos, 2.2 + Math.min( jaguar.speed, 15 ) * 0.04, 1.2 );
 
 		}
+
+		if ( herd.ready && herd.group.visible && ! window.__deerFreeze ) {
+
+			const threats = [ { pos: jaguar.pos, speed: jaguar.speed, isPredator: true } ];
+			if ( ! third ) threats.push( { pos: camera.position, speed: controls.speed || 0, isPredator: false } );
+			herd.update( dt, threats, third ? jaguar.pos : controls.pos );
+
+		}
+
+		herd.deer.forEach( ( d, i ) => {
+
+			if ( herd.group.visible ) setActor( i + 1, d.pos, d.size * 0.3, d.size * 0.32 );
+			else U.actors[ i + 1 ].value.y = - 1e4;
+
+		} );
 		sky.update( camera );
 		terrain.update( camera );
 		grass.update( renderer, camera, controls.pusher );
@@ -535,7 +571,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { THREE, renderer, scene, camera, controls, settings, applySky, audio, jaguar, setView, setQuality( q ) {
+	window.__meadow = { THREE, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, POSE, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

@@ -38,8 +38,9 @@ export const U = {
 	particles: uniform( 0.6 ), // fraction of floating particles shown
 	mist: uniform( 0.35 ), // morning inversion / valley mist amount
 	twilight: uniform( 0 ), // 0..1 peaks around sunrise / sunset (belt of Venus, afterglow)
-	actor: uniform( new THREE.Vector4( 0, - 1e4, 0, 1.2 ) ), // jaguar body: xyz + push radius
-	actorShadow: uniform( new THREE.Vector3( 0, 0, 0 ) ), // ground shadow centre xz + strength
+	// animals pushing plants aside: xyz + push radius; shadows: centre xz, strength, radius
+	actors: [ 0, 1, 2, 3 ].map( () => uniform( new THREE.Vector4( 0, - 1e4, 0, 1.2 ) ) ),
+	actorShadows: [ 0, 1, 2, 3 ].map( () => uniform( new THREE.Vector4( 0, 0, 0, 1 ) ) ),
 
 	cloudCover: uniform( 0.5 ),
 	cloudDark: uniform( 0.45 ),
@@ -171,20 +172,37 @@ export const cloudShadow = Fn( ( [ xz ] ) => {
 
 } );
 
-// Push vector (xz, 0..1) that the jaguar's body applies to a plant at `xz`.
+// Push vector (xz, 0..1) that the animals' bodies apply to a plant at `xz`.
 export const actorPush = ( xz, y ) => {
 
-	const pd = xz.sub( U.actor.xz );
-	const pl = length( pd );
-	const near = smoothstep( 2.0, 0.8, abs( U.actor.y.sub( y ) ) );
-	const amt = smoothstep( U.actor.w, 0.0, pl ).mul( near );
-	return select( pl.greaterThan( 0.001 ), pd.div( pl ), vec2( 0 ) ).mul( amt );
+	let sum = vec2( 0 );
+	for ( const a of U.actors ) {
+
+		const pd = xz.sub( a.xz );
+		const pl = length( pd );
+		const near = smoothstep( 3.0, 1.0, abs( a.y.sub( y ) ) );
+		const amt = smoothstep( a.w, 0.0, pl ).mul( near );
+		sum = sum.add( select( pl.greaterThan( 0.001 ), pd.div( pl ), vec2( 0 ) ).mul( amt ) );
+
+	}
+
+	return sum;
 
 };
 
-// Soft contact / cast shadow of the jaguar on the meadow (multiplies direct light).
-export const actorShadowAt = ( xz ) => float( 1.0 ).sub(
-	U.actorShadow.z.mul( smoothstep( U.actor.w.mul( 1.05 ), U.actor.w.mul( 0.15 ), length( xz.sub( U.actorShadow.xy ) ) ) ) );
+// Soft contact / cast shadows of the animals on the meadow (multiplies direct light).
+export const actorShadowAt = ( xz ) => {
+
+	let lit = float( 1.0 );
+	for ( const sh of U.actorShadows ) {
+
+		lit = lit.mul( float( 1.0 ).sub( sh.z.mul( smoothstep( sh.w, sh.w.mul( 0.15 ), length( xz.sub( sh.xy ) ) ) ) ) );
+
+	}
+
+	return lit;
+
+};
 
 // Brightness lift of the canopy as a gust passes: bent blades expose their
 // glossier, lighter faces. This is what makes wind waves readable far away.
