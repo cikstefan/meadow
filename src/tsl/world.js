@@ -6,7 +6,7 @@
 
 import * as THREE from 'three/webgpu';
 import {
-	Fn, uniform, float, vec2, vec3, mix, smoothstep, clamp, max, pow, exp, dot, normalize, length, cameraPosition
+	Fn, uniform, float, vec2, vec3, mix, smoothstep, clamp, max, pow, exp, dot, normalize, length, cameraPosition, select, abs
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from './noise.js';
 
@@ -28,6 +28,16 @@ export const U = {
 	windDir: uniform( new THREE.Vector2( 1, 0.35 ).normalize() ),
 	windStrength: uniform( 0.55 ),
 	windSpeed: uniform( 3.2 ),
+	// integrated offsets (advanced on the CPU every frame) so wind / cloud speed
+	// and direction can change smoothly without the whole field jumping
+	windOffset: uniform( new THREE.Vector2() ), // ∫ windDir * windSpeed dt
+	windPhase: uniform( 0 ), // ∫ windSpeed dt
+	cloudOffset: uniform( new THREE.Vector2() ),
+	skyOffset: uniform( new THREE.Vector2() ),
+	driftOffset: uniform( new THREE.Vector3() ), // pollen drift ∫ W * strength dt
+	particles: uniform( 0.6 ), // fraction of floating particles shown
+	mist: uniform( 0.35 ), // morning inversion / valley mist amount
+	twilight: uniform( 0 ), // 0..1 peaks around sunrise / sunset (belt of Venus, afterglow)
 
 	cloudCover: uniform( 0.5 ),
 	cloudDark: uniform( 0.45 ),
@@ -123,7 +133,7 @@ export const fieldFlowers = Fn( ( [ xz ] ) => {
 // in the wind direction, which is what produces the "waves" in tall grass.
 export const windField = Fn( ( [ xz ] ) => {
 
-	const scroll = U.windDir.mul( U.time.mul( U.windSpeed ) );
+	const scroll = U.windOffset;
 	const p = xz.sub( scroll );
 	// big rolling waves (visible across the whole valley) + gusts + flutter
 	const n0 = vnoise( xz.sub( scroll.mul( 0.85 ) ).div( 38.0 ).add( vec2( 31.0, 7.0 ) ) );
@@ -138,8 +148,7 @@ export const windField = Fn( ( [ xz ] ) => {
 // CPU mirror of windField (drives the wind audio)
 export function windFieldJS( x, z ) {
 
-	const t = U.time.value * U.windSpeed.value;
-	const dx = U.windDir.value.x * t, dz = U.windDir.value.y * t;
+	const dx = U.windOffset.value.x, dz = U.windOffset.value.y;
 	const n0 = vnoiseJS( ( x - dx * 0.85 ) / 38 + 31, ( z - dz * 0.85 ) / 38 + 7 );
 	const n1 = vnoiseJS( ( x - dx ) / 11, ( z - dz ) / 11 );
 	const n2 = vnoiseJS( ( x - dx * 1.35 ) / 3.7 + 17, ( z - dz * 1.35 ) / 3.7 + 5 );
@@ -153,7 +162,7 @@ export function windFieldJS( x, z ) {
 // 0..1 multiplier for direct sunlight under drifting cloud shadows
 export const cloudShadow = Fn( ( [ xz ] ) => {
 
-	const p = xz.sub( U.windDir.mul( U.time.mul( U.cloudSpeed ) ) );
+	const p = xz.sub( U.cloudOffset );
 	const c = vnoise( p.div( 85.0 ) ).mul( 0.7 ).add( vnoise( p.div( 27.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) );
 	const lit = smoothstep( U.cloudCover.sub( 0.1 ), U.cloudCover.add( 0.1 ), c );
 	return mix( float( 1.0 ).sub( U.cloudDark ), float( 1.0 ), lit );
@@ -177,15 +186,36 @@ export const skyColor = Fn( ( [ dir ] ) => {
 	const y = max( dir.y, 0.0 );
 	const col = mix( U.zenith, U.horizon, pow( float( 1.0 ).sub( y ), 4.0 ) ).toVar();
 	const mu = max( dot( dir, U.sunDir ), 0.0 );
-	// warm horizon glow on the sun side
-	col.assign( mix( col, U.horizonSun, pow( mu, 5.0 ).mul( pow( float( 1.0 ).sub( y ), 4.0 ) ).mul( 0.85 ) ) );
+	// warm horizon glow on the sun side: much wider and stronger around sunrise / sunset
+	const glowPow = mix( 5.0, 2.2, U.twilight );
+	col.assign( mix( col, U.horizonSun, pow( mu, glowPow ).mul( pow( float( 1.0 ).sub( y ), mix( 4.0, 2.6, U.twilight ) ) ).mul( mix( 0.85, 0.95, U.twilight ) ) ) );
+	// belt of Venus: pink band above the dark earth-shadow, opposite the sun
+	const sunH = normalize( vec3( U.sunDir.x, 0.0, U.sunDir.z ).add( vec3( 1e-4, 0, 0 ) ) );
+	const anti = pow( max( dot( normalize( vec3( dir.x, 0.0, dir.z ).add( vec3( 0, 0, 1e-4 ) ) ), sunH.negate() ), 0.0 ), 1.5 );
+	const belt = smoothstep( 0.03, 0.1, y ).mul( smoothstep( 0.36, 0.12, y ) );
+	const earthShadow = smoothstep( 0.07, 0.0, y );
+	col.addAssign( vec3( 0.46, 0.2, 0.32 ).mul( U.twilight.mul( belt ).mul( anti ).mul( 0.55 ) ) );
+	col.mulAssign( float( 1.0 ).sub( U.twilight.mul( earthShadow ).mul( anti ).mul( 0.35 ) ) );
 	// mie halo
 	col.addAssign( U.sunColor.mul( pow( mu, 12.0 ).mul( 0.045 ).add( pow( mu, 110.0 ).mul( 0.2 ) ) ) );
+	// inversion: a bright band of mist lying along the horizon
+	col.assign( mix( col, mistColor( dir ), U.mist.mul( smoothstep( 0.11, 0.0, y ) ).mul( 0.8 ) ) );
 	return col;
 
 } );
 
-// Aerial perspective: blend toward the sky colour seen in that direction.
+// Colour of sunlit mist seen in a direction (strong forward scattering toward the sun).
+export const mistColor = Fn( ( [ dir ] ) => {
+
+	const mu = max( dot( dir, U.sunDir ), 0.0 );
+	return U.horizon.mul( 0.55 ).add( U.skyAmb.mul( 1.3 ) )
+		.add( U.sunColor.mul( mix( 0.1, 0.75, pow( mu, 4.0 ) ) ) )
+		.add( U.horizonSun.mul( U.twilight.mul( pow( mu, 2.0 ) ).mul( 0.4 ) ) );
+
+} );
+
+// Aerial perspective: blend toward the sky colour seen in that direction,
+// then integrate an exponential height fog (valley mist / inversion layer).
 export const applyFog = Fn( ( [ color, worldPos ] ) => {
 
 	const d = worldPos.sub( cameraPosition );
@@ -195,7 +225,19 @@ export const applyFog = Fn( ( [ color, worldPos ] ) => {
 	const fogCol = skyColor( fogDir );
 	const amt = float( 1.0 ).sub( exp( dist.mul( U.fogDensity ).negate() ) );
 	const edge = smoothstep( U.terrainFar.mul( 0.62 ), U.terrainFar, dist );
-	return mix( color, fogCol, max( amt, edge ) );
+	const fogged = mix( color, fogCol, max( amt, edge ) );
+
+	// analytic integral of a * exp(-b (y - base)) along the view ray
+	const b = 0.42;
+	const base = float( - 1.0 );
+	const a = U.mist.mul( 0.05 );
+	const e0 = exp( max( cameraPosition.y.sub( base ), - 1.5 ).mul( - b ) );
+	const k = dir.y.mul( dist ).mul( b );
+	const term = select( abs( k ).greaterThan( 1e-3 ), float( 1.0 ).sub( exp( k.negate() ) ).div( k ), float( 1.0 ).sub( k.mul( 0.5 ) ) ).mul( dist );
+	// drifting patchiness
+	const patch = mix( 0.5, 1.3, vnoise( worldPos.xz.sub( U.windOffset.mul( 0.15 ) ).div( 70.0 ) ) );
+	const mistAmt = float( 1.0 ).sub( exp( a.mul( e0 ).mul( term ).mul( patch ).negate() ) );
+	return mix( fogged, mistColor( dir ), clamp( mistAmt, 0.0, 0.97 ) );
 
 } );
 
@@ -228,3 +270,17 @@ export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt,
 
 } );
 
+
+// Advance the integrated wind / cloud offsets (call once per frame).
+export function advanceWind( dt ) {
+
+	const d = U.windDir.value, sp = U.windSpeed.value;
+	U.windOffset.value.addScaledVector( d, sp * dt );
+	U.windPhase.value += sp * dt;
+	U.cloudOffset.value.addScaledVector( d, U.cloudSpeed.value * dt );
+	U.skyOffset.value.addScaledVector( d, 0.0035 * dt );
+	const k = U.windStrength.value * dt;
+	U.driftOffset.value.x += d.x * k;
+	U.driftOffset.value.z += d.y * k;
+
+}

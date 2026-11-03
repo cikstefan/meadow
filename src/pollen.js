@@ -6,7 +6,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, uniform, float, vec3, vec4, instanceIndex, positionLocal, uv, varying, mod, sin, cos, pow, clamp,
-	dot, normalize, length, smoothstep, mix, cameraPosition
+	dot, normalize, length, smoothstep, mix, cameraPosition, select
 } from 'three/tsl';
 import { pcg } from './tsl/noise.js';
 import { U } from './tsl/world.js';
@@ -37,19 +37,21 @@ export class Pollen {
 			const W = vec3( U.windDir.x, 0, U.windDir.y );
 
 			// drift with the wind + lazy looping turbulence
-			const vel = W.mul( U.windStrength.mul( mix( 1.2, 2.6, seed ) ) ).add( vec3( 0, mix( - 0.04, 0.06, r.y ), 0 ) );
+			const drift = U.driftOffset.mul( mix( 1.2, 2.6, seed ) );
 			const swirl = vec3(
 				sin( t.mul( mix( 0.3, 0.9, r.x ) ).add( seed.mul( 40.0 ) ) ),
 				sin( t.mul( mix( 0.4, 1.1, r.z ) ).add( seed.mul( 13.0 ) ) ).mul( 0.4 ),
 				cos( t.mul( mix( 0.3, 0.8, r.y ) ).add( seed.mul( 71.0 ) ) )
 			).mul( 0.35 );
-			const base = r.mul( box ).add( vel.mul( t ) ).add( swirl );
+			const base = r.mul( box ).add( drift ).add( swirl );
 
 			// wrap into a box centred on the camera; keep near the ground
 			const rel = mod( base.sub( cameraPosition ).add( box * 0.5 ), box ).sub( box * 0.5 );
 			const p = vec3( cameraPosition.x.add( rel.x ), this.u.ground.add( r.y.mul( r.y ).mul( 3.2 ) ).add( 0.15 ).add( swirl.y ), cameraPosition.z.add( rel.z ) );
 
-			const size = mix( 0.004, 0.011, pow( seed, 3.0 ) );
+			// only a fraction of the specks is shown (auto-weather varies it)
+			const shown = select( pcg( i.add( 3571 ) ).lessThan( U.particles ), float( 1.0 ), float( 0.0 ) );
+			const size = mix( 0.005, 0.013, pow( seed, 3.0 ) ).mul( shown );
 			const world = p.add( this.u.right.mul( positionLocal.x.mul( size ) ) ).add( this.u.up.mul( positionLocal.y.mul( size ) ) );
 
 			const d = length( p.sub( cameraPosition ) );
@@ -67,7 +69,8 @@ export class Pollen {
 			const V = normalize( cameraPosition.sub( vWorld ) );
 			const back = pow( clamp( dot( V.negate(), U.sunDir ), 0, 1 ), 6.0 );
 			const lit = smoothstep( - 0.02, 0.08, U.sunDir.y );
-			const col = U.sunColor.mul( back.mul( 1.6 ).add( 0.05 ) ).mul( lit ).add( U.skyAmb.mul( 0.15 ) ).toVar();
+			// lit fluff: visible front-lit too (diffuse), sparkling when backlit
+			const col = U.sunColor.mul( back.mul( 2.2 ).add( 0.22 ) ).mul( lit ).add( U.skyAmb.mul( 0.5 ) ).toVar();
 			// night: drifting blue spores, gently pulsing
 			const pulse = sin( U.time.mul( 1.7 ).add( vWorld.x.mul( 3.1 ) ).add( vWorld.z.mul( 2.3 ) ) ).mul( 0.4 ).add( 0.6 );
 			col.addAssign( U.glowColor.mul( U.night.mul( U.glow ).mul( pulse ).mul( 0.6 ) ) );

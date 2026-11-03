@@ -14,10 +14,11 @@ import { U, skyColor } from './tsl/world.js';
 const KEYS = [
 	// night: deep blue sky, cool blue ambient everywhere (the moon is handled separately)
 	{ e: - 16, zen: [ 0.002, 0.005, 0.018 ], hor: [ 0.009, 0.016, 0.042 ], hsun: [ 0.01, 0.018, 0.045 ], sun: [ 0, 0, 0 ], amb: [ 0.016, 0.03, 0.075 ] },
-	{ e: - 8, zen: [ 0.006, 0.012, 0.038 ], hor: [ 0.035, 0.04, 0.075 ], hsun: [ 0.16, 0.07, 0.06 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.03, 0.042, 0.095 ] },
-	{ e: - 4, zen: [ 0.02, 0.04, 0.11 ], hor: [ 0.2, 0.15, 0.18 ], hsun: [ 0.7, 0.26, 0.12 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.065, 0.07, 0.13 ] },
-	{ e: - 1, zen: [ 0.04, 0.07, 0.17 ], hor: [ 0.35, 0.24, 0.26 ], hsun: [ 1.1, 0.4, 0.14 ], sun: [ 0.9, 0.25, 0.05 ], amb: [ 0.08, 0.08, 0.13 ] },
-	{ e: 3, zen: [ 0.05, 0.11, 0.3 ], hor: [ 0.55, 0.42, 0.36 ], hsun: [ 1.35, 0.66, 0.28 ], sun: [ 2.6, 1.25, 0.45 ], amb: [ 0.14, 0.15, 0.22 ] },
+	// twilight: deep indigo zenith, violet belt, blood-orange afterglow on the sun side
+	{ e: - 8, zen: [ 0.006, 0.011, 0.04 ], hor: [ 0.045, 0.035, 0.08 ], hsun: [ 0.3, 0.08, 0.07 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.03, 0.04, 0.095 ] },
+	{ e: - 4, zen: [ 0.018, 0.03, 0.1 ], hor: [ 0.24, 0.12, 0.2 ], hsun: [ 1.25, 0.28, 0.1 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.065, 0.06, 0.12 ] },
+	{ e: - 1, zen: [ 0.035, 0.06, 0.17 ], hor: [ 0.5, 0.26, 0.3 ], hsun: [ 1.9, 0.52, 0.13 ], sun: [ 1.0, 0.26, 0.05 ], amb: [ 0.09, 0.08, 0.13 ] },
+	{ e: 3, zen: [ 0.05, 0.1, 0.3 ], hor: [ 0.72, 0.45, 0.36 ], hsun: [ 1.85, 0.78, 0.28 ], sun: [ 2.6, 1.15, 0.38 ], amb: [ 0.14, 0.14, 0.21 ] },
 	{ e: 9, zen: [ 0.07, 0.17, 0.46 ], hor: [ 0.6, 0.55, 0.52 ], hsun: [ 1.25, 0.78, 0.42 ], sun: [ 3.4, 2.15, 1.15 ], amb: [ 0.2, 0.24, 0.32 ] },
 	{ e: 20, zen: [ 0.08, 0.22, 0.58 ], hor: [ 0.55, 0.64, 0.76 ], hsun: [ 0.95, 0.86, 0.72 ], sun: [ 3.3, 2.7, 2.0 ], amb: [ 0.2, 0.27, 0.38 ] },
 	{ e: 40, zen: [ 0.07, 0.21, 0.6 ], hor: [ 0.5, 0.62, 0.8 ], hsun: [ 0.78, 0.8, 0.82 ], sun: [ 3.3, 3.0, 2.55 ], amb: [ 0.2, 0.27, 0.4 ] },
@@ -62,7 +63,7 @@ export class Sky {
 			const y = dir.y;
 
 			// cumulus layer projected on a plane
-			const drift = U.windDir.mul( U.time.mul( 0.0035 ) );
+			const drift = U.skyOffset;
 			const p = dir.xz.div( max( y, 0.0 ).add( 0.12 ) ).mul( 0.9 ).add( drift ).toVar();
 			const f = vnoise( p ).mul( 0.5 )
 				.add( vnoise( p.mul( 2.03 ).add( vec2( 3.1, 1.7 ) ) ).mul( 0.25 ) )
@@ -73,7 +74,10 @@ export class Sky {
 			// darker, thicker cores; bright sun-facing rims (silver lining)
 			const core = smoothstep( this.u.skyCover.add( 0.08 ), this.u.skyCover.add( 0.45 ), f );
 			const shadowCol = mix( U.skyAmb.mul( 1.6 ), U.horizon.mul( 0.7 ), 0.4 );
-			const litCol = U.sunColor.mul( 0.32 ).add( U.horizon.mul( 0.55 ) );
+			// at sunrise / sunset clouds are lit from below: fiery near the sun, pink elsewhere
+			const litCol = U.sunColor.mul( 0.32 ).add( U.horizon.mul( 0.55 ) )
+				.add( U.horizonSun.mul( U.twilight.mul( pow( mu, 2.0 ).mul( 0.9 ).add( 0.12 ) ) ) )
+				.add( vec3( 0.32, 0.12, 0.2 ).mul( U.twilight.mul( 0.35 ) ) );
 			const cloudCol = mix( litCol, shadowCol, core.mul( 0.75 ) )
 				.add( U.sunColor.mul( pow( mu, 6.0 ).mul( 0.35 ).mul( float( 1.0 ).sub( core ) ) ) );
 			// --- night sky: stars + a faint milky way, hidden by clouds and haze
@@ -136,6 +140,7 @@ export class Sky {
 		// handed to the moon (opposite side of the sky) without a visible pop.
 		const night = THREE.MathUtils.smoothstep( - elevationDeg, 2, 12 );
 		U.night.value = night;
+		U.twilight.value = Math.exp( - Math.pow( ( elevationDeg - 0.5 ) / 6.5, 2 ) );
 		const isMoon = elevationDeg < - 4;
 		const lightEl = isMoon ? 32 : elevationDeg;
 		const lightAz = isMoon ? azimuthDeg + 180 + 25 : azimuthDeg;

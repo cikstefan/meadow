@@ -41,7 +41,13 @@ function bladeGeometry( segments ) {
 
 export class Grass {
 
-	constructor( { bladesPerAxis, area, lodScale = 1, innerRadius = 0, widthScale = 1, lods = null, renderOrder = RENDER_ORDER } ) {
+	/**
+	 * fadeIn / fadeOut: [start, end] distances (m) of a stochastic density crossfade.
+	 * Overlapping rings use complementary bands, so blades keep their real height
+	 * and only their *count* hands over from one ring to the next (no seam).
+	 */
+	constructor( { bladesPerAxis, area, lodScale = 1, widthScale = 1, lods = null, renderOrder = RENDER_ORDER,
+		fadeIn = null, fadeOut = null, aoMin = 0.2, groundBlend = 0 } ) {
 
 		this.N = bladesPerAxis;
 		this.area = area;
@@ -60,8 +66,11 @@ export class Grass {
 			widthScale: uniform( GRASS_DEFAULTS.widthScale ),
 			clumpSize: uniform( GRASS_DEFAULTS.clumpSize ),
 			epoch: uniform( 0 ),
-			inner: uniform( innerRadius ), // > 0: ring system that starts where a nearer one ends
+			fadeIn: uniform( new THREE.Vector2( ...( fadeIn || [ - 2, - 1 ] ) ) ),
+			fadeOut: uniform( new THREE.Vector2( ...( fadeOut || [ area * 0.35, area * 0.485 ] ) ) ),
 			widthMul: uniform( widthScale ),
+			aoMin: uniform( aoMin ),
+			groundBlend: uniform( groundBlend ),
 		};
 
 		const count = this.count;
@@ -197,7 +206,9 @@ export class Grass {
 
 			const rel = pos.sub( u.cullPos );
 			const distXZ = length( rel.xz );
-			const inRadius = distXZ.lessThan( u.radius ).and( distXZ.greaterThan( u.inner.mul( 0.7 ) ) );
+			// stochastic crossfade: a blade survives while its stable per-cell hash < keep(distance)
+			const keep = smoothstep( u.fadeIn.x, u.fadeIn.y, distXZ ).mul( float( 1.0 ).sub( smoothstep( u.fadeOut.x, u.fadeOut.y, distXZ ) ) );
+			const inRadius = distXZ.lessThan( u.radius ).and( hash2i( int( key.x ).add( 5 ), int( key.y ) ).lessThan( keep ) );
 
 			// sphere-vs-frustum test in clip space (conservative)
 			const centre = vec3( pos.x, pos.y.add( h.mul( 0.5 ) ), pos.z );
@@ -265,11 +276,11 @@ export class Grass {
 			const seed = C.w;
 
 			// fade the outer ring by shrinking blades -> no visible boundary
-			const dj = distXZ.mul( float( 0.94 ).add( seed.mul( 0.12 ) ) );
-			// outer fade, and (ring systems) inner fade-in where the nearer system fades out
-			const edge = smoothstep( u.radius, u.radius.mul( 0.8 ), dj )
-				.mul( clamp( dj.sub( u.inner.mul( 0.72 ) ).div( u.inner.mul( 0.26 ).add( 1e-3 ) ), 0.0, 1.0 ) );
-			const h = A.w.mul( edge );
+			// density crossfade (see compute): blades grow in/out over a short margin
+			// instead of popping; heights are otherwise untouched -> no visible seam
+			const keep = smoothstep( u.fadeIn.x, u.fadeIn.y, distXZ ).mul( float( 1.0 ).sub( smoothstep( u.fadeOut.x, u.fadeOut.y, distXZ ) ) );
+			const cellHash = hash2i( int( K.x ).add( 5 ), int( K.y ) );
+			const h = A.w.mul( smoothstep( 0.0, 0.08, keep.sub( cellHash ) ) );
 			const bend = B.y;
 			const yaw = B.z;
 			const wind = D.x;
@@ -284,7 +295,7 @@ export class Grass {
 			const Wp = vec3( U.windDir.y.negate(), 0, U.windDir.x );
 
 			// sway: a travelling phase (moves with the gust field) + per-blade flutter
-			const phase = dot( root.xz, U.windDir ).mul( 0.42 ).sub( U.time.mul( U.windSpeed ).mul( 0.42 ) ).add( seed.mul( 1.5 ) );
+			const phase = dot( root.xz, U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( seed.mul( 1.5 ) );
 			const flutter = sin( U.time.mul( mix( 2.2, 4.2, seed ) ).add( seed.mul( 61.0 ) ) );
 			const wAmt = wind.mul( float( 1.0 ).add( sin( phase ).mul( 0.35 ) ) );
 			const wh = wAmt.mul( h );
@@ -386,10 +397,10 @@ export class Grass {
 			// behaves like a volume, stabilises lighting at distance)
 			const nB = normalize( vN.add( vR.mul( vS.mul( 0.55 ) ) ) ).mul( faceDirection );
 			const far = smoothstep( 4.0, 40.0, vDist );
-			const N = normalize( mix( nB, vGround, mix( 0.22, 0.65, far ) ) );
+			const N = normalize( mix( nB, vGround, clamp( mix( 0.22, 0.65, far ).add( u.groundBlend ), 0.0, 1.0 ) ) );
 
 			// --- occlusion: dark near the ground, inside dense canopy
-			const ao = mix( 0.2, 1.0, pow( t, 0.85 ) );
+			const ao = mix( u.aoMin, 1.0, pow( t, 0.85 ) );
 
 			const transmit = mix( 0.55, 1.0, t ).mul( mix( 1.0, 0.45, dryness ) );
 			const spec = mix( 0.03, 0.18, t ).mul( mix( 1.0, 0.4, dryness ) );

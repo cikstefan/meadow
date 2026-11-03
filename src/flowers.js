@@ -277,7 +277,7 @@ export class Flowers {
 			const lean = vec3( cos( yaw ), 0, sin( yaw ) ).mul( mix( 0.04, 0.16, seed ) );
 
 			// flower heads bob on their stems: slower, larger motion than blades
-			const phase = dot( root.xz, U.windDir ).mul( 0.42 ).sub( U.time.mul( U.windSpeed ).mul( 0.42 ) );
+			const phase = dot( root.xz, U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) );
 			const bobF = sin( U.time.mul( mix( 1.3, 2.4, seed ) ).add( seed.mul( 40.0 ) ) );
 			const wh = wind.mul( h ).mul( float( 1.0 ).add( sin( phase ).mul( 0.4 ) ) );
 

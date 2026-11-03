@@ -3,7 +3,7 @@ import { pass, vec3, uv, smoothstep, length, float, mix } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
 
-import { U, fieldsJS, windFieldJS } from './tsl/world.js';
+import { U, fieldsJS, windFieldJS, advanceWind } from './tsl/world.js';
 import { Grass } from './grass.js';
 import { Flowers } from './flowers.js';
 import { Terrain } from './terrain.js';
@@ -11,13 +11,15 @@ import { Sky } from './sky.js';
 import { Controls } from './controls.js';
 import { Pollen } from './pollen.js';
 import { MeadowAudio } from './audio.js';
+import { Weather, sunElevation } from './weather.js';
 
 const QUALITY = {
-	// blades/area: dense near field; far/farArea: coarse ring of wide blades out to the hills
-	low: { blades: 576, area: 56, far: 384, farArea: 240, flowers: 224, dpr: 1, lod: 0.8 },
-	medium: { blades: 896, area: 76, far: 512, farArea: 300, flowers: 304, dpr: 1.25, lod: 1 },
-	high: { blades: 1280, area: 96, far: 640, farArea: 360, flowers: 384, dpr: 1.5, lod: 1.15 },
-	ultra: { blades: 1664, area: 120, far: 896, farArea: 440, flowers: 480, dpr: 2, lod: 1.4 },
+	// three nested grass rings, each coarser (wider blades) than the last:
+	// blades/area = dense near field, mid/midArea, far/farArea out to the hills
+	low: { blades: 576, area: 56, mid: 512, midArea: 150, far: 384, farArea: 360, flowers: 224, dpr: 1, lod: 0.8 },
+	medium: { blades: 896, area: 76, mid: 704, midArea: 190, far: 512, farArea: 400, flowers: 304, dpr: 1.25, lod: 1 },
+	high: { blades: 1280, area: 96, mid: 896, midArea: 240, far: 640, farArea: 440, flowers: 384, dpr: 1.5, lod: 1.15 },
+	ultra: { blades: 1664, area: 120, mid: 1152, midArea: 300, far: 768, farArea: 500, flowers: 480, dpr: 2, lod: 1.4 },
 };
 
 const params = new URLSearchParams( location.search );
@@ -32,6 +34,9 @@ const settings = {
 	grassHeight: parseFloat( params.get( 'grass' ) || '1.6' ),
 	dryPatches: parseFloat( params.get( 'dry' ) || '0' ),
 	flowerGlow: 1.0,
+	mist: parseFloat( params.get( 'mist' ) || '0.35' ),
+	particles: parseFloat( params.get( 'particles' ) || '0.6' ),
+	autoTime: params.get( 'auto' ) === '1',
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
 	exposure: 1.0,
@@ -68,7 +73,8 @@ async function start() {
 	const sky = new Sky();
 	scene.add( sky.mesh );
 
-	const pollen = new Pollen( isMobile ? 1200 : 2500 );
+	const pollen = new Pollen( isMobile ? 2500 : 6000 );
+	const weather = new Weather();
 	scene.add( pollen.mesh );
 
 	const controls = new Controls( camera, renderer.domElement );
@@ -88,28 +94,38 @@ async function start() {
 
 	}
 
-	let grass = null, farGrass = null, flowers = null, terrain = null;
+	let grass = null, midGrass = null, farGrass = null, flowers = null, terrain = null;
+	const grassRings = () => [ grass, midGrass, farGrass ].filter( Boolean );
 
 	function buildWorld() {
 
 		const q = QUALITY[ settings.quality ];
-		if ( grass ) grass.dispose();
-		if ( farGrass ) farGrass.dispose();
+		for ( const g of grassRings() ) g.dispose();
 		if ( flowers ) flowers.dispose();
 		if ( terrain ) terrain.mesh.removeFromParent();
 
-		grass = new Grass( { bladesPerAxis: q.blades, area: q.area, lodScale: q.lod } );
-		grass.u.heightScale.value = settings.grassHeight;
-		scene.add( grass.group );
-
-		// waving grass all the way to the hills: a coarse ring of wide blades that
-		// fades in exactly where the dense near field fades out
-		farGrass = new Grass( {
-			bladesPerAxis: q.far, area: q.farArea, innerRadius: q.area * 0.5, widthScale: 3.2, renderOrder: 3,
-			lods: [ { segments: 3, maxDistance: 90 }, { segments: 1, maxDistance: Infinity } ],
+		// Complementary crossfade bands: ring k fades out over the same distances
+		// ring k+1 fades in, so blade *density* hands over while heights stay real.
+		const Rn = q.area * 0.5, Rm = q.midArea * 0.5, Rf = q.farArea * 0.5;
+		const bandN = [ Rn * 0.62, Rn * 0.96 ], bandM = [ Rm * 0.6, Rm * 0.96 ];
+		const nearSp = q.area / q.blades;
+		grass = new Grass( { bladesPerAxis: q.blades, area: q.area, lodScale: q.lod, fadeOut: bandN } );
+		midGrass = new Grass( {
+			bladesPerAxis: q.mid, area: q.midArea, renderOrder: 3, fadeIn: bandN, fadeOut: bandM,
+			widthScale: Math.sqrt( ( q.midArea / q.mid ) / nearSp ) * 1.6, aoMin: 0.32, groundBlend: 0.1,
+			lods: [ { segments: 4, maxDistance: Rn * 1.4 }, { segments: 2, maxDistance: Infinity } ],
 		} );
-		farGrass.u.heightScale.value = settings.grassHeight;
-		scene.add( farGrass.group );
+		farGrass = new Grass( {
+			bladesPerAxis: q.far, area: q.farArea, renderOrder: 5, fadeIn: bandM, fadeOut: [ Rf * 0.7, Rf * 0.97 ],
+			widthScale: Math.sqrt( ( q.farArea / q.far ) / nearSp ) * 1.7, aoMin: 0.45, groundBlend: 0.2,
+			lods: [ { segments: 2, maxDistance: Rm * 1.3 }, { segments: 1, maxDistance: Infinity } ],
+		} );
+		for ( const g of grassRings() ) {
+
+			g.u.heightScale.value = settings.grassHeight;
+			scene.add( g.group );
+
+		}
 
 		flowers = new Flowers( { perAxis: q.flowers, area: q.area * 0.92, grassArea: q.area } );
 		flowers.u.heightScale.value = settings.grassHeight;
@@ -121,7 +137,7 @@ async function start() {
 
 		renderer.setPixelRatio( Math.min( window.devicePixelRatio, q.dpr ) );
 		resize();
-		stats.blades = q.blades * q.blades + q.far * q.far;
+		stats.blades = q.blades * q.blades + q.mid * q.mid + q.far * q.far;
 
 	}
 
@@ -146,13 +162,15 @@ async function start() {
 	function applySky() {
 
 		const h = settings.hour;
-		const el = 58 * Math.sin( Math.PI * ( h - 6 ) / 12 ) - ( h < 6 || h > 18 ? 4 : 0 );
+		const el = sunElevation( h );
 		const az = 90 + ( h - 6 ) / 12 * 180;
 		sky.setAtmosphere( el, az, settings.clouds );
 		// eyes adapt at night: lift exposure so the moonlit meadow stays readable
 		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * 0.7 );
 		U.dry.value = settings.dryPatches;
 		U.glow.value = settings.flowerGlow;
+		U.mist.value = settings.mist;
+		U.particles.value = settings.particles;
 		sky.az = az;
 		const wa = THREE.MathUtils.degToRad( settings.windAngle );
 		U.windDir.value.set( Math.cos( wa ), Math.sin( wa ) );
@@ -168,28 +186,33 @@ async function start() {
 	// ------------------------------------------------------------ gui
 	const gui = new GUI( { title: 'Meadow' } );
 	if ( isMobile || params.has( 'nogui' ) ) gui.close();
-	gui.add( settings, 'hour', 0, 24, 0.05 ).name( 'time of day' ).onChange( applySky );
-	gui.add( settings, 'clouds', 0, 1, 0.01 ).onChange( applySky );
-	gui.add( settings, 'wind', 0, 1.6, 0.01 ).onChange( applySky );
-	gui.add( settings, 'windAngle', 0, 360, 1 ).name( 'wind direction' ).onChange( applySky );
+	gui.add( settings, 'hour', 0, 24, 0.05 ).name( 'time of day' ).onChange( applySky ).listen();
+	gui.add( settings, 'clouds', 0, 1, 0.01 ).onChange( applySky ).listen();
+	gui.add( settings, 'wind', 0, 1.6, 0.01 ).onChange( applySky ).listen();
+	gui.add( settings, 'windAngle', 0, 360, 1 ).name( 'wind direction' ).onChange( applySky ).listen();
 	gui.add( settings, 'grassHeight', 0.3, 3.0, 0.01 ).name( 'grass height' ).onChange( ( v ) => {
 
-		grass.u.heightScale.value = v;
-		farGrass.u.heightScale.value = v;
+		for ( const g of grassRings() ) {
+
+			g.u.heightScale.value = v;
+			g.invalidate();
+
+		}
+
 		flowers.u.heightScale.value = v;
-		grass.invalidate();
-		farGrass.invalidate();
 		flowers.invalidate();
 
 	} );
 	gui.add( settings, 'dryPatches', 0, 1, 0.01 ).name( 'dry patches' ).onChange( () => {
 
 		applySky();
-		grass.invalidate();
-		farGrass.invalidate();
+		for ( const g of grassRings() ) g.invalidate();
 
 	} );
 	gui.add( settings, 'flowerGlow', 0, 3, 0.01 ).name( 'night glow' ).onChange( applySky );
+	gui.add( settings, 'mist', 0, 1, 0.01 ).name( 'inversion / mist' ).onChange( applySky ).listen();
+	gui.add( settings, 'particles', 0, 1, 0.01 ).name( 'floating particles' ).onChange( applySky ).listen();
+	gui.add( settings, 'autoTime' ).name( 'auto time (12 min day)' );
 	gui.add( settings, 'flowers' ).onChange( ( v ) => ( flowers.group.visible = v ) );
 	gui.add( settings, 'exposure', 0.4, 2.0, 0.01 ).onChange( applySky );
 	gui.add( settings, 'bloom' );
@@ -312,11 +335,14 @@ async function start() {
 		clock.update();
 		const dt = Math.min( clock.getDelta(), 1 / 15 );
 		U.time.value += dt;
+		if ( weather.update( dt, settings ) ) applySky();
+		advanceWind( dt );
 
 		controls.update( dt, settings.tour );
 		sky.update( camera );
 		terrain.update( camera );
 		grass.update( renderer, camera, controls.pusher );
+		midGrass.update( renderer, camera, null );
 		farGrass.update( renderer, camera, null );
 		if ( settings.flowers ) flowers.update( renderer, camera, controls.pusher );
 		pollen.update( camera, controls._groundY );
