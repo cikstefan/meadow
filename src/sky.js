@@ -15,7 +15,8 @@ const KEYS = [
 	// night: deep blue sky, cool blue ambient everywhere (the moon is handled separately)
 	{ e: - 16, zen: [ 0.002, 0.005, 0.018 ], hor: [ 0.009, 0.016, 0.042 ], hsun: [ 0.01, 0.018, 0.045 ], sun: [ 0, 0, 0 ], amb: [ 0.016, 0.03, 0.075 ] },
 	// twilight: deep indigo zenith, violet belt, blood-orange afterglow on the sun side
-	{ e: - 8, zen: [ 0.006, 0.011, 0.04 ], hor: [ 0.045, 0.035, 0.08 ], hsun: [ 0.3, 0.08, 0.07 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.03, 0.04, 0.095 ] },
+	{ e: - 12, zen: [ 0.004, 0.008, 0.028 ], hor: [ 0.02, 0.025, 0.06 ], hsun: [ 0.09, 0.045, 0.065 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.022, 0.035, 0.085 ] },
+	{ e: - 8, zen: [ 0.008, 0.014, 0.045 ], hor: [ 0.08, 0.055, 0.1 ], hsun: [ 0.45, 0.13, 0.1 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.035, 0.045, 0.1 ] },
 	{ e: - 4, zen: [ 0.018, 0.03, 0.1 ], hor: [ 0.24, 0.12, 0.2 ], hsun: [ 1.25, 0.28, 0.1 ], sun: [ 0.0, 0.0, 0.0 ], amb: [ 0.065, 0.06, 0.12 ] },
 	{ e: - 1, zen: [ 0.035, 0.06, 0.17 ], hor: [ 0.5, 0.26, 0.3 ], hsun: [ 1.9, 0.52, 0.13 ], sun: [ 1.0, 0.26, 0.05 ], amb: [ 0.09, 0.08, 0.13 ] },
 	{ e: 3, zen: [ 0.05, 0.1, 0.3 ], hor: [ 0.72, 0.45, 0.36 ], hsun: [ 1.85, 0.78, 0.28 ], sun: [ 2.6, 1.15, 0.38 ], amb: [ 0.14, 0.14, 0.21 ] },
@@ -59,7 +60,8 @@ export class Sky {
 
 			const dir = normalize( positionWorld.sub( cameraPosition ) );
 			const col = skyColor( dir ).toVar();
-			const mu = max( dot( dir, U.sunDir ), 0.0 );
+			const mu = max( dot( dir, U.trueSunDir ), 0.0 );
+			const muMoon = max( dot( dir, U.sunDir ), 0.0 );
 			const y = dir.y;
 
 			// cumulus layer projected on a plane
@@ -79,7 +81,7 @@ export class Sky {
 				.add( U.horizonSun.mul( U.twilight.mul( pow( mu, 2.0 ).mul( 0.9 ).add( 0.12 ) ) ) )
 				.add( vec3( 0.32, 0.12, 0.2 ).mul( U.twilight.mul( 0.35 ) ) );
 			const cloudCol = mix( litCol, shadowCol, core.mul( 0.75 ) )
-				.add( U.sunColor.mul( pow( mu, 6.0 ).mul( 0.35 ).mul( float( 1.0 ).sub( core ) ) ) );
+				.add( U.trueSunColor.mul( pow( mu, 6.0 ).mul( 0.35 ).mul( float( 1.0 ).sub( core ) ) ) );
 			// --- night sky: stars + a faint milky way, hidden by clouds and haze
 			const above = smoothstep( 0.0, 0.12, y );
 			const bandN = normalize( vec3( 0.35, 0.5, 0.79 ) );
@@ -119,8 +121,12 @@ export class Sky {
 
 			// sun disk (HDR, picked up by bloom), dimmed behind clouds
 			// (at night the "sun" uniforms carry the moon: bigger, relatively brighter disk)
-			const disk = smoothstep( mix( 0.99985, 0.99975, U.night ), mix( 0.99995, 0.9999, U.night ), mu ).mul( float( 1.0 ).sub( dens.mul( 0.85 ) ) );
-			col.addAssign( U.sunColor.mul( disk ).mul( mix( 18.0, 30.0, U.night ) ) );
+			const clear = float( 1.0 ).sub( dens.mul( 0.85 ) );
+			const disk = smoothstep( 0.99985, 0.99995, mu ).mul( clear );
+			col.addAssign( U.trueSunColor.mul( disk ).mul( 18.0 ) );
+			// the moon: its own (bigger) disk, only while it lights the scene
+			const moonDisk = smoothstep( 0.99975, 0.9999, muMoon ).mul( clear ).mul( U.night );
+			col.addAssign( U.sunColor.mul( moonDisk ).mul( 30.0 ) );
 
 			// below horizon
 			const below = smoothstep( 0.0, - 0.08, y );
@@ -146,7 +152,7 @@ export class Sky {
 
 		// Below -4 deg the sun contributes nothing, so the directional light is
 		// handed to the moon (opposite side of the sky) without a visible pop.
-		const night = THREE.MathUtils.smoothstep( - elevationDeg, 2, 12 );
+		const night = THREE.MathUtils.smoothstep( - elevationDeg, 1, 15 );
 		U.night.value = night;
 		U.twilight.value = Math.exp( - Math.pow( ( elevationDeg - 0.5 ) / 6.5, 2 ) );
 		const isMoon = elevationDeg < - 4;
@@ -158,12 +164,18 @@ export class Sky {
 		U.sunDir.value.copy( this.sunDir );
 
 		const p = samplePalette( elevationDeg );
+		// the actual sun, always where it really is (sky effects use this)
+		{
+
+			const e = THREE.MathUtils.degToRad( elevationDeg ), a = THREE.MathUtils.degToRad( azimuthDeg );
+			U.trueSunDir.value.set( Math.sin( a ) * Math.cos( e ), Math.sin( e ), - Math.cos( a ) * Math.cos( e ) ).normalize();
+			U.trueSunColor.value.setRGB( ...p.sun.map( ( v ) => v * ( 1 - cloudiness * cloudiness * 0.3 ) ) );
+
+		}
 		if ( isMoon ) {
 
 			const k = THREE.MathUtils.smoothstep( - elevationDeg, 4, 10 );
 			p.sun = [ 0.09, 0.13, 0.24 ].map( ( v ) => v * k );
-			// moon-side horizon glow stays cool
-			p.hsun = p.hor.map( ( v, i ) => v + [ 0.01, 0.02, 0.04 ][ i ] * k );
 
 		}
 		const overcast = cloudiness * cloudiness * 0.5;

@@ -15,7 +15,12 @@ import { vnoise, vnoiseJS } from './noise.js';
 export const U = {
 	time: uniform( 0 ),
 
+	// sunDir / sunColor: the directional LIGHT (sun by day, moon at night) used for shading.
+	// trueSunDir / trueSunColor: the actual sun, used by the sky (glow, halo, twilight
+	// bands, mist scattering) so dusk and dawn never jump when the light hands over.
 	sunDir: uniform( new THREE.Vector3( 0.3, 0.2, - 1 ).normalize() ),
+	trueSunDir: uniform( new THREE.Vector3( 0.3, 0.2, - 1 ).normalize() ),
+	trueSunColor: uniform( new THREE.Color( 1, 0.8, 0.6 ) ),
 	sunColor: uniform( new THREE.Color( 1, 0.8, 0.6 ) ),
 	zenith: uniform( new THREE.Color( 0.2, 0.4, 0.7 ) ),
 	horizon: uniform( new THREE.Color( 0.7, 0.7, 0.7 ) ),
@@ -39,8 +44,8 @@ export const U = {
 	mist: uniform( 0.35 ), // morning inversion / valley mist amount
 	twilight: uniform( 0 ), // 0..1 peaks around sunrise / sunset (belt of Venus, afterglow)
 	// animals pushing plants aside: xyz + push radius; shadows: centre xz, strength, radius
-	actors: [ 0, 1, 2, 3 ].map( () => uniform( new THREE.Vector4( 0, - 1e4, 0, 1.2 ) ) ),
-	actorShadows: [ 0, 1, 2, 3 ].map( () => uniform( new THREE.Vector4( 0, 0, 0, 1 ) ) ),
+	actors: [ 0, 1, 2, 3, 4 ].map( () => uniform( new THREE.Vector4( 0, - 1e4, 0, 1.2 ) ) ),
+	actorShadows: [ 0, 1, 2, 3, 4 ].map( () => uniform( new THREE.Vector4( 0, 0, 0, 1 ) ) ),
 
 	cloudCover: uniform( 0.5 ),
 	cloudDark: uniform( 0.45 ),
@@ -220,19 +225,22 @@ export const skyColor = Fn( ( [ dir ] ) => {
 
 	const y = max( dir.y, 0.0 );
 	const col = mix( U.zenith, U.horizon, pow( float( 1.0 ).sub( y ), 4.0 ) ).toVar();
-	const mu = max( dot( dir, U.sunDir ), 0.0 );
+	const mu = max( dot( dir, U.trueSunDir ), 0.0 );
 	// warm horizon glow on the sun side: much wider and stronger around sunrise / sunset
 	const glowPow = mix( 5.0, 2.2, U.twilight );
 	col.assign( mix( col, U.horizonSun, pow( mu, glowPow ).mul( pow( float( 1.0 ).sub( y ), mix( 4.0, 2.6, U.twilight ) ) ).mul( mix( 0.85, 0.95, U.twilight ) ) ) );
 	// belt of Venus: pink band above the dark earth-shadow, opposite the sun
-	const sunH = normalize( vec3( U.sunDir.x, 0.0, U.sunDir.z ).add( vec3( 1e-4, 0, 0 ) ) );
+	const sunH = normalize( vec3( U.trueSunDir.x, 0.0, U.trueSunDir.z ).add( vec3( 1e-4, 0, 0 ) ) );
 	const anti = pow( max( dot( normalize( vec3( dir.x, 0.0, dir.z ).add( vec3( 0, 0, 1e-4 ) ) ), sunH.negate() ), 0.0 ), 1.5 );
 	const belt = smoothstep( 0.03, 0.1, y ).mul( smoothstep( 0.36, 0.12, y ) );
 	const earthShadow = smoothstep( 0.07, 0.0, y );
 	col.addAssign( vec3( 0.46, 0.2, 0.32 ).mul( U.twilight.mul( belt ).mul( anti ).mul( 0.55 ) ) );
 	col.mulAssign( float( 1.0 ).sub( U.twilight.mul( earthShadow ).mul( anti ).mul( 0.35 ) ) );
 	// mie halo
-	col.addAssign( U.sunColor.mul( pow( mu, 12.0 ).mul( 0.045 ).add( pow( mu, 110.0 ).mul( 0.2 ) ) ) );
+	col.addAssign( U.trueSunColor.mul( pow( mu, 12.0 ).mul( 0.045 ).add( pow( mu, 110.0 ).mul( 0.2 ) ) ) );
+	// faint moon halo at night
+	const muM = max( dot( dir, U.sunDir ), 0.0 );
+	col.addAssign( U.sunColor.mul( pow( muM, 60.0 ).mul( 0.25 ).mul( U.night ) ) );
 	// inversion: a bright band of mist lying along the horizon
 	col.assign( mix( col, mistColor( dir ), U.mist.mul( smoothstep( 0.11, 0.0, y ) ).mul( 0.8 ) ) );
 	return col;
@@ -242,9 +250,9 @@ export const skyColor = Fn( ( [ dir ] ) => {
 // Colour of sunlit mist seen in a direction (strong forward scattering toward the sun).
 export const mistColor = Fn( ( [ dir ] ) => {
 
-	const mu = max( dot( dir, U.sunDir ), 0.0 );
+	const mu = max( dot( dir, U.trueSunDir ), 0.0 );
 	return U.horizon.mul( 0.55 ).add( U.skyAmb.mul( 1.3 ) )
-		.add( U.sunColor.mul( mix( 0.1, 0.75, pow( mu, 4.0 ) ) ) )
+		.add( U.trueSunColor.mul( mix( 0.1, 0.5, pow( mu, 4.0 ) ) ) ).add( U.sunColor.mul( U.night.mul( 0.15 ) ) )
 		.add( U.horizonSun.mul( U.twilight.mul( pow( mu, 2.0 ) ).mul( 0.4 ) ) );
 
 } );

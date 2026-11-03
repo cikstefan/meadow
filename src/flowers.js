@@ -317,7 +317,7 @@ export class Flowers {
 
 			// head frame: follows stem tip, faces up and partly toward the sun
 			const T = tan( float( 1.0 ) );
-			const sunH = normalize( vec3( U.sunDir.x, 0, U.sunDir.z ).add( vec3( 1e-4, 0, 0 ) ) );
+			const sunH = normalize( vec3( U.trueSunDir.x, 0, U.trueSunDir.z ).add( vec3( 1e-4, 0, 0 ) ) );
 			const n = normalize( T.add( up.mul( 0.7 ) ).add( sunH.mul( mix( 0.25, 0.6, seed ) ) ).add( lean.mul( 2.0 ) ) );
 			const ref = select( abs( n.z ).lessThan( 0.9 ), vec3( 0, 0, 1 ), vec3( 1, 0, 0 ) );
 			const ax = normalize( cross( n, ref ) );

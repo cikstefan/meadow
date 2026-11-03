@@ -14,7 +14,7 @@ export const DAY_SECONDS = 12 * 60;
 export function sunElevation( h ) {
 
 	const s = Math.sin( Math.PI * ( h - 6 ) / 12 );
-	return 58 * Math.sign( s ) * Math.pow( Math.abs( s ), 1.6 );
+	return 58 * Math.sign( s ) * Math.pow( Math.abs( s ), 2.0 );
 
 }
 
@@ -75,6 +75,16 @@ export class Weather {
 		// floating particles: livelier around golden hours and at night (spores)
 		const golden = gauss( h, 6.8, 1.3 ) + gauss( h, 18.6, 1.3 );
 		settings.particles = Math.min( 1, 0.25 + 0.5 * n1( t / 60, 5 ) + 0.35 * golden );
+
+		// wind spirits: a twilight phenomenon — they gather around sunset and before
+		// sunrise, only rarely deep in the night, never by day; usually ~0.1, never > 0.2
+		const twilight = gauss( h, 5.5, 0.75 ) + gauss( h, 19.0, 0.8 );
+		const deepNight = ( h > 21 || h < 3.5 ) ? 1 : 0;
+		const rare = deepNight * smooth( 0.82, 0.95, n1( t / 300, 8 ) ) * 0.06;
+		const target = Math.min( 0.2, twilight * ( 0.03 + 0.15 * n1( t / 170, 7 ) ) + rare );
+		// gather / disperse slowly
+		this.spirits = ( this.spirits ?? 0 ) + ( target - ( this.spirits ?? 0 ) ) * ( 1 - Math.exp( - dt / 25 ) );
+		settings.spiritAmount = this.spirits;
 
 		return true;
 

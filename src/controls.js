@@ -17,8 +17,8 @@ export class Controls {
 		this.eye = 2.3;
 		this.eyeTarget = 2.3;
 		this.mode = 'first'; // 'first' | 'third'
-		this.dist = 10;
-		this.distTarget = 10;
+		this.dist = 8;
+		this.distTarget = 8;
 		this.orbitTarget = new THREE.Vector3();
 		this._orbitInit = false;
 		this.keys = new Set();
@@ -96,6 +96,12 @@ export class Controls {
 
 		} );
 		window.addEventListener( 'keyup', ( e ) => this.keys.delete( e.code ) );
+		window.addEventListener( 'keydown', ( e ) => {
+
+			if ( e.code === 'KeyR' && ! e.repeat ) this.autoRun = ! this.autoRun;
+			if ( e.code === 'Space' && e.target === document.body ) e.preventDefault();
+
+		} );
 		window.addEventListener( 'blur', () => this.keys.clear() );
 
 	}
@@ -214,7 +220,9 @@ export class Controls {
 
 		}
 
-		return { x, y, run: k.has( 'ShiftLeft' ) || k.has( 'ShiftRight' ), sprint: k.has( 'Space' ) };
+		const shift = k.has( 'ShiftLeft' ) || k.has( 'ShiftRight' );
+		// R toggles "always run" (no need to hold Shift); Space adds the full gallop
+		return { x, y, run: shift || this.autoRun, sprint: k.has( 'Space' ) };
 
 	}
 

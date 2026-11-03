@@ -23,7 +23,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import {
 	vec2, vec3, vec4, output, positionWorld, positionGeometry, normalWorld, cameraPosition, normalize, dot, pow, clamp,
-	float, max, mix, smoothstep, texture, uv, fwidth, length, materialColor
+	float, max, mix, smoothstep, texture, uv, fwidth, length, materialColor, normalGeometry, abs, bumpMap
 } from 'three/tsl';
 import { U, applyFog, terrainHeightJS } from './tsl/world.js';
 import { vnoise } from './tsl/noise.js';
@@ -64,20 +64,21 @@ class Spring {
 
 }
 
-const SIZE = 3.0; // model scale (~2.5x a real jaguar, as requested)
+const SIZE = 2.16; // model scale (~1.8x a real jaguar)
 const CAD = 1 / Math.sqrt( SIZE / 1.2 ); // bigger animals step more slowly
 
 // leg order: LH, RH, LF, RF
 const GAITS = {
 	// stride frequencies (Hz) for a ~2.5x-scale cat (Froude scaling: slower cadence, longer strides)
-	walk: { beta: 0.64, freq: ( v ) => 0.55 + 0.17 * v, off: [ 0.0, 0.5, 0.25, 0.75 ], lift: 0.9, bob: 0.010, sway: 0.05, flex: 0.0 },
-	trot: { beta: 0.46, freq: ( v ) => 1.0 + 0.08 * v, off: [ 0.0, 0.5, 0.5, 0.0 ], lift: 1.0, bob: 0.018, sway: 0.02, flex: 0.05 },
-	canter: { beta: 0.42, freq: ( v ) => 1.25 + 0.03 * v, off: [ 0.33, 0.0, 0.66, 0.33 ], lift: 1.05, bob: 0.035, sway: 0.0, flex: 0.16 },
-	gallop: { beta: 0.32, freq: ( v ) => 1.5 + 0.025 * v, off: [ 0.0, 0.18, 0.7, 0.52 ], lift: 1.15, bob: 0.05, sway: 0.0, flex: 0.3 },
+	// lift: paw lift as a fraction of leg length
+	walk: { beta: 0.64, freq: ( v ) => 0.85 + 0.25 * v, off: [ 0.0, 0.5, 0.25, 0.75 ], lift: 0.1, bob: 0.008, sway: 0.04, flex: 0.0 },
+	trot: { beta: 0.47, freq: ( v ) => 1.3 + 0.1 * v, off: [ 0.0, 0.5, 0.5, 0.0 ], lift: 0.16, bob: 0.015, sway: 0.02, flex: 0.05 },
+	canter: { beta: 0.42, freq: ( v ) => 1.6 + 0.04 * v, off: [ 0.33, 0.0, 0.66, 0.33 ], lift: 0.24, bob: 0.03, sway: 0.0, flex: 0.16 },
+	gallop: { beta: 0.33, freq: ( v ) => 1.9 + 0.03 * v, off: [ 0.0, 0.18, 0.7, 0.52 ], lift: 0.3, bob: 0.045, sway: 0.0, flex: 0.3 },
 };
 const GAIT_NAMES = [ 'walk', 'trot', 'canter', 'gallop' ];
 
-const SPEED = { walk: 2.8, canter: 9.0, gallop: 17 };
+const SPEED = { walk: 2.2, canter: 7.6, gallop: 14.5 };
 
 // rest poses (joint deltas in radians, drop as a fraction of model scale), solved so
 // that paws, hocks and hips rest on the ground (see README: pose fitting)
@@ -134,6 +135,13 @@ export class Jaguar {
 		const gltf = await loader.parseAsync( bytes.buffer, '' );
 		const model = gltf.scene;
 
+		const { default: furUrl } = await import( './assets/fur_detail.jpg?inline' );
+		const furTex = await new THREE.TextureLoader().loadAsync( furUrl );
+		furTex.wrapS = furTex.wrapT = THREE.RepeatWrapping;
+		furTex.colorSpace = THREE.NoColorSpace;
+		furTex.anisotropy = 4;
+		const furScale = float( 3.2 ); // geometry units -> fur tiles (~a hand-width per tile)
+
 		model.scale.setScalar( SIZE );
 		this.scale = SIZE;
 		this.body.add( model );
@@ -184,18 +192,24 @@ export class Jaguar {
 				m.map = src.map;
 				// melanistic coat: near-black albedo with fine fur strands; rosettes survive faintly
 				m.color.copy( src.color ).multiplyScalar( 0.15 );
-				const pg = positionGeometry;
-				const arg = vec2( pg.x.add( pg.y.mul( 0.3 ) ).mul( 520.0 ), pg.z.mul( 46.0 ).add( pg.y.mul( 40.0 ) ) );
-				const fade = float( 1.0 ).sub( smoothstep( 0.4, 1.2, length( fwidth( arg ) ) ) );
-				const strands = mix( float( 1.0 ), mix( 0.72, 1.18, vnoise( arg ) ), fade );
+				// real fur detail lifted from the deer's coat (luminance only, tileable),
+				// projected triplanar in bind space so it sticks to the body while it moves
+				const pg = positionGeometry.mul( furScale );
+				const wN = pow( abs( normalGeometry ), vec3( 4.0 ) );
+				const wS = wN.div( wN.x.add( wN.y ).add( wN.z ).add( 1e-4 ) );
+				const fx = texture( furTex, pg.zy ).r, fy = texture( furTex, pg.xz ).r, fz = texture( furTex, pg.xy ).r;
+				const detail = fx.mul( wS.x ).add( fy.mul( wS.y ) ).add( fz.mul( wS.z ) );
+				const strands = mix( 0.6, 1.4, detail );
 				m.colorNode = texture( src.map, uv() ).mul( materialColor ).mul( strands );
 				m.roughness = 0.78;
-				m.roughnessNode = mix( float( 0.72 ), float( 0.86 ), vnoise( arg.mul( 0.5 ) ) );
+				m.roughnessNode = mix( float( 0.92 ), float( 0.5 ), detail );
+				// strand micro-relief: highlights break up into fur instead of a smooth sheen
+				m.normalNode = bumpMap( detail, float( 0.9 ) );
 				m.metalness = 0.0;
 				m.sheen = 0.7;
 				m.sheenRoughness = 0.55;
 				m.sheenColor = new THREE.Color( 0.07, 0.075, 0.09 );
-				m.specularIntensity = 0.16;
+				m.specularIntensity = 0.32;
 				// soft fur silhouette (fuzz) when backlit + faint bioluminescent fill at night
 				const V = normalize( cameraPosition.sub( positionWorld ) );
 				const rim = pow( clamp( float( 1.0 ).sub( max( dot( normalWorld, V ), 0.0 ) ), 0.0, 1.0 ), 2.6 );
@@ -256,6 +270,18 @@ export class Jaguar {
 		this.hindLen = ( wp( 'Bip001_L_Thigh' ).y - wp( 'Bip001_L_Toe0' ).y ) / SIZE;
 		this.foreLen = ( wp( 'Bip001_L_UpperArm' ).y - wp( 'Bip001_L_Finger0' ).y ) / SIZE;
 		this.hip = wp( 'Bip001_Pelvis' ); // pivot for sitting (model at origin)
+		// neutral paw contact points (group frame: +z forward, +y up) for foot planting
+		this.neutral = {};
+		for ( const s of [ 'L', 'R' ] ) {
+
+			this.neutral[ s + 'H' ] = wp( `Bip001_${ s }_Toe0` );
+			// forepaws land under the shoulder, slightly ahead of the rest pose
+			this.neutral[ s + 'F' ] = wp( `Bip001_${ s }_Finger0` ).add( new THREE.Vector3( 0, 0, 0.06 * SIZE ) );
+
+		}
+
+		this._v = new THREE.Vector3();
+		this._inv = new THREE.Matrix4();
 
 		this._q = new THREE.Quaternion();
 		this.ready = true;
@@ -382,7 +408,7 @@ export class Jaguar {
 
 		// 1D blend tree on speed: idle -> walk -> trot -> canter -> gallop
 		const t = { idle: 0, walk: 0, trot: 0, canter: 0, gallop: 0 };
-		const bands = [ [ 'idle', 0 ], [ 'walk', 1.2 ], [ 'walk', 3.0 ], [ 'trot', 4.4 ], [ 'trot', 5.8 ], [ 'canter', 7.5 ], [ 'canter', 11.5 ], [ 'gallop', 14.5 ] ];
+		const bands = [ [ 'idle', 0 ], [ 'walk', 1.0 ], [ 'walk', 2.6 ], [ 'trot', 3.8 ], [ 'trot', 5.0 ], [ 'canter', 6.4 ], [ 'canter', 9.8 ], [ 'gallop', 12.4 ] ];
 		if ( v <= 0.08 ) {
 
 			t.idle = 1;
@@ -448,25 +474,29 @@ export class Jaguar {
 
 				const p = ( P + G.off[ i ] ) % 1;
 				const len = ( i < 2 ? this.hindLen : this.foreLen ) * SIZE;
-				const A = Math.asin( Math.min( 0.85, travel / ( 2 * len ) ) );
-				let swing, lift = 0, push = 0;
+				// paw displacement along the body (m): planted during stance (moves back
+				// exactly with the body), lifted arc forward during swing
+				const half = Math.min( travel, len * 1.5 ) * 0.5;
+				let dz, lift = 0, push = 0, fold = 0;
 				if ( p < G.beta ) {
 
 					const u = p / G.beta;
-					swing = A * ( 1 - 2 * u );
+					dz = half * ( 1 - 2 * u );
 					push = smooth( 0.6, 1.0, u );
 
 				} else {
 
 					const u = ( p - G.beta ) / ( 1 - G.beta );
 					const e = u * u * ( 3 - 2 * u );
-					swing = A * ( - 1 + 2 * e );
-					lift = Math.sin( Math.PI * u ) * G.lift;
+					dz = half * ( - 1 + 2 * e );
+					lift = Math.sin( Math.PI * Math.pow( u, 0.8 ) ) * G.lift * len;
+					fold = Math.sin( Math.PI * Math.min( 1, u * 1.25 ) );
 
 				}
 
 				const a = ang[ legs[ i ] ];
-				a.swing += swing * w; a.lift += lift * w; a.push += push * w;
+				a.swing += ( dz / len ) * w; a.lift += lift * w; a.push += push * w;
+				a.dz = ( a.dz || 0 ) + dz * w; a.fold = ( a.fold || 0 ) + fold * w;
 
 			}
 
@@ -487,22 +517,8 @@ export class Jaguar {
 
 		}
 
-		// ---- legs (+x = distal end moves backward)
-		for ( const s of [ 'L', 'R' ] ) {
-
-			const H = ang[ s + 'H' ], F = ang[ s + 'F' ];
-			this.rot( `Bip001_${ s }_Thigh`, m * ( - H.swing - H.lift * 0.25 ) );
-			this.rot( `Bip001_${ s }_Calf`, m * ( - H.lift * 0.75 ) );
-			this.rot( `Bip001_${ s }_HorseLink`, m * ( H.lift * 1.0 + H.push * 0.25 ) );
-			this.rot( `Bip001_${ s }_Foot`, m * ( H.lift * 0.5 + H.swing * 0.4 ) );
-			this.rot( `Bip001_${ s }_Toe0`, m * ( H.lift * 0.4 ) );
-			this.rot( `Bip001_${ s }_Clavicle`, m * ( - F.swing * 0.35 ) );
-			this.rot( `Bip001_${ s }_UpperArm`, m * ( - F.swing * 0.8 - F.lift * 0.15 ) );
-			this.rot( `Bip001_${ s }_Forearm`, m * ( F.lift * 0.9 ) );
-			this.rot( `Bip001_${ s }_Hand`, m * ( F.lift * 1.25 + F.swing * 0.55 + F.push * 0.2 ) );
-			this.rot( `Bip001_${ s }_Finger0`, m * ( F.lift * 0.5 ) );
-
-		}
+		// ---- shoulder blades roll with the stride (the classic feline shoulder motion)
+		for ( const s of [ 'L', 'R' ] ) this.rot( `Bip001_${ s }_Clavicle`, m * ( - ang[ s + 'F' ].swing * 0.3 ) );
 
 		// ---- spine: bound-gait flexion wave, walk sway, bend into turns
 		const turn = THREE.MathUtils.clamp( this.turnRate, - 1.5, 1.5 );
@@ -569,7 +585,79 @@ export class Jaguar {
 		const hy = this.hip.y, hz = this.hip.z;
 		const c = Math.cos( bodyPitch ), s = Math.sin( bodyPitch );
 		const py = hy - ( hy * c - hz * s ), pz = hz - ( hy * s + hz * c );
-		this.body.position.set( 0, py + bob * SIZE * m - gal * 0.03 * SIZE - drop, pz );
+		// moving cats carry themselves a little lower ("prowl"), legs never fully locked
+		this.body.position.set( 0, py + bob * SIZE * m - gal * 0.03 * SIZE - m * 0.045 * SIZE - drop, pz );
+
+		// ---- legs: foot-planting IK (paws stay put on the terrain during stance)
+		if ( m > 0.01 ) {
+
+			this.group.updateMatrixWorld( true );
+			this._inv.copy( this.group.matrixWorld ).invert();
+			for ( const s of [ 'L', 'R' ] ) {
+
+				const H = ang[ s + 'H' ], F = ang[ s + 'F' ];
+				this.legIK( s + 'H', `Bip001_${ s }_Thigh`, `Bip001_${ s }_Calf`, `Bip001_${ s }_HorseLink`, `Bip001_${ s }_Toe0`, H, true, 0.55, m );
+				this.legIK( s + 'F', `Bip001_${ s }_UpperArm`, `Bip001_${ s }_Forearm`, `Bip001_${ s }_Hand`, `Bip001_${ s }_Finger0`, F, false, 1.1, m );
+				// paws: toes curl a little in swing, push off at the end of stance
+				this.rot( `Bip001_${ s }_Toe0`, m * ( H.fold * 0.35 ) );
+				this.rot( `Bip001_${ s }_Finger0`, m * ( F.fold * 0.45 + F.push * 0.15 ) );
+
+			}
+
+		}
+
+	}
+
+	// local (group-frame) position of a bone: x side, y up, z forward
+	lp( name ) {
+
+		return this.bones[ name ].getWorldPosition( new THREE.Vector3() ).applyMatrix4( this._inv );
+
+	}
+
+	/**
+	 * Analytic 2-bone IK in the sagittal plane + an end segment aimed at the paw.
+	 * upper/lower/end are joint bones, tip the paw contact. bendForward: knee
+	 * (hind) bends forward, elbow (fore) backward. foldAmt: how far the end
+	 * segment (metatarsus / carpus) folds back while the paw is in the air.
+	 * Target blending happens in target space so the solve stays exact.
+	 */
+	legIK( leg, upper, lower, end, tip, a, bendForward, foldAmt, w ) {
+
+		const N = this.neutral[ leg ];
+		const A = this.lp( upper ), B = this.lp( lower ), C = this.lp( end ), D = this.lp( tip );
+		// paw target on the ground (terrain under the paw, in group frame)
+		const tz = N.z + ( a.dz || 0 );
+		const wpos = this._v.set( N.x, 0, tz ).applyMatrix4( this.group.matrixWorld );
+		const gy = terrainHeightJS( wpos.x, wpos.z ) - this.pos.y;
+		const T = { z: lerp( D.z, tz, w ), y: lerp( D.y, Math.max( gy, - 0.5 ) + 0.02 * SIZE + ( a.lift || 0 ), w ) };
+		// end segment (hock->paw / wrist->paw), folded back during swing
+		const mz = D.z - C.z, my = D.y - C.y;
+		const fa = ( a.fold || 0 ) * foldAmt * w;
+		const cf = Math.cos( fa ), sf = Math.sin( fa );
+		const Hz = T.z - ( mz * cf + my * sf ), Hy = T.y - ( my * cf - mz * sf );
+		// 2-bone solve for the end joint
+		const L1 = Math.hypot( B.z - A.z, B.y - A.y ), L2 = Math.hypot( C.z - B.z, C.y - B.y );
+		let dx = Hz - A.z, dy = Hy - A.y;
+		let d = Math.hypot( dx, dy );
+		const dc = THREE.MathUtils.clamp( d, Math.abs( L1 - L2 ) * 1.05 + 1e-4, ( L1 + L2 ) * 0.995 );
+		const phi = Math.atan2( dy, dx );
+		const alpha = Math.acos( THREE.MathUtils.clamp( ( L1 * L1 + dc * dc - L2 * L2 ) / ( 2 * L1 * dc ), - 1, 1 ) );
+		const th1 = bendForward ? phi + alpha : phi - alpha;
+		const th1c = Math.atan2( B.y - A.y, B.z - A.z );
+		const d1 = th1c - th1;
+		this.rot( upper, d1 );
+		const Bz = A.z + L1 * Math.cos( th1 ), By = A.y + L1 * Math.sin( th1 );
+		const Hz2 = A.z + dc * Math.cos( phi ), Hy2 = A.y + dc * Math.sin( phi );
+		const th2 = Math.atan2( Hy2 - By, Hz2 - Bz );
+		const th2c = Math.atan2( C.y - B.y, C.z - B.z ) - d1;
+		const d2 = th2c - th2;
+		this.rot( lower, d2 );
+		// aim the end segment at the paw target
+		const th3 = Math.atan2( T.y - Hy2, T.z - Hz2 );
+		const th3c = Math.atan2( D.y - C.y, D.z - C.z ) - d1 - d2;
+		this.rot( end, th3c - th3 );
+		if ( this.debugIK ) ( this._dbg ||= {} )[ leg ] = { T, H: { z: Hz2, y: Hy2 }, d, L1, L2, A, D };
 
 	}
 

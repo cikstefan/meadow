@@ -92,6 +92,7 @@ export async function loadDeerAsset() {
 
 			const antler = /antler/i.test( src.name );
 			m = new THREE.MeshPhysicalNodeMaterial();
+			m.name = src.name;
 			m.map = src.map;
 			m.normalMap = src.normalMap;
 			if ( m.normalMap ) m.normalScale = new THREE.Vector2( 0.8, 0.8 );
@@ -109,6 +110,15 @@ export async function loadDeerAsset() {
 				const rim = pow( clamp( float( 1.0 ).sub( max( dot( normalWorld, V ), 0.0 ) ), 0.0, 1.0 ), 2.8 );
 				const back = clamp( dot( V.negate(), U.sunDir ).mul( 0.5 ).add( 0.5 ), 0.0, 1.0 );
 				m.emissiveNode = U.sunColor.mul( rim.mul( mix( 0.02, 0.3, back ) ) ).mul( vec4( 1.0, 0.85, 0.65, 1 ).xyz );
+
+			}
+
+			if ( antler ) {
+
+				// antlers catch the moonlight: a cool blue-white glow at night, like the flowers
+				const V = normalize( cameraPosition.sub( positionWorld ) );
+				const rim = pow( clamp( float( 1.0 ).sub( max( dot( normalWorld, V ), 0.0 ) ), 0.0, 1.0 ), 2.0 );
+				m.emissiveNode = vec4( 0.4, 0.66, 1.0, 1 ).xyz.mul( U.night.mul( U.glow ).mul( rim.mul( 0.6 ).add( 0.16 ) ) );
 
 			}
 
@@ -132,7 +142,7 @@ export async function loadDeerAsset() {
 
 export class Deer {
 
-	constructor( asset, { scale = 1, seed = 0 } = {} ) {
+	constructor( asset, { scale = 1, seed = 0, female = false } = {} ) {
 
 		this.group = new THREE.Group();
 		this.body = new THREE.Group();
@@ -143,6 +153,13 @@ export class Deer {
 		this.size = LENGTH * scale;
 		this.body.add( model );
 		this.model = model;
+		// hinds (females) carry no antlers
+		this.female = female;
+		if ( female ) model.traverse( ( o ) => {
+
+			if ( o.isMesh && /antler/i.test( o.material.name || '' ) ) o.visible = false;
+
+		} );
 		this.seed = seed;
 
 		// idle clip
@@ -215,6 +232,7 @@ export class Deer {
 		this.target = new THREE.Vector3();
 		this.grazeW = new Spring( 1 );
 		this.alertW = new Spring( 0 );
+		this.tailFlag = new Spring( 0 );
 		this.lookYaw = new Spring( 0 );
 		this.chew = 0;
 		this.threatDir = 0;
@@ -524,8 +542,9 @@ export class Deer {
 		this.rot( 'EarL1', - al * 0.35, 0 );
 		this.rot( 'EarR1', - al * 0.35, 0 );
 		// tail: flicks up when alarmed or fleeing (white rump flash)
-		const flag = Math.max( al * 0.6, this.state === 'flee' ? 1 : 0 );
-		this.rot( 'Tail1', - flag * 0.9 + Math.sin( this.time * 3 + this.seed ) * 0.05 * ( 1 - flag ) );
+		this.tailFlag.step( Math.max( al * 0.6, this.state === 'flee' ? 1 : 0 ), dt, 0.35 );
+		const flag = this.tailFlag.v;
+		this.rot( 'Tail1', - flag * 0.9 + Math.sin( this.time * 1.3 + this.seed ) * 0.04 * ( 1 - flag ) );
 
 		// placement: terrain slope, bob, bank
 		const fwdX = - Math.sin( this.heading ), fwdZ = - Math.cos( this.heading );
@@ -563,7 +582,8 @@ export class DeerHerd {
 		const asset = await loadDeerAsset();
 		for ( let i = 0; i < count; i ++ ) {
 
-			const d = new Deer( asset, { scale: i === 0 ? 1 : 0.86 - i * 0.04, seed: i + 1 } );
+			// one stag, the rest hinds (smaller, no antlers)
+			const d = new Deer( asset, { scale: i === 0 ? 1 : 0.84 - i * 0.03, seed: i + 1, female: i > 0 } );
 			const a = i * 2.1, r = i === 0 ? 0 : 9 + i * 4;
 			d.place( spawn.x + Math.cos( a ) * r, spawn.z + Math.sin( a ) * r, Math.random() * TAU );
 			this.group.add( d.group );

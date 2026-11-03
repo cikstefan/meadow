@@ -76,7 +76,13 @@ False Earth's character controller (speed → 1D blend weights → footstep even
   a carried tail that lags behind the body, banking into turns, slope following
 - footfalls drive soft paw-step audio; the body parts the grass and casts a soft shadow
 - in first person the jaguar wanders around you on its own; in third person you steer
-  it camera-relative (W runs where you look)
+  it camera-relative (W runs where you look); **R** toggles always-run; the status line shows its gait
+- **foot-planting IK:** paw targets in the ground-aligned body frame (planted on the real
+  terrain during stance, lifted arc during swing); analytic 2-bone solve (knee forward for
+  the hind leg, elbow back for the fore), then the hock / wrist aims the paw; moving cats
+  carry themselves slightly lower (prowl) and the shoulder blades roll with the stride
+- fur detail lifted from the deer's coat (luminance, made tileable) applied triplanar in
+  bind space as strand micro-relief and roughness on the black coat; ~1.8x real size
 - gaits: walk → trot → **canter** (Shift; hind leg and opposite fore land together) →
   **rotary gallop** (Shift+Space; four spread footfalls); the head locks forward when moving
 - rest behaviour: calm look-around on critically damped springs with long holds,
@@ -88,7 +94,7 @@ False Earth's character controller (speed → 1D blend weights → footstep even
 ### The red deer
 Model: [“Deer (Demo Free Download)” by All For $19.99](https://sketchfab.com/3d-models/deer-demo-free-download-034f40010b1341e5bc352fd97c5254d6),
 licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); converted from spec-gloss to
-metal-rough, WebP + meshopt (10 MB → 0.88 MB). A herd of three (a stag and two smaller deer):
+metal-rough, WebP + meshopt (10 MB → 0.88 MB). A herd of four: a stag and three hinds (females, no antlers):
 - base layer: the artist's 22.5 s idle clip (ears, blinks, weight shifts), faded to a neutral
   stance while moving and out of the neck while grazing or alert
 - procedural walk / trot / gallop on the 80-bone rig, speed-blended, no-slip stride
@@ -96,6 +102,7 @@ metal-rough, WebP + meshopt (10 MB → 0.88 MB). A herd of three (a stag and two
   (head high, ears forward, watching the threat) when the jaguar or you come near; **flee** at a
   gallop with a raised tail when they come closer (sooner if the jaguar is running); calm down after
 - each deer parts the grass and casts a soft shadow, like the jaguar
+- at night the stag's antlers glow blue-white in the moonlight, like the flowers
 
 ### Wildflowers
 They use the same slot, compute, LOD and indirect pipeline with a sparser lattice.

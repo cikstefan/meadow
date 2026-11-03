@@ -42,7 +42,8 @@ const settings = {
 	particles: parseFloat( params.get( 'particles' ) || '0.6' ),
 	autoTime: params.get( 'auto' ) === '1',
 	windSpirits: params.get( 'spirits' ) === '1',
-	sunShafts: params.get( 'shafts' ) === '1',
+	spiritAmount: 0.1,
+	sunShafts: params.get( 'shafts' ) !== '0',
 	painterly: params.get( 'grade' ) === '1',
 	view: params.get( 'view' ) === 'third' ? 'third person (jaguar)' : 'first person',
 	flowers: true,
@@ -276,7 +277,7 @@ async function start() {
 	jaguar.load().then( () => {
 
 		const f = new THREE.Vector3( - Math.sin( controls.yaw ), 0, - Math.cos( controls.yaw ) );
-		jaguar.place( controls.pos.x + f.x * 14, controls.pos.z + f.z * 14, controls.yaw + Math.PI / 2 );
+		jaguar.place( controls.pos.x + f.x * 11, controls.pos.z + f.z * 11, controls.yaw + Math.PI / 2 );
 		if ( settings.view.startsWith( 'third' ) ) setView( settings.view );
 
 	} ).catch( ( e ) => console.warn( 'jaguar failed to load', e ) );
@@ -286,7 +287,7 @@ async function start() {
 
 		const a = controls.yaw + 0.5;
 		const f = new THREE.Vector3( - Math.sin( a ), 0, - Math.cos( a ) );
-		herd.load( new THREE.Vector3( controls.pos.x + f.x * 55, 0, controls.pos.z + f.z * 55 ), 3 )
+		herd.load( new THREE.Vector3( controls.pos.x + f.x * 55, 0, controls.pos.z + f.z * 55 ), 4 )
 			.catch( ( e ) => console.warn( 'deer failed to load', e ) );
 
 	}
@@ -311,7 +312,7 @@ async function start() {
 			controls._orbitInit = false;
 			controls.yaw = jaguar.heading;
 			controls.pitch = - 0.22;
-			controls.distTarget = controls.dist = 10;
+			controls.distTarget = controls.dist = 8;
 
 		} else {
 
@@ -375,7 +376,7 @@ async function start() {
 
 	const squid = gui.addFolder( '✦ Sword of the Sea mode (prototype)' );
 	squid.add( settings, 'windSpirits' ).name( 'wind spirits' ).onChange( ( v ) => ( spirits.mesh.visible = v ) );
-	squid.add( spirits.u.amount, 'value', 0, 1, 0.01 ).name( 'spirit amount' );
+	squid.add( settings, 'spiritAmount', 0, 1, 0.005 ).name( 'spirit amount' ).onChange( ( v ) => ( spirits.u.amount.value = v ) ).listen();
 	squid.add( settings, 'sunShafts' ).name( 'sun shafts' ).onChange( buildPost );
 	squid.add( settings, 'painterly' ).name( 'painterly grade' ).onChange( buildPost );
 	squid.add( { all: () => {
@@ -499,14 +500,23 @@ async function start() {
 		clock.update();
 		const dt = Math.min( clock.getDelta(), 1 / 15 );
 		U.time.value += dt;
-		if ( weather.update( dt, settings ) ) applySky();
+		if ( weather.update( dt, settings ) ) {
+
+			applySky();
+			// spirits behave like weather in auto time: they appear on their own at twilight
+			spirits.u.amount.value = settings.spiritAmount;
+			spirits.mesh.visible = settings.spiritAmount > 0.003;
+
+		}
+
+		spirits.update( camera );
 		advanceWind( dt );
 
 		const third = controls.mode === 'third' && jaguar.ready && ! window.__jaguarFreeze;
 		if ( third ) {
 
 			jaguar.update( dt, window.__jaguarInput || controls.moveInput() );
-			controls.updateThird( dt, new THREE.Vector3( jaguar.pos.x, jaguar.pos.y + 1.7, jaguar.pos.z ), jaguar.speed );
+			controls.updateThird( dt, new THREE.Vector3( jaguar.pos.x, jaguar.pos.y + 1.25, jaguar.pos.z ), jaguar.speed );
 
 		} else {
 
@@ -518,7 +528,7 @@ async function start() {
 		if ( jaguar.ready ) {
 
 			// body pushes grass; soft shadow cast along the sun direction
-			setActor( 0, jaguar.pos, 2.2 + Math.min( jaguar.speed, 15 ) * 0.04, 1.2 );
+			setActor( 0, jaguar.pos, 1.6 + Math.min( jaguar.speed, 15 ) * 0.03, 0.9 );
 
 		}
 
@@ -571,12 +581,12 @@ async function start() {
 
 		if ( settings.sunShafts ) {
 
-			const sp = U.sunDir.value.clone().multiplyScalar( 1000 ).add( camera.position ).project( camera );
+			const sp = U.trueSunDir.value.clone().multiplyScalar( 1000 ).add( camera.position ).project( camera );
 			post.sunUV.value.set( sp.x * 0.5 + 0.5, 1 - ( sp.y * 0.5 + 0.5 ) );
 			post.aspect.value = camera.aspect;
-			const facing = U.sunDir.value.dot( camera.getWorldDirection( new THREE.Vector3() ) );
-			const low = 1 - THREE.MathUtils.smoothstep( U.sunDir.value.y, 0.25, 0.7 );
-			post.shaftAmt.value = THREE.MathUtils.smoothstep( facing, 0.05, 0.45 ) * ( 0.35 + 0.65 * low ) * ( 1 - U.night.value ) * 0.9;
+			const facing = U.trueSunDir.value.dot( camera.getWorldDirection( new THREE.Vector3() ) );
+			const low = 1 - THREE.MathUtils.smoothstep( U.trueSunDir.value.y, 0.25, 0.7 );
+			post.shaftAmt.value = THREE.MathUtils.smoothstep( facing, 0.05, 0.45 ) * ( 0.35 + 0.65 * low ) * THREE.MathUtils.smoothstep( U.trueSunDir.value.y, - 0.03, 0.04 ) * 0.9;
 
 		}
 
@@ -599,7 +609,16 @@ async function start() {
 
 			stats.fps = stats.frames / stats.acc;
 			stats.frames = 0; stats.acc = 0;
-			hud.textContent = `${ stats.fps.toFixed( 0 ) } fps · ${ ( stats.blades / 1e6 ).toFixed( 2 ) }M blades · ${ settings.quality }`;
+			let gait = '';
+			if ( controls.mode === 'third' && jaguar.ready ) {
+
+				const w = jaguar.weights;
+				const g = Object.keys( w ).reduce( ( a, b ) => ( w[ b ] > w[ a ] ? b : a ) );
+				gait = ` · jaguar: ${ g === 'idle' ? ( jaguar.lieW > 0.5 ? 'lying' : jaguar.sitW > 0.5 ? 'sitting' : 'standing' ) : g } ${ jaguar.speed.toFixed( 1 ) } m/s${ controls.autoRun ? ' (run: R)' : '' }`;
+
+			}
+
+			hud.textContent = `${ stats.fps.toFixed( 0 ) } fps · ${ ( stats.blades / 1e6 ).toFixed( 2 ) }M blades · ${ settings.quality }${ gait }`;
 
 		}
 
@@ -638,7 +657,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { THREE, U, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, POSE, setQuality( q ) {
+	window.__meadow = { THREE, U, spirits, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, POSE, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;
