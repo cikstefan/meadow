@@ -200,7 +200,7 @@ async function start() {
 	controls.lookAtAzimuth( sky.az + 12 );
 
 	// the jaguar appears a few metres ahead, crossing the view
-	jaguar.load( './models/jaguar.glb' ).then( () => {
+	jaguar.load().then( () => {
 
 		const f = new THREE.Vector3( - Math.sin( controls.yaw ), 0, - Math.cos( controls.yaw ) );
 		jaguar.place( controls.pos.x + f.x * 7, controls.pos.z + f.z * 7, controls.yaw + Math.PI / 2 );
@@ -505,7 +505,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { THREE, renderer, scene, camera, controls, settings, applySky, audio, jaguar, setView, jaguarMod: () => import( './jaguar.js' ), setQuality( q ) {
+	window.__meadow = { THREE, renderer, scene, camera, controls, settings, applySky, audio, jaguar, setView, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

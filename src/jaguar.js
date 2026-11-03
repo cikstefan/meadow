@@ -73,11 +73,17 @@ export class Jaguar {
 
 	}
 
-	async load( url ) {
+	async load() {
 
+		// The GLB ships as a lazily loaded JS chunk (base64) and is parsed in
+		// memory: works on any static host, including ones that won't serve .glb.
+		const { default: dataUrl } = await import( './assets/jaguar.glb?inline' );
+		const bin = atob( dataUrl.slice( dataUrl.indexOf( ',' ) + 1 ) );
+		const bytes = new Uint8Array( bin.length );
+		for ( let i = 0; i < bin.length; i ++ ) bytes[ i ] = bin.charCodeAt( i );
 		const loader = new GLTFLoader();
 		loader.setMeshoptDecoder( MeshoptDecoder );
-		const gltf = await loader.loadAsync( url );
+		const gltf = await loader.parseAsync( bytes.buffer, '' );
 		const model = gltf.scene;
 
 		// real jaguar: ~1.6 m nose-to-rump, ~0.7 m at the shoulder
