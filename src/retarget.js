@@ -76,13 +76,28 @@ export function retargetClips( o ) {
 	for ( const n of srcNames ) srcRefInv[ n ] = bodyQuat( srcNode[ n ], srcInvQ, new THREE.Quaternion() ).invert();
 	const srcRootRef = srcNode[ o.rootSrc ].getWorldPosition( new THREE.Vector3() ).applyMatrix4( new THREE.Matrix4().copy( srcRoot.matrixWorld ).invert() );
 
+	// source bone directions in the reference pose (for rest-pose alignment)
+	const srcInvM0 = new THREE.Matrix4().copy( srcRoot.matrixWorld ).invert();
+	const sPos = ( n ) => srcNode[ n ].getWorldPosition( new THREE.Vector3() ).applyMatrix4( srcInvM0 );
+	const srcDir = {};
+	for ( const [ t, a, , , tc, sc ] of map ) if ( tc && sc ) srcDir[ t ] = sPos( sc ).sub( sPos( a ) ).normalize();
+
 	dstFrame.updateMatrixWorld( true );
 	const dstRestLocal = {}, dstRefW = {};
-	for ( const [ t ] of map ) {
+	const dPos = ( n ) => dstBones[ n ].getWorldPosition( new THREE.Vector3() ).applyMatrix4( dstInvM );
+	for ( const [ t, , , , tc ] of map ) {
 
 		const b = dstBones[ t ];
 		dstRestLocal[ t ] = b.quaternion.clone();
 		dstRefW[ t ] = bodyQuat( b, dstInvQ, new THREE.Quaternion() );
+		// different rest poses (e.g. T-pose vs A-pose): first swing the target bone
+		// so it points where the source bone points in the reference pose
+		if ( srcDir[ t ] ) {
+
+			const dirT = dPos( tc ).sub( dPos( t ) ).normalize();
+			dstRefW[ t ].premultiply( new THREE.Quaternion().setFromUnitVectors( dirT, srcDir[ t ] ) );
+
+		}
 
 	}
 
@@ -161,7 +176,7 @@ export function retargetClips( o ) {
  * Ground speed of an in-place locomotion clip: how fast the planted paws move
  * backward (source units / s), median over all stance samples.
  */
-export function stanceSpeed( srcRoot, clip, toeNames, fps = 120 ) {
+export function stanceSpeed( srcRoot, clip, toeNames, fps = 120, relThr = 0 ) {
 
 	const mixer = new THREE.AnimationMixer( srcRoot );
 	mixer.clipAction( clip ).play();
@@ -182,10 +197,11 @@ export function stanceSpeed( srcRoot, clip, toeNames, fps = 120 ) {
 	const speeds = [];
 	for ( const p of pos ) {
 
-		const minY = Math.min( ...p.map( ( q ) => q.y ) );
+		const ys = p.map( ( q ) => q.y );
+		const minY = Math.min( ...ys ), thr = Math.max( 0.02, relThr * ( Math.max( ...ys ) - minY ) );
 		for ( let f = 1; f < p.length; f ++ ) {
 
-			if ( p[ f ].y < minY + 0.02 && p[ f - 1 ].y < minY + 0.02 ) speeds.push( - ( p[ f ].z - p[ f - 1 ].z ) * fps );
+			if ( p[ f ].y < minY + thr && p[ f - 1 ].y < minY + thr ) speeds.push( - ( p[ f ].z - p[ f - 1 ].z ) * fps );
 
 		}
 

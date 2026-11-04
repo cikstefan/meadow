@@ -93,6 +93,33 @@ faintly in the light, as on a real black jaguar. ~1.8x real size.
 - In first person the jaguar wanders around you on its own. In third person you steer it
   camera-relative; **R** toggles always-run, **F** attacks, and the status line shows its gait.
 
+### More characters: velociraptor and human
+**V** cycles the view: first person → jaguar → raptor → human. Each character loads the first
+time it's chosen and appears a few metres ahead. When you switch away it stays in the meadow,
+idling, and goes to sleep after a while. Both run on one shared controller, `src/character.js`,
+which works like the jaguar's:
+- in-place locomotion clips share one stride phase, and each plays at the rate that matches its
+  feet to the ground
+- one-shot actions play over the base layer; any forward root motion in a clip (a leap, a tackle)
+  is stripped from the skeleton and turned into real movement
+- a rest loop takes over after standing still
+
+- **Velociraptor:** [“PBR Velociraptor (Animated)” by ferociousindustries.matthias](https://sketchfab.com/3d-models/pbr-velociraptor-animated-8f1744af7b0847a2aabe3df90be802f0),
+  CC BY 4.0. It uses its own 26 clips; the materials were converted from spec-gloss to metal-rough
+  (WebP + meshopt, 16.6 MB → 2.8 MB).
+  - **Moving:** walk, jog, sprint (Shift, up to 6.5 m/s); the clips play faster than authored,
+    with stride rate rising with speed.
+  - **Actions:** **Space** leaps (6 m of root motion), **F** bites or tackles, **G** roars.
+  - **Idle and rest:** idle variations (sniff, call, look around); sleeps after 15 s.
+  - The deer treat it as a predator.
+- **Human:** [“Low Poly Female” by Loves_Art](https://sketchfab.com/3d-models/low-poly-female-07eeb124d210402bbc061e543d0b97a1),
+  CC BY 4.0, animated with **Mixamo** motion clips retargeted onto her rig at load. The
+  retargeter first lines the two rest poses up bone by bone (T-pose vs A-pose), then transfers
+  the rotation changes.
+  - **Moving:** walk, run (Shift); **C** crouches and crouch-walks.
+  - **Actions:** **Space** jumps, keeping your momentum; **F** kicks or punches.
+  - **Rest:** lies down to sleep after 20 s.
+
 ### The red deer
 Model: [“Deer (Demo Free Download)” by All For $19.99](https://sketchfab.com/3d-models/deer-demo-free-download-034f40010b1341e5bc352fd97c5254d6),
 licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); converted from spec-gloss to
@@ -174,7 +201,9 @@ src/pollen.js     floating pollen
 src/audio.js      procedural music, wind, wildlife, footsteps
 src/controls.js   walk / look / auto-tour camera
 src/jaguar.js     jaguar: materials, clip blending, rest states, foot IK
-src/retarget.js   bakes the tiger's clips onto the jaguar rig
+src/retarget.js   bakes clips from one skeleton onto another (tiger → jaguar, Mixamo → human)
+src/character.js  clip-driven third-person character (raptor, human)
+src/characters.js their configs and credits
 src/gpu.js        storage + indirect-draw helpers
 src/tsl/noise.js  bit-exact GPU/CPU hash + value noise
 src/tsl/world.js  terrain, fields, wind, clouds, sky, fog, foliage lighting

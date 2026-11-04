@@ -14,6 +14,7 @@ import { Pollen } from './pollen.js';
 import { MeadowAudio } from './audio.js';
 import { Weather, sunElevation } from './weather.js';
 import { Jaguar } from './jaguar.js';
+import { makeRaptor, makeHuman } from './characters.js';
 import { DeerHerd } from './deer.js';
 import { WindSpirits } from './spirits.js';
 
@@ -45,7 +46,7 @@ const settings = {
 	spiritAmount: parseFloat( params.get( 'spiritamount' ) || '0.09' ),
 	sunShafts: params.get( 'shafts' ) !== '0',
 	painterly: params.get( 'grade' ) === '1',
-	view: params.get( 'view' ) === 'third' ? 'third person (jaguar)' : 'first person',
+	view: { third: 'third person (jaguar)', jaguar: 'third person (jaguar)', raptor: 'third person (raptor)', human: 'third person (human)' }[ params.get( 'view' ) ] || 'first person',
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
 	exposure: 1.0,
@@ -106,6 +107,11 @@ async function start() {
 
 	const jaguar = new Jaguar();
 	scene.add( jaguar.group );
+	// more third-person characters, loaded the first time they're chosen
+	const raptor = makeRaptor(), human = makeHuman();
+	scene.add( raptor.group, human.group );
+	const chars = { 'third person (jaguar)': jaguar, 'third person (raptor)': raptor, 'third person (human)': human };
+	const VIEWS = [ 'first person', ...Object.keys( chars ) ];
 	const herd = new DeerHerd();
 	scene.add( herd.group );
 	const spirits = new WindSpirits( isMobile ? 90 : 170 );
@@ -275,7 +281,7 @@ async function start() {
 	controls.lookAtAzimuth( sky.az + 12 );
 
 	// the jaguar appears a few metres ahead, crossing the view
-	jaguar.load().then( () => {
+	jaguar._loading = jaguar.load().then( () => {
 
 		const f = new THREE.Vector3( - Math.sin( controls.yaw ), 0, - Math.cos( controls.yaw ) );
 		jaguar.place( controls.pos.x + f.x * 11, controls.pos.z + f.z * 11, controls.yaw + Math.PI / 2 );
@@ -307,13 +313,30 @@ async function start() {
 	function setView( v ) {
 
 		settings.view = v;
-		if ( v.startsWith( 'third' ) ) {
+		const c = chars[ v ];
+		if ( c && ! c.ready ) {
+
+			// load on first use, appear a few metres ahead of the camera
+			if ( ! c._loading ) c._loading = c.load().then( () => {
+
+				const f = new THREE.Vector3( - Math.sin( controls.yaw ), 0, - Math.cos( controls.yaw ) );
+				const p = controls.mode === 'third' && chars[ VIEWS[ 0 ] ] ? controls.pos : controls.pos;
+				c.place( p.x + f.x * 6, p.z + f.z * 6, controls.yaw );
+				c.group.visible = true;
+				if ( settings.view === v ) setView( v );
+
+			} ).catch( ( e ) => console.warn( c.name + ' failed to load', e ) );
+			return;
+
+		}
+
+		if ( c ) {
 
 			controls.mode = 'third';
 			controls._orbitInit = false;
-			controls.yaw = jaguar.heading;
+			controls.yaw = c.heading;
 			controls.pitch = - 0.22;
-			controls.distTarget = controls.dist = 8;
+			controls.distTarget = controls.dist = c.cfg ? c.cfg.camDist : 8;
 
 		} else {
 
@@ -327,8 +350,14 @@ async function start() {
 
 	window.addEventListener( 'keydown', ( e ) => {
 
-		if ( e.code === 'KeyV' && jaguar.ready ) setView( settings.view.startsWith( 'third' ) ? 'first person' : 'third person (jaguar)' );
-		if ( e.code === 'KeyF' && ! e.repeat && controls.mode === 'third' ) jaguar.attack();
+		if ( e.code === 'KeyV' ) setView( VIEWS[ ( VIEWS.indexOf( settings.view ) + 1 ) % VIEWS.length ] );
+		const c = chars[ settings.view ];
+		if ( c && c.ready && controls.mode === 'third' && ! e.repeat ) {
+
+			if ( e.code === 'KeyF' ) c.attack();
+			if ( e.code === 'KeyG' && c.roar ) c.roar();
+
+		}
 
 	} );
 
@@ -373,7 +402,7 @@ async function start() {
 	} ).listen();
 	gui.add( controls, 'tour' ).name( 'auto tour' ).listen();
 	gui.add( controls, 'mouseSteer' ).name( 'look follows cursor' );
-	gui.add( settings, 'view', [ 'first person', 'third person (jaguar)' ] ).name( 'view (V)' ).onChange( setView ).listen();
+	gui.add( settings, 'view', VIEWS ).name( 'view (V)' ).onChange( setView ).listen();
 	gui.add( herd.group, 'visible' ).name( 'deer' );
 
 	const squid = gui.addFolder( '✦ Sword of the Sea mode (prototype)' );
@@ -514,31 +543,36 @@ async function start() {
 		spirits.update( camera );
 		advanceWind( dt );
 
-		const third = controls.mode === 'third' && jaguar.ready && ! window.__jaguarFreeze;
+		const active = chars[ settings.view ];
+		const third = controls.mode === 'third' && active && active.ready && ! window.__jaguarFreeze;
 		if ( third ) {
 
-			jaguar.update( dt, window.__jaguarInput || controls.moveInput() );
-			controls.updateThird( dt, new THREE.Vector3( jaguar.pos.x, jaguar.pos.y + 1.25, jaguar.pos.z ), jaguar.speed );
+			active.update( dt, window.__jaguarInput || controls.moveInput() );
+			const h = active.cfg ? active.cfg.camHeight : 1.25;
+			controls.updateThird( dt, new THREE.Vector3( active.pos.x, active.pos.y + h, active.pos.z ), active.speed );
 
-		} else {
+		} else controls.update( dt, settings.tour );
 
-			controls.update( dt, settings.tour );
-			if ( jaguar.ready && ! window.__jaguarFreeze ) jaguar.update( dt, null, controls.pos );
+		const freeze = window.__jaguarFreeze;
+		if ( jaguar.ready && ! freeze && ! ( third && active === jaguar ) ) jaguar.update( dt, null, third ? active.pos : controls.pos );
+		for ( const c of [ raptor, human ] ) if ( c.ready && c.group.visible && ! freeze && ! ( third && active === c ) ) c.update( dt, null );
 
-		}
+		// the followed animal (or the jaguar) pushes grass and casts a soft shadow
+		const lead = third ? active : jaguar;
+		if ( lead.ready ) {
 
-		if ( jaguar.ready ) {
-
-			// body pushes grass; soft shadow cast along the sun direction
-			setActor( 0, jaguar.pos, 1.6 + Math.min( jaguar.speed, 15 ) * 0.03, 0.9 );
+			if ( lead === jaguar ) setActor( 0, jaguar.pos, 1.6 + Math.min( jaguar.speed, 15 ) * 0.03, 0.9 );
+			else setActor( 0, lead.pos, lead.cfg.radius + Math.min( lead.speed, 15 ) * 0.03, lead.cfg.bodyHeight );
 
 		}
 
 		if ( herd.ready && herd.group.visible && ! window.__deerFreeze ) {
 
-			const threats = [ { pos: jaguar.pos, speed: jaguar.speed, isPredator: true } ];
+			const threats = [];
+			if ( jaguar.ready ) threats.push( { pos: jaguar.pos, speed: jaguar.speed, isPredator: true } );
+			for ( const c of [ raptor, human ] ) if ( c.ready && c.group.visible ) threats.push( { pos: c.pos, speed: c.speed, isPredator: c.cfg.predator } );
 			if ( ! third ) threats.push( { pos: camera.position, speed: controls.speed || 0, isPredator: false } );
-			herd.update( dt, threats, third ? jaguar.pos : controls.pos );
+			herd.update( dt, threats, third ? active.pos : controls.pos );
 
 		}
 
@@ -565,14 +599,14 @@ async function start() {
 
 		if ( audio.enabled ) {
 
-			const who = third ? jaguar.pos : controls.pos;
+			const who = third ? active.pos : controls.pos;
 			const f = fieldsJS( who.x, who.z );
 			audio.update( {
 				wind: windSample(),
-				speed: third ? jaguar.speed : ( controls.speed || 0 ),
+				speed: third ? active.speed : ( controls.speed || 0 ),
 				onFoot: third || controls.eye < 2.5,
-				steps: third ? jaguar.steps : ( controls.steps || 0 ),
-				bob: third ? jaguar.phase * Math.PI * 4 : ( controls.bob || 0 ),
+				steps: third ? active.steps : ( controls.steps || 0 ),
+				bob: third ? active.phase * Math.PI * 4 : ( controls.bob || 0 ),
 				soft: third,
 				grass: Math.min( 1, ( 0.14 + f.tall * 0.91 ) * settings.grassHeight ),
 				hour: settings.hour,
@@ -612,12 +646,14 @@ async function start() {
 			stats.fps = stats.frames / stats.acc;
 			stats.frames = 0; stats.acc = 0;
 			let gait = '';
-			if ( controls.mode === 'third' && jaguar.ready ) {
+			const act = chars[ settings.view ];
+			if ( controls.mode === 'third' && act && act.ready ) {
 
-				const w = jaguar.weights;
+				const w = act.weights;
 				const g = Object.keys( w ).reduce( ( a, b ) => ( w[ b ] > w[ a ] ? b : a ) );
-				const st = { down: 'lying down', lying: 'lying', toSleep: 'falling asleep', sleeping: 'sleeping', wake: 'waking', up: 'getting up' }[ jaguar.state ];
-				gait = ` · jaguar: ${ st || ( jaguar.attackT >= 0 ? 'attack' : g === 'idle' ? 'standing' : g === 'run' && jaguar.speed > 9 ? 'sprint' : g ) } ${ jaguar.speed.toFixed( 1 ) } m/s${ controls.autoRun ? ' (run: R)' : '' }`;
+				const st = { down: 'lying down', lying: 'lying', resting: 'resting', toSleep: 'falling asleep', sleeping: 'sleeping', wake: 'waking', up: 'getting up' }[ act.state ];
+				const doing = st || ( act.shot ? act.shot.n : act.attackT >= 0 ? 'attack' : g === 'idle' ? ( act.crouch ? 'crouching' : 'standing' ) : g.toLowerCase() );
+				gait = ` · ${ act === jaguar ? 'jaguar' : act.name }: ${ doing } ${ act.speed.toFixed( 1 ) } m/s${ controls.autoRun ? ' (run: R)' : '' }`;
 
 			}
 
@@ -660,7 +696,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { THREE, U, spirits, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, terrainHeightJS, setQuality( q ) {
+	window.__meadow = { THREE, U, spirits, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, raptor, human, setView, terrainHeightJS, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

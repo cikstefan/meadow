@@ -222,7 +222,7 @@ export class Controls {
 
 		const shift = k.has( 'ShiftLeft' ) || k.has( 'ShiftRight' );
 		// R toggles "always run" (no need to hold Shift); Space adds the full gallop
-		return { x, y, run: shift || this.autoRun, sprint: k.has( 'Space' ) };
+		return { x, y, run: shift || this.autoRun, sprint: k.has( 'Space' ), crouch: k.has( 'KeyC' ) || k.has( 'ControlLeft' ) };
 
 	}
 
