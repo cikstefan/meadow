@@ -61,35 +61,36 @@ light (with bloom), and grass and terrain in flower drifts receive that light.
 Pollen turns into slowly pulsing blue spores.
 
 ### The jaguar
-Model: [“black panther” by kenchoo](https://sketchfab.com/3d-models/black-panther-7fca11c89cca4362a525c891a8345112),
-licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); textures converted to WebP and the
-mesh meshopt-compressed (6.9 MB → 0.54 MB), shipped as a lazily loaded chunk.
+Model: [“jaguar” by Ear.Rodriguez](https://sketchfab.com/3d-models/jaguar-91c61c329d2a4668816f81f08dfcd492),
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It was converted from FBX to glTF
+(meshopt + WebP, 7.2 MB → 1.2 MB, shipped as a lazily loaded chunk) and **repainted melanistic**: the
+coat texture is baked to near-black, with the rosettes kept as a slightly darker pattern so they show
+faintly in the light, as on a real black jaguar. ~1.8x real size.
 
-No freely licensed jaguar with walk/run clips was available for direct download, and this
-model only has a showcase clip (idle, lie down, get up). So the idle comes from the baked
-clip and **locomotion is procedural** on its 47-bone rig, following the structure of
-False Earth's character controller (speed → 1D blend weights → footstep events):
-- walk (lateral sequence), trot (diagonal) and rotary gallop, each with per-leg phase
-  offsets, stance/swing timing and joint flexion; gaits are blended by speed
-- stride amplitude solved from speed and leg length so the paws don't slide
-- spine flexion/extension in the gallop, lateral sway in the walk, a stabilised head,
-  a carried tail that lags behind the body, banking into turns, slope following
-- footfalls drive soft paw-step audio; the body parts the grass and casts a soft shadow
-- in first person the jaguar wanders around you on its own; in third person you steer
-  it camera-relative (W runs where you look); **R** toggles always-run; the status line shows its gait
-- **foot-planting IK:** paw targets in the ground-aligned body frame (planted on the real
-  terrain during stance, lifted arc during swing); analytic 2-bone solve (knee forward for
-  the hind leg, elbow back for the fore), then the hock / wrist aims the paw; moving cats
-  carry themselves slightly lower (prowl) and the shoulder blades roll with the stride
-- fur detail lifted from the deer's coat (luminance, made tileable) applied triplanar in
-  bind space as strand micro-relief and roughness on the black coat; ~1.8x real size
-- gaits: walk → trot → **canter** (Shift; hind leg and opposite fore land together) →
-  **rotary gallop** (Shift+Space; four spread footfalls); the head locks forward when moving
-- rest behaviour: calm look-around on critically damped springs with long holds,
-  breathing, ear flicks, tail flicks; **sits after 10 s, lies down after 20 s**
-- refined at load: one level of subdivision with blended skin weights, Taubin smoothing
-  (seams pinned) and welded smooth normals; fur strand micro-texture, matte sheen coat,
-  silver-blue eyes; scaled to ~2.5x real size
+- **Coat:** matte fur (high roughness, low specular, a soft dull sheen) plus fine fur strands lifted
+  from the deer's coat, applied triplanar in bind space; a faint fur halo when backlit.
+- **Eyes:** shaded procedurally around each eye bone's gaze axis: a silver-blue iris with radial
+  fibres, a dark limbal ring and a round black pupil that widens at night. A wet cornea, no glow.
+- **Idle:** the artist's own idle clip (looking around, sniffing, pawing) plays while the cat
+  stands still, with ear and tail flicks on top. It fades out as the cat moves or settles.
+  The cat **sits after 10 s and lies down (sphinx) after 20 s**, using poses fitted numerically
+  so paws, hocks and hips rest on the ground.
+- **Locomotion is procedural** on the Advanced Skeleton rig, because the model has no walk or run
+  clips. It follows the structure of False Earth's character controller (speed → 1D blend weights →
+  footstep events), with felid footfall patterns:
+  - **walk:** lateral sequence (LH, LF, RH, RF), duty ≈ 0.65
+  - **trot:** diagonal pairs, briefly, between walk and run
+  - **rotary gallop** (Shift; Shift+Space sprints): LH, RH, RF, LF. The spine arches as the hind
+    legs swing under the body (gathered suspension) and extends as they push off. The trunk pitches
+    over each leg pair, the stance shortens with speed and the head stays level.
+- Cadence is Froude-scaled for the larger size (longer, slower strides), and stride amplitude is
+  solved from speed so the paws don't slide.
+- **Foot-planting IK:** the paws are planted on the real terrain during stance and lifted in an
+  arc during swing. An analytic 2-bone solve bends the knee forward and the elbow back, then the
+  hock or wrist aims the paw. The shoulder blades roll with the stride.
+- Footfalls drive soft paw-step audio. The body parts the grass and casts a soft shadow.
+- In first person the jaguar wanders around you on its own. In third person you steer it
+  camera-relative; **R** toggles always-run, and the status line shows its gait.
 
 ### The red deer
 Model: [“Deer (Demo Free Download)” by All For $19.99](https://sketchfab.com/3d-models/deer-demo-free-download-034f40010b1341e5bc352fd97c5254d6),
