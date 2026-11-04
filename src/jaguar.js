@@ -1,27 +1,21 @@
-// Black jaguar: a skinned, textured big-cat model driven by the artist's idle
-// clip at rest and procedural quadruped locomotion when it moves.
+// Black jaguar: the Ear.Rodriguez jaguar model (repainted melanistic) animated
+// with motion-captured-style clips from a CC-BY tiger, retargeted onto its rig.
 //
 // Model: "jaguar" by Ear.Rodriguez (Sketchfab), CC-BY-4.0
 //   https://sketchfab.com/3d-models/jaguar-91c61c329d2a4668816f81f08dfcd492
-//   converted FBX -> glTF (meshopt + WebP); coat repainted melanistic (a black
-//   jaguar: the rosettes stay faintly visible in the black fur), eyes shaded
-//   procedurally (silver-blue iris, round black pupil).
+//   converted FBX -> glTF (meshopt + WebP); coat repainted melanistic (the
+//   rosettes stay faintly visible in the black fur), eyes shaded procedurally
+//   (silver-blue iris, round black pupil).
+// Motion: "Tiger" by planeta-elefante (Sketchfab), CC-BY-4.0
+//   https://sketchfab.com/3d-models/tiger-5566ab23dc004b3b96f3c15c7276e681
+//   Walk, Run (bounding gallop), lie down / get up, sleep and attack clips are
+//   baked onto the jaguar's Advanced Skeleton rig at load (see retarget.js).
 //
-// The model ships with one idle clip (looking around, sniffing the ground,
-// pawing). It is used as-is when the cat stands still and fades out as it
-// starts to move or settles down.
-//
-// Locomotion follows the structure of False Earth's character controller:
-// speed -> 1D blend weights -> poses + footstep events, with procedural gaits
-// on the Advanced Skeleton rig. Footfall order follows real felids:
-//   walk    lateral sequence       LH, LF, RH, RF   (duty ~0.65)
-//   trot    diagonal pairs         LH+RF, RH+LF     (brief, between walk and run)
-//   gallop  rotary, 4-beat         LH, RH, RF, LF   (Shift; Shift+Space sprints)
-//           spine flexes (gathered) as the hind legs swing under the body
-//           and extends as they push off; the head stays level.
-// Stride amplitude is solved from speed and leg length; paws are planted on
-// the terrain with 2-bone IK. At rest: idle clip + calm look-around, ear and
-// tail flicks; after 10 s it sits, after 20 s it lies down (sphinx).
+// Controller (structure after False Earth's): speed -> blend weights over the
+// idle / walk / run clips, which share one stride phase. Each clip plays at
+// the rate that makes its paws travel exactly as fast as the body moves (no
+// foot sliding). Rest: after 10 s it lies down, after 25 s it puts its head
+// down to sleep; moving wakes it and it gets up first. F: attack.
 
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -31,6 +25,7 @@ import {
 	float, max, mix, smoothstep, texture, uv, abs, normalGeometry, bumpMap, uniform, select, length, atan, sin, acos
 } from 'three/tsl';
 import { U, applyFog, terrainHeightJS } from './tsl/world.js';
+import { retargetClips, stanceSpeed } from './retarget.js';
 
 const TAU = Math.PI * 2;
 const lerp = THREE.MathUtils.lerp;
@@ -44,7 +39,6 @@ const smooth = ( a, b, x ) => {
 
 const angleDiff = ( a, b ) => Math.atan2( Math.sin( b - a ), Math.cos( b - a ) );
 
-// critically damped spring toward a target (smooth, never overshoots/snaps)
 class Spring {
 
 	constructor( v = 0 ) {
@@ -67,61 +61,68 @@ class Spring {
 
 }
 
+async function parseGLB( dataUrl ) {
+
+	const bin = atob( dataUrl.slice( dataUrl.indexOf( ',' ) + 1 ) );
+	const bytes = new Uint8Array( bin.length );
+	for ( let i = 0; i < bin.length; i ++ ) bytes[ i ] = bin.charCodeAt( i );
+	const loader = new GLTFLoader();
+	loader.setMeshoptDecoder( MeshoptDecoder );
+	return loader.parseAsync( bytes.buffer, '' );
+
+}
+
 // model is in centimetres at life size; 1.8x a real jaguar
 const SCALE = 0.018;
-// legacy length unit for tuning constants (~ metres for this size)
-const SIZE = 2.16;
+const SIZE = 2.16; // legacy length unit (~ metres for this size)
 
-// rig (Advanced Skeleton names)
 const R = {
 	root: 'Root_M',
-	spine: [ 'Spine1_M', 'Spine2_M', 'Spine3_M', 'Chest_M' ],
-	neck: [ 'Neck_M', 'Neck1_M', 'Neck2_M' ],
 	head: 'Head_M',
+	neck: [ 'Neck_M', 'Neck1_M', 'Neck2_M' ],
 	tail: [ 'Tail0_M', 'Tail7_M', 'Tail8_M', 'Tail9_M', 'Tail10_M', 'Tail11_M', 'Tail12_M', 'Tail13_M', 'Tail14_M', 'Tail15_M' ],
 	ear: { L: 'Ear1_L', R: 'Ear4_R' },
 	eye: { L: [ 'Eye_L', 'EyeEnd_L' ], R: [ 'Eye_R', 'EyeEnd_R' ] },
-	leg: ( s ) => ( {
-		clav: `Scapula_${ s }`, ua: `Shoulder_${ s }`, fa: `Elbow_${ s }`, hand: `Wrist_${ s }`, fing: `Fingers1_${ s }`,
-		thigh: `Hip_${ s }`, calf: `Knee_${ s }`, hock: `Ankle_${ s }`, foot: `Toes1_${ s }`, toe: `Toes2_${ s }`,
-	} ),
 };
-const LEG = { L: R.leg( 'L' ), R: R.leg( 'R' ) };
 
-// Gaits. land = footfall phase of [LH, RH, LF, RF] within the stride.
-// Stride frequencies are Froude-scaled for a 1.8x cat (slower cadence, longer strides).
-const GAITS = {
-	walk: {
-		land: [ 0.0, 0.5, 0.25, 0.75 ], beta: () => 0.65, freq: ( v ) => 0.45 + 0.3 * v,
-		lift: 0.1, bob: 0.006, sway: 0.035, flex: 0.0, shiftH: 0, shiftF: 0,
-	},
-	trot: {
-		land: [ 0.0, 0.5, 0.5, 0.0 ], beta: () => 0.46, freq: ( v ) => 1.2 + 0.07 * v,
-		lift: 0.15, bob: 0.012, sway: 0.015, flex: 0.03, shiftH: 0.02, shiftF: 0.02,
-	},
-	gallop: {
-		land: [ 0.0, 0.12, 0.62, 0.5 ], beta: ( v ) => lerp( 0.38, 0.27, smooth( 7, 15, v ) ), freq: ( v ) => 1.8 + 0.045 * v,
-		lift: 0.28, bob: 0.05, sway: 0.0, flex: 1.0, shiftH: 0.22, shiftF: 0.12,
-	},
+// tiger bone -> jaguar bone (parent first). [ target, srcA, srcB?, k? ]
+const T = {
+	s1: 'spine1_loResSpine1', s2: 'spine1_loResSpine2', s3: 'spine1_loResSpine3', neck: 'head1_neck', head: 'head1_head',
+	t: [ 'tail1_Joint1', 'tail1_Joint2', 'tail1_Joint3', 'tail1_Joint4' ],
 };
-const GAIT_NAMES = [ 'walk', 'trot', 'gallop' ];
-for ( const g of GAIT_NAMES ) GAITS[ g ].off = GAITS[ g ].land.map( ( l ) => ( 1 - l ) % 1 );
+const MAP = [
+	[ 'Root_M', T.s1 ],
+	[ 'Spine1_M', T.s1, T.s2, 0.5 ], [ 'Spine2_M', T.s2 ], [ 'Spine3_M', T.s2, T.s3, 0.5 ], [ 'Chest_M', T.s3 ],
+	[ 'Neck_M', T.s3, T.neck, 0.5 ], [ 'Neck1_M', T.neck ], [ 'Neck2_M', T.neck, T.head, 0.5 ], [ 'Head_M', T.head ],
+	[ 'Jaw_M', 'JAw' ],
+];
+for ( const [ s, ts ] of [ [ 'L', 'left' ], [ 'R', 'right' ] ] ) {
 
-const SPEED = { walk: 1.7, run: 8.5, sprint: 15.0 };
+	// hind: hip, knee, hock, paw
+	MAP.push( [ `Hip_${ s }`, `${ ts }Leg2_LoResUpperLeg` ], [ `Knee_${ s }`, `${ ts }Leg2_LoResLowerLeg` ],
+		[ `Ankle_${ s }`, `${ ts }Leg2_LoResFoot` ], [ `Toes1_${ s }`, `${ ts }Leg2_LoResToe` ] );
+	// fore: the tiger's upper segment is the shoulder blade
+	MAP.push( [ `Scapula_${ s }`, `${ ts }Leg1_LoResUpperLeg` ], [ `Shoulder_${ s }`, `${ ts }Leg1_LoResLowerLeg` ],
+		[ `Elbow_${ s }`, `${ ts }Leg1_LoResFoot` ], [ `Wrist_${ s }`, `${ ts }Leg1_LoResToe` ] );
 
-// rest poses (joint deltas in radians, drop as a fraction of SIZE), solved so
-// that paws, hocks and hips rest on the ground (see README: pose fitting)
-export const POSE = {
-	sit: { thigh: - 1.004, calf: 1.593, hock: - 1.12, foot: 1.112, ua: 0.89, fa: 0, hand: 0, pitch: 0.629, drop: 0.364 },
-	lie: { thigh: - 1.091, calf: 1.678, hock: - 1.543, foot: 1.124, ua: 0.688, fa: - 1.483, hand: 0.9, pitch: 0.208, drop: 0.37 },
-};
+}
+
+R.tail.forEach( ( n, i ) => {
+
+	const u = i / ( R.tail.length - 1 ) * ( T.t.length - 1 );
+	const a = Math.floor( u ), b = Math.min( a + 1, T.t.length - 1 );
+	MAP.push( u - a < 1e-3 || a === b ? [ n, T.t[ a ] ] : [ n, T.t[ a ], T.t[ b ], u - a ] );
+
+} );
+
+const SPEED = { walk: 1.5, run: 8.0, sprint: 11.5 };
 
 export class Jaguar {
 
 	constructor() {
 
 		this.group = new THREE.Group(); // world placement (yaw)
-		this.body = new THREE.Group(); // slope pitch / roll / pose drop
+		this.body = new THREE.Group(); // slope pitch / roll
 		this.group.add( this.body );
 		this.ready = false;
 
@@ -132,47 +133,40 @@ export class Jaguar {
 		this.turnRate = 0;
 		this.phase = 0;
 		this.steps = 0;
-		this.weights = { idle: 1, walk: 0, trot: 0, gallop: 0 };
+		this.weights = { idle: 1, walk: 0, run: 0 };
 		this.lean = 0;
 		this.pitch = 0;
-		this._prevPhase = [ 0, 0, 0, 0 ];
 
-		// rest behaviour
+		// rest behaviour: 'stand' | 'down' | 'lying' | 'toSleep' | 'sleeping' | 'wake' | 'up'
+		this.state = 'stand';
 		this.restTime = 0;
+		this.restW = 0;
 		this.sitW = 0;
 		this.lieW = 0;
-		this.look = { yaw: new Spring(), pitch: new Spring(), tYaw: 0, tPitch: 0, timer: 2 };
+		this.attackT = - 1;
 		this.ear = { L: new Spring(), R: new Spring(), timer: 3 };
 		this.tailFlick = { s: new Spring(), timer: 4 };
 		this.time = 0;
 
-		// autonomous wandering when not player-controlled
 		this.wander = { target: new THREE.Vector3(), timer: 0, run: false, pause: 0 };
 
 	}
 
 	async load() {
 
-		// The GLB ships as a lazily loaded JS chunk (base64) and is parsed in
-		// memory: works on any static host, including ones that won't serve .glb.
-		const { default: dataUrl } = await import( './assets/jaguar.glb?inline' );
-		const bin = atob( dataUrl.slice( dataUrl.indexOf( ',' ) + 1 ) );
-		const bytes = new Uint8Array( bin.length );
-		for ( let i = 0; i < bin.length; i ++ ) bytes[ i ] = bin.charCodeAt( i );
-		const loader = new GLTFLoader();
-		loader.setMeshoptDecoder( MeshoptDecoder );
-		const gltf = await loader.parseAsync( bytes.buffer, '' );
+		const [ { default: jagUrl }, { default: tigUrl }, { default: furUrl } ] = await Promise.all( [
+			import( './assets/jaguar.glb?inline' ), import( './assets/tiger_anim.glb?inline' ), import( './assets/fur_detail.jpg?inline' ) ] );
+		const [ gltf, tiger ] = await Promise.all( [ parseGLB( jagUrl ), parseGLB( tigUrl ) ] );
 		const model = gltf.scene;
 		this.model = model;
 
-		const { default: furUrl } = await import( './assets/fur_detail.jpg?inline' );
 		const furTex = await new THREE.TextureLoader().loadAsync( furUrl );
 		furTex.wrapS = furTex.wrapT = THREE.RepeatWrapping;
 		furTex.colorSpace = THREE.NoColorSpace;
 		furTex.anisotropy = 4;
 
-		// bones: the FBX rig nests pivot helpers with the same name; the outermost
-		// (un-suffixed) node is the animated one
+		// bones: the FBX rig nests pivot helpers with the same name; the first
+		// (outermost) node of each name carries the chain
 		const bones = {};
 		model.traverse( ( o ) => {
 
@@ -195,11 +189,6 @@ export class Jaguar {
 		model.position.set( - mid.x, - floor + 0.01, - mid.z );
 		model.updateMatrixWorld( true );
 		this.scale = SIZE;
-
-		// idle clip (the artist's), faded out when moving / sitting / lying
-		this.mixer = new THREE.AnimationMixer( model );
-		this.idle = this.mixer.clipAction( gltf.animations[ 0 ] );
-		this.idle.play();
 
 		// --- materials
 		const skinned = [];
@@ -319,81 +308,98 @@ export class Jaguar {
 
 		} );
 
-		// --- joints: rotation axes (side = +X, up = +Y, fwd = +Z in body space) in each bone's parent space
-		model.updateMatrixWorld( true );
-		const bodyInv = this.body.getWorldQuaternion( new THREE.Quaternion() ).invert();
-		const axisIn = ( bone, a ) => {
-
-			const pq = bone.parent.getWorldQuaternion( new THREE.Quaternion() ).premultiply( bodyInv );
-			return a.clone().applyQuaternion( pq.invert() ).normalize();
-
+		// --- retarget the tiger's clips onto this rig
+		const src = tiger.scene;
+		src.updateMatrixWorld( true );
+		const srcClip = ( n ) => tiger.animations.find( ( a ) => a.name.replace( /\s+/g, ' ' ).trim() === n );
+		const sp = ( root, n ) => root.getObjectByName( n ).getWorldPosition( new THREE.Vector3() );
+		// leg length ratio (hip joint height above the paw), reference = tiger Idle
+		const mixer0 = new THREE.AnimationMixer( src );
+		mixer0.clipAction( srcClip( 'Idle' ) ).play();
+		mixer0.setTime( 0 );
+		src.updateMatrixWorld( true );
+		const srcLeg = sp( src, 'leftLeg2_LoResUpperLeg' ).y - sp( src, 'leftLeg2_LoResToe' ).y;
+		mixer0.stopAllAction();
+		const bodyInv = new THREE.Matrix4().copy( this.body.matrixWorld ).invert();
+		const dstLeg = wpos( 'Hip_L' ).applyMatrix4( bodyInv ).y - wpos( 'Toes1_L' ).applyMatrix4( bodyInv ).y;
+		const posScale = dstLeg / srcLeg;
+		const names = [ 'Walk', 'Run', 'Start Rest', 'End Rest', 'Go To Sleep', 'Sleep', 'End Sleep', 'Attack', 'Attack Paw' ];
+		const baked = retargetClips( {
+			srcRoot: src, clips: names.map( srcClip ), refClip: srcClip( 'Idle' ),
+			dstFrame: this.body, dstBones: bones, map: MAP, rootDst: 'Root_M', rootSrc: T.s1, posScale,
+		} );
+		const clip = Object.fromEntries( baked.map( ( c ) => [ c.name, c ] ) );
+		// body speed at which each locomotion clip's paws don't slide (m/s at timeScale 1)
+		this.clipSpeed = {
+			walk: stanceSpeed( src, srcClip( 'Walk' ), [ 'leftLeg2_LoResToe', 'rightLeg2_LoResToe', 'leftLeg1_LoResToe', 'rightLeg1_LoResToe' ] ) * posScale,
+			run: stanceSpeed( src, srcClip( 'Run' ), [ 'leftLeg2_LoResToe', 'rightLeg2_LoResToe', 'leftLeg1_LoResToe', 'rightLeg1_LoResToe' ] ) * posScale,
 		};
 
-		const X = new THREE.Vector3( 1, 0, 0 ), Y = new THREE.Vector3( 0, 1, 0 ), Z = new THREE.Vector3( 0, 0, 1 );
-		this.joints = {};
-		const names = [ R.root, ...R.spine, ...R.neck, R.head, ...R.tail, R.ear.L, R.ear.R ];
-		for ( const s of [ 'L', 'R' ] ) names.push( ...Object.values( LEG[ s ] ) );
-		for ( const n of names ) {
+		// --- actions
+		this.mixer = new THREE.AnimationMixer( model );
+		const act = ( c, once ) => {
 
-			const b = bones[ n ];
-			if ( ! b ) {
+			const a = this.mixer.clipAction( c );
+			if ( once ) {
 
-				console.warn( 'jaguar: missing bone', n );
-				continue;
+				a.setLoop( THREE.LoopOnce, 1 ); a.clampWhenFinished = true;
 
 			}
 
-			this.joints[ n ] = { bone: b, x: axisIn( b, X ), y: axisIn( b, Y ), z: axisIn( b, Z ), rest: b.quaternion.clone() };
+			a.play(); a.setEffectiveWeight( 0 );
+			return a;
+
+		};
+
+		this.A = {
+			idle: act( gltf.animations[ 0 ] ), // the artist's own idle (looks around, sniffs, paws)
+			walk: act( clip[ 'Walk' ] ), run: act( clip[ 'Run' ] ),
+			down: act( clip[ 'Start Rest' ], true ), up: act( clip[ 'End Rest' ], true ),
+			toSleep: act( clip[ 'Go To Sleep' ], true ), sleep: act( clip[ 'Sleep' ] ), wake: act( clip[ 'End Sleep' ], true ),
+			attack: act( clip[ 'Attack' ], true ), paw: act( clip[ 'Attack Paw' ], true ),
+		};
+		this.A.walk.timeScale = 0; this.A.run.timeScale = 0; // driven by the stride phase
+		this.restW_ = { down: 0, up: 0, toSleep: 0, sleep: 0, wake: 0 };
+		this.A.idle.setEffectiveWeight( 1 );
+
+		// joints touched procedurally on top of the clips (ears, tail flick, head into turns)
+		this.rest = {};
+		for ( const n of [ ...R.neck, R.head, ...R.tail, R.ear.L, R.ear.R ] ) if ( bones[ n ] ) this.rest[ n ] = bones[ n ];
+		const bodyQ = this.body.getWorldQuaternion( new THREE.Quaternion() ).invert();
+		this.axes = {};
+		this.restQ = {};
+		for ( const n in this.rest ) this.restQ[ n ] = this.rest[ n ].quaternion.clone();
+		for ( const n in this.rest ) {
+
+			const pq = bones[ n ].parent.getWorldQuaternion( new THREE.Quaternion() ).premultiply( bodyQ ).invert();
+			this.axes[ n ] = { x: new THREE.Vector3( 1, 0, 0 ).applyQuaternion( pq ), y: new THREE.Vector3( 0, 1, 0 ).applyQuaternion( pq ) };
 
 		}
 
-		const bp = ( n ) => bones[ n ].getWorldPosition( new THREE.Vector3() ).sub( this.body.getWorldPosition( new THREE.Vector3() ) );
-		this.hindLen = bp( LEG.L.thigh ).y / SIZE;
-		this.foreLen = bp( LEG.L.ua ).y / SIZE;
-		this.hip = bp( R.root ); // pivot for sitting
-		// neutral paw contact points (group frame: +z forward, +y up) for foot planting
-		this.neutral = {};
-		for ( const s of [ 'L', 'R' ] ) {
+		this.hip = wpos( R.root ).applyMatrix4( bodyInv ); // pitch pivot
+		// paw contact heights in the rest pose (foot-contact IK keeps them above the terrain)
+		this.legs = [];
+		for ( const sd of [ 'L', 'R' ] ) {
 
-			this.neutral[ s + 'H' ] = bp( LEG[ s ].foot );
-			this.neutral[ s + 'F' ] = bp( LEG[ s ].fing ).add( new THREE.Vector3( 0, 0, 0.03 * SIZE ) );
+			this.legs.push( { c: [ `Hip_${ sd }`, `Knee_${ sd }`, `Ankle_${ sd }`, `Toes1_${ sd }`, `Toes2_${ sd }` ], h: wpos( `Toes1_${ sd }` ).applyMatrix4( bodyInv ).y, h2: wpos( `Toes2_${ sd }` ).applyMatrix4( bodyInv ).y } );
+			this.legs.push( { c: [ `Shoulder_${ sd }`, `Elbow_${ sd }`, `Wrist_${ sd }`, `Fingers1_${ sd }`, `Fingers2_${ sd }` ], h: wpos( `Fingers1_${ sd }` ).applyMatrix4( bodyInv ).y, h2: Math.min( 0.02, wpos( `Fingers2_${ sd }` ).applyMatrix4( bodyInv ).y ) } );
 
 		}
 
-		this._v = new THREE.Vector3();
 		this._inv = new THREE.Matrix4();
+		this._v = new THREE.Vector3();
 		this._q = new THREE.Quaternion();
 		this.ready = true;
 
 	}
 
-	// rotate a joint about side (x), up (y) and forward (z) axes (radians).
-	// + about x moves a segment's distal end down (forward-pointing) / up (backward-pointing)
-	rot( name, ax, ay = 0, az = 0 ) {
+	// small additive rotation about body-space side (x) / up (y) axes, after the clips
+	rot( name, ax, ay = 0 ) {
 
-		const j = this.joints[ name ];
-		if ( ! j ) return;
-		const q = this._q;
-		if ( ax ) {
-
-			q.setFromAxisAngle( j.x, ax );
-			j.bone.quaternion.premultiply( q );
-
-		}
-
-		if ( ay ) {
-
-			q.setFromAxisAngle( j.y, ay );
-			j.bone.quaternion.premultiply( q );
-
-		}
-
-		if ( az ) {
-
-			q.setFromAxisAngle( j.z, az );
-			j.bone.quaternion.premultiply( q );
-
-		}
+		const b = this.rest[ name ], A = this.axes[ name ];
+		if ( ! b ) return;
+		if ( ax ) b.quaternion.premultiply( this._q.setFromAxisAngle( A.x, ax ) );
+		if ( ay ) b.quaternion.premultiply( this._q.setFromAxisAngle( A.y, ay ) );
 
 	}
 
@@ -404,10 +410,19 @@ export class Jaguar {
 
 	}
 
+	attack() {
+
+		if ( ! this.ready || this.attackT >= 0 || this.state !== 'stand' ) return;
+		this.attackClip = this.speed < 2 && Math.random() < 0.5 ? this.A.paw : this.A.attack;
+		this.attackClip.reset().play();
+		this.attackT = 0;
+
+	}
+
 	// ------------------------------------------------------------------ control
 
 	/**
-	 * @param input null (wander on its own) or { x, y, run, sprint } with (x,y)
+	 * @param input null (wander on its own) or { x, y, run, sprint, attack } with (x,y)
 	 *              the desired world-XZ move direction (camera-relative)
 	 */
 	update( dt, input, wanderCentre ) {
@@ -432,8 +447,7 @@ export class Jaguar {
 				w.target.set( c.x + Math.cos( a ) * r, 0, c.z + Math.sin( a ) * r );
 				w.run = Math.random() < 0.12;
 				w.timer = 10 + Math.random() * 14;
-				// often rests long enough to sit or lie down
-				w.pause = Math.random() < 0.55 ? 6 + Math.random() * 30 : 0;
+				w.pause = Math.random() < 0.55 ? 6 + Math.random() * 40 : 0;
 
 			}
 
@@ -448,226 +462,146 @@ export class Jaguar {
 
 		}
 
-		// getting up from sitting / lying takes a moment before walking off
-		const seated = Math.max( this.sitW, this.lieW );
-		const prevHeading = this.heading;
-		if ( desired !== null ) {
+		// rest state machine (lie down after 10 s, sleep after 25 s; get up before moving)
+		const A = this.A, done = ( a ) => ! a.isRunning() || a.time >= a.getClip().duration - 1e-3;
+		if ( desired === null && this.speed < 0.05 && this.attackT < 0 ) this.restTime += dt;
+		else this.restTime = 0;
+		const S = this.state;
+		const go = ( s, a ) => {
 
-			this.restTime = 0;
+			this.state = s;
+			if ( a ) a.reset().play();
+
+		};
+
+		if ( S === 'stand' && this.restTime > 10 ) go( 'down', A.down );
+		else if ( S === 'down' && done( A.down ) ) go( 'lying' );
+		else if ( S === 'lying' && desired !== null ) go( 'up', A.up );
+		else if ( S === 'lying' && this.restTime > 25 ) go( 'toSleep', A.toSleep );
+		else if ( S === 'toSleep' && done( A.toSleep ) ) go( 'sleeping' );
+		else if ( ( S === 'sleeping' || S === 'toSleep' ) && desired !== null ) go( 'wake', A.wake );
+		else if ( S === 'wake' && done( A.wake ) ) go( 'up', A.up );
+		else if ( S === 'down' && desired !== null && A.down.time < 0.3 ) go( 'stand' );
+		else if ( S === 'up' && done( A.up ) ) go( 'stand' );
+
+		const canMove = this.state === 'stand' && this.attackT < 0.6;
+		const prevHeading = this.heading;
+		if ( desired !== null && canMove ) {
+
 			const d = angleDiff( this.heading, desired );
-			const rate = lerp( 2.4, 1.1, smooth( 4, 16, this.speed ) ) * ( 1 - seated * 0.9 );
+			const rate = lerp( 2.6, 1.2, smooth( 3, 11, this.speed ) );
 			this.heading += Math.sign( d ) * Math.min( Math.abs( d ), rate * dt );
 			const turnPenalty = lerp( 1, 0.35, smooth( 0.6, 2.2, Math.abs( d ) ) );
 			const top = sprint ? SPEED.sprint : run ? SPEED.run : SPEED.walk;
-			this.targetSpeed = top * ( input ? 1 : 0.85 ) * turnPenalty * ( 1 - smooth( 0.05, 0.6, seated ) );
+			this.targetSpeed = top * ( input ? 1 : 0.85 ) * turnPenalty;
 
 		} else this.targetSpeed = 0;
 
-		const accel = this.targetSpeed > this.speed ? ( sprint ? 9 : run ? 6.5 : 2.6 ) : 5.5;
+		const accel = this.targetSpeed > this.speed ? ( sprint ? 8 : run ? 6 : 2.4 ) : 6;
 		this.speed += Math.sign( this.targetSpeed - this.speed ) * Math.min( Math.abs( this.targetSpeed - this.speed ), accel * dt );
 		this.turnRate = lerp( this.turnRate, angleDiff( prevHeading, this.heading ) / Math.max( dt, 1e-3 ), 1 - Math.exp( - dt * 6 ) );
 
 		this.pos.x += - Math.sin( this.heading ) * this.speed * dt;
 		this.pos.z += - Math.cos( this.heading ) * this.speed * dt;
 
-		// rest states: sit after 10 s still, lie down after 20 s
-		if ( this.speed < 0.05 && desired === null ) this.restTime += dt;
-		else this.restTime = 0;
-		const wantSit = this.restTime > 10 ? 1 : 0, wantLie = this.restTime > 20 ? 1 : 0;
-		const kDown = 1 - Math.exp( - dt * 1.1 ), kUp = 1 - Math.exp( - dt * 3.2 );
-		this.sitW += ( wantSit - this.sitW ) * ( wantSit > this.sitW ? kDown : kUp );
-		this.lieW += ( wantLie - this.lieW ) * ( wantLie > this.lieW ? kDown * 0.8 : kUp );
-
+		if ( input && input.attack ) this.attack();
 		this.animate( dt );
 
 	}
 
-	// ------------------------------------------------------------------ locomotion
+	// ------------------------------------------------------------------ animation
 
 	blendWeights( v ) {
 
-		// 1D blend tree on speed: idle -> walk -> (trot) -> gallop
-		const t = { idle: 0, walk: 0, trot: 0, gallop: 0 };
-		const bands = [ [ 'idle', 0 ], [ 'walk', 0.8 ], [ 'walk', 2.2 ], [ 'trot', 3.0 ], [ 'trot', 4.2 ], [ 'gallop', 5.6 ] ];
-		if ( v <= 0.08 ) {
-
-			t.idle = 1;
-			return t;
-
-		}
-
-		for ( let i = 0; i < bands.length - 1; i ++ ) {
-
-			const [ a, va ] = bands[ i ], [ b, vb ] = bands[ i + 1 ];
-			if ( v <= vb ) {
-
-				const k = smooth( va, vb, v );
-				t[ a ] += 1 - k; t[ b ] += k;
-				return t;
-
-			}
-
-		}
-
-		t.gallop = 1;
-		return t;
+		const walk = smooth( 0.05, 0.7, v ) * ( 1 - smooth( 2.4, 4.8, v ) );
+		const run = smooth( 2.4, 4.8, v );
+		return { idle: 1 - smooth( 0.05, 0.7, v ), walk, run };
 
 	}
 
 	animate( dt ) {
 
-		const v = this.speed;
-		const k = 1 - Math.exp( - dt * 5 );
+		const v = this.speed, A = this.A;
+		const k = 1 - Math.exp( - dt * 6 );
 		const tw = this.blendWeights( v );
 		for ( const g in this.weights ) this.weights[ g ] = lerp( this.weights[ g ], tw[ g ], k );
 		const W = this.weights;
 		const m = 1 - W.idle;
-		const seated = Math.max( this.sitW, this.lieW );
 
-		// ---- base pose: the artist's idle clip while standing still, the bind pose otherwise
-		for ( const n in this.joints ) this.joints[ n ].bone.quaternion.copy( this.joints[ n ].rest );
-		const clipW = ( 1 - m ) * ( 1 - smooth( 0.0, 0.5, seated ) );
-		this.idle.setEffectiveWeight( clipW );
-		this.mixer.update( this.clipFrozen ? 0 : dt );
+		// ---- stride phase: clips advance so their paws travel with the ground
+		const sW = this.clipSpeed.walk, sR = this.clipSpeed.run;
+		const dW = A.walk.getClip().duration, dR = A.run.getClip().duration;
+		const wl = W.walk + W.run;
+		const freq = wl > 1e-3
+			? ( W.walk * v / ( sW * dW ) + W.run * v / ( sR * dR ) ) / wl
+			: 1 / dW;
+		const prevP = this.phase;
+		this.phase = ( this.phase + dt * Math.max( freq, 0.1 ) ) % 1;
+		// align the left-hind footfall of both cycles
+		A.walk.time = ( ( this.phase + 0.0 ) % 1 ) * dW;
+		A.run.time = ( ( this.phase + 0.0 ) % 1 ) * dR;
+		if ( m > 0.3 && Math.floor( this.phase * 4 ) !== Math.floor( prevP * 4 ) ) this.steps ++;
 
-		// ---- shared phase, blended stride frequency
-		let f = 0, wsum = 0;
-		for ( const g of GAIT_NAMES ) {
+		// ---- rest layer weights (one transition clip active at a time, crossfaded)
+		const st = this.state;
+		const tgt = {
+			down: st === 'down' || st === 'lying' ? 1 : 0, toSleep: st === 'toSleep' ? 1 : 0, sleep: st === 'sleeping' ? 1 : 0,
+			wake: st === 'wake' ? 1 : 0, up: st === 'up' ? 1 : 0,
+		};
+		const kr = 1 - Math.exp( - dt * 10 );
+		let rest = 0;
+		for ( const n in tgt ) {
 
-			f += W[ g ] * GAITS[ g ].freq( Math.max( v, 0.8 ) );
-			wsum += W[ g ];
+			this.restW_[ n ] = lerp( this.restW_[ n ], tgt[ n ], kr );
+			rest += this.restW_[ n ];
 
 		}
 
-		f = wsum > 1e-3 ? f / wsum : GAITS.walk.freq( 1 );
-		this.phase = ( this.phase + dt * f ) % 1;
-		const P = this.phase;
+		rest = Math.min( 1, rest );
+		this.restW = rest;
+		this.lieW = st === 'stand' ? 0 : 1;
 
-		const legs = [ 'LH', 'RH', 'LF', 'RF' ];
-		const ang = {};
-		for ( const l of legs ) ang[ l ] = { dz: 0, lift: 0, push: 0, fold: 0 };
-		let bob = 0, sway = 0;
+		// ---- attack overlay
+		let atk = 0;
+		if ( this.attackT >= 0 ) {
 
-		for ( const g of GAIT_NAMES ) {
+			this.attackT += dt;
+			const d = this.attackClip.getClip().duration;
+			atk = smooth( 0, 0.12, this.attackT ) * ( 1 - smooth( d - 0.2, d, this.attackT ) );
+			if ( this.attackT >= d ) {
 
-			const w = W[ g ];
-			if ( w < 1e-3 ) continue;
-			const G = GAITS[ g ];
-			const beta = G.beta( v );
-			const travel = v * beta / Math.max( f, 0.3 ); // paw travel during stance == body travel
-			for ( let i = 0; i < 4; i ++ ) {
-
-				const hind = i < 2;
-				const p = ( P + G.off[ i ] ) % 1;
-				const len = ( hind ? this.hindLen : this.foreLen ) * SIZE;
-				// planted during stance (moves back exactly with the body), lifted arc forward in swing
-				const half = Math.min( travel, len * 1.6 ) * 0.5;
-				const shift = ( hind ? G.shiftH : G.shiftF ) * len;
-				let dz, lift = 0, push = 0, fold = 0;
-				if ( p < beta ) {
-
-					const u = p / beta;
-					dz = half * ( 1 - 2 * u );
-					push = smooth( 0.6, 1.0, u );
-
-				} else {
-
-					const u = ( p - beta ) / ( 1 - beta );
-					const e = u * u * ( 3 - 2 * u );
-					dz = half * ( - 1 + 2 * e );
-					lift = Math.sin( Math.PI * Math.pow( u, 0.8 ) ) * G.lift * len;
-					fold = Math.sin( Math.PI * Math.min( 1, u * 1.25 ) );
-
-				}
-
-				const a = ang[ legs[ i ] ];
-				a.dz += ( dz + shift ) * w; a.lift += lift * w; a.push += push * w; a.fold += fold * w;
+				this.attackT = - 1; atk = 0;
 
 			}
 
-			if ( g === 'gallop' ) {
-
-				// highest in the gathered suspension (before the hind legs land),
-				// lowest through mid-stance of each pair
-				bob += w * G.bob * ( 0.6 * Math.cos( TAU * ( P - 0.93 ) ) + 0.4 * Math.cos( 2 * TAU * ( P - 0.15 ) ) );
-
-			} else bob += w * G.bob * Math.cos( 2 * TAU * ( P - 0.15 ) );
-
-			sway += w * G.sway * Math.sin( TAU * P );
-
 		}
 
-		// gallop dynamics: spine flexion (+ = arched / gathered) peaks as the hind legs
-		// land, extension as they push off and the fore legs reach; the trunk pitches
-		// nose-up while vaulting over the hind legs and nose-down onto the fore legs
-		const gal = W.gallop;
-		const sprint = smooth( 8, 15, v );
-		const flexAmp = gal * lerp( 0.13, 0.22, sprint ) + W.trot * 0.02;
-		const flex = flexAmp * Math.cos( TAU * ( P - 0.02 ) );
-		const pitchOsc = gal * lerp( 0.04, 0.07, sprint ) * Math.cos( TAU * ( P - 0.3 ) );
+		const base = ( 1 - rest ) * ( 1 - atk );
+		A.idle.setEffectiveWeight( W.idle * base );
+		A.walk.setEffectiveWeight( W.walk * base );
+		A.run.setEffectiveWeight( W.run * base );
+		for ( const n in this.restW_ ) A[ n ].setEffectiveWeight( this.restW_[ n ] * ( 1 - atk ) );
+		A.attack.setEffectiveWeight( this.attackClip === A.attack ? atk : 0 );
+		A.paw.setEffectiveWeight( this.attackClip === A.paw ? atk : 0 );
 
-		// footfall events (dominant gait)
-		const dom = GAIT_NAMES.reduce( ( a, b ) => ( W[ b ] > W[ a ] ? b : a ), 'walk' );
-		for ( let i = 0; i < 4; i ++ ) {
+		// rest pose of procedurally touched joints, then the clips
+		for ( const n in this.rest ) this.rest[ n ].quaternion.copy( this.restQ[ n ] );
+		this.mixer.update( this.clipFrozen ? 0 : dt );
 
-			const p = ( P + GAITS[ dom ].off[ i ] ) % 1;
-			if ( m > 0.3 && p < this._prevPhase[ i ] ) this.steps ++;
-			this._prevPhase[ i ] = p;
-
-		}
-
-		// ---- spine: flexion wave, walk sway, bend into turns
+		// ---- small procedural layer: look into turns, ear and tail flicks
 		const turn = THREE.MathUtils.clamp( this.turnRate, - 1.5, 1.5 );
-		const bend = turn * 0.06 * m;
-		const [ s1, s2, s3, ch ] = R.spine;
-		// arch: rear segments tip up (-), front segments tip down (+)
-		this.rot( s1, - flex * 0.9, sway * m + bend );
-		this.rot( s2, - flex * 0.3, - sway * 0.5 * m + bend );
-		this.rot( s3, flex * 0.5, bend );
-		this.rot( ch, flex * 0.7, bend );
-
-		// ---- shoulder blades roll with the stride (the classic feline shoulder walk)
-		for ( const s of [ 'L', 'R' ] ) this.rot( LEG[ s ].clav, m * ( - ( ang[ s + 'F' ].dz / ( this.foreLen * SIZE ) ) * 0.25 ) );
-
-		// ---- rest behaviour: look-around on top of the clip, ears, tail
-		this.restBehaviour( dt, m );
-
-		// ---- head: level and looking ahead when moving (cancels trunk pitch and spine flexion)
-		const lookYaw = this.look.yaw.v * ( 1 - m ), lookPitch = this.look.pitch.v * ( 1 - m );
-		const turnLook = turn * 0.12 * m;
-		const level = - ( - pitchOsc + flex * 0.4 ) - bob * 1.2 + gal * 0.06; // + = nose down
-		const [ n0, n1, n2 ] = R.neck;
-		this.rot( n0, m * level * 0.4 + lookPitch * 0.35, lookYaw * 0.35 + turnLook * 0.5 );
-		this.rot( n1, m * level * 0.3 + lookPitch * 0.3, lookYaw * 0.35 + turnLook * 0.3 );
-		this.rot( n2, lookPitch * 0.15, lookYaw * 0.15 );
-		this.rot( R.head, m * level * 0.3 + lookPitch * 0.2, lookYaw * 0.15 + turnLook * 0.2, - lookYaw * 0.12 );
-
-		// ---- tail: carried low with an upturned tip, lags the stride, streams out when running
-		const rest = seated;
+		this.rot( R.neck[ 0 ], 0, turn * 0.06 * m );
+		this.rot( R.head, 0, turn * 0.05 * m );
+		this.flicks( dt, 1 - m );
 		const nT = R.tail.length;
 		for ( let i = 0; i < nT; i ++ ) {
 
 			const u = i / ( nT - 1 );
-			const lag = u * 3.0;
-			const swayT = Math.sin( TAU * P - lag ) * ( 0.025 + 0.03 * u ) * m * ( 1 - gal * 0.5 )
-				+ Math.sin( this.time * 0.55 - u * 2.5 ) * 0.025 * ( 1 - m )
-				+ this.tailFlick.s.v * u * 0.12;
-			// running: tail raised toward horizontal as a rudder, bounces with the stride
-			const lift = ( i === 0 ? 0.55 * gal + 0.15 * W.trot : 0 ) + Math.sin( TAU * P - lag ) * 0.035 * gal * u
-				- ( i > 0 && i < 6 ? 0.05 * gal : 0 );
-			// resting: tail lies on the ground curving around
-			const sitOnly = this.sitW * ( 1 - this.lieW );
-			const restCurl = rest * ( i === 0 ? 0.45 : ( i < 5 ? 0.06 : - 0.03 ) ) + sitOnly * ( i === 0 ? 0.55 : 0 );
-			const restSide = rest * ( i >= 2 ? 0.1 : 0 );
-			this.rot( R.tail[ i ], lift + restCurl, swayT - turn * 0.04 * m + restSide );
+			this.rot( R.tail[ i ], 0, this.tailFlick.s.v * u * 0.12 - turn * 0.03 * m );
 
 		}
 
-		// ---- sit / lie poses (joint deltas + body drop/pitch)
-		this.restPose();
-		if ( this.debugRot ) for ( const n in this.debugRot ) this.rot( n, ...[].concat( this.debugRot[ n ] ) );
-
-		// ---- body placement: terrain slope, bob, banking, pose drop
+		// ---- body placement: terrain slope, banking
 		const fwdX = - Math.sin( this.heading ), fwdZ = - Math.cos( this.heading );
 		const half = 0.5 * SIZE;
 		const hF = terrainHeightJS( this.pos.x + fwdX * half, this.pos.z + fwdZ * half );
@@ -679,43 +613,22 @@ export class Jaguar {
 
 		this.group.position.copy( this.pos );
 		this.group.rotation.set( 0, this.heading + Math.PI, 0 );
-
-		// sitting tips the body up around the hips
-		const sitW = this.sitW * ( 1 - this.lieW );
-		const sitPitch = sitW * POSE.sit.pitch + this.lieW * POSE.lie.pitch;
-		const drop = ( sitW * POSE.sit.drop + this.lieW * POSE.lie.drop ) * SIZE;
-		const bodyPitch = - this.pitch - sitPitch - pitchOsc;
-		this.body.rotation.set( bodyPitch, 0, THREE.MathUtils.clamp( this.lean, - 0.25, 0.25 ) );
-		// rotate about the hip pivot instead of the feet
+		const bodyPitch = - this.pitch;
+		this.body.rotation.set( bodyPitch, 0, THREE.MathUtils.clamp( this.lean, - 0.2, 0.2 ) );
 		const hy = this.hip.y, hz = this.hip.z;
 		const c = Math.cos( bodyPitch ), s = Math.sin( bodyPitch );
-		const py = hy - ( hy * c - hz * s ), pz = hz - ( hy * s + hz * c );
-		// moving cats carry themselves a little lower ("prowl"); galloping cats stretch out lower still
-		this.body.position.set( 0, py + bob * SIZE * m - gal * 0.01 * SIZE - m * 0.015 * SIZE - drop, pz );
+		this.body.position.set( 0, hy - ( hy * c - hz * s ), hz - ( hy * s + hz * c ) );
 
-		// ---- legs: foot-planting IK (paws stay put on the terrain during stance)
-		if ( m > 0.01 ) {
-
-			this.group.updateMatrixWorld( true );
-			this._inv.copy( this.group.matrixWorld ).invert();
-			for ( const s of [ 'L', 'R' ] ) {
-
-				const H = ang[ s + 'H' ], F = ang[ s + 'F' ], L = LEG[ s ];
-				this.legIK( s + 'H', L.thigh, L.calf, L.hock, L.foot, H, true, 0.6, m );
-				this.legIK( s + 'F', L.ua, L.fa, L.hand, L.fing, F, false, 1.2, m );
-				// paws: toes curl in swing, push off at the end of stance
-				this.rot( L.foot, m * ( H.fold * 0.4 - H.push * 0.2 ) );
-				this.rot( L.fing, m * ( F.fold * 0.5 - F.push * 0.25 ) );
-
-			}
-
-		}
+		// foot contact: lift any paw the clip pushes below the terrain
+		this.group.updateMatrixWorld( true );
+		this._inv.copy( this.group.matrixWorld ).invert();
+		for ( const L of this.legs ) this.footIK( L );
 
 		// eyes (for the iris shader)
 		this.model.updateMatrixWorld( true );
-		for ( const s of [ 'L', 'R' ] ) {
+		for ( const sd of [ 'L', 'R' ] ) {
 
-			const E = this.eyeU[ s ], [ a, b ] = R.eye[ s ];
+			const E = this.eyeU[ sd ], [ a, b ] = R.eye[ sd ];
 			E.c.value.copy( E.off ).applyMatrix4( this.bones[ a ].matrixWorld );
 			const p0 = this.bones[ a ].getWorldPosition( this._v );
 			E.d.value.copy( this.bones[ b ].getWorldPosition( new THREE.Vector3() ) ).sub( p0 ).normalize();
@@ -724,94 +637,58 @@ export class Jaguar {
 
 	}
 
-	// local (group-frame) position of a bone: x side, y up, z forward
-	lp( name ) {
+	// group-frame position (x side, y up, z forward)
+	lp( n ) {
 
-		return this.bones[ name ].getWorldPosition( new THREE.Vector3() ).applyMatrix4( this._inv );
+		return this.bones[ n ].getWorldPosition( new THREE.Vector3() ).applyMatrix4( this._inv );
 
 	}
 
-	/**
-	 * Analytic 2-bone IK in the sagittal plane + an end segment aimed at the paw.
-	 * upper/lower/end are joint bones, tip the paw contact. bendForward: knee
-	 * (hind) bends forward, elbow (fore) backward. foldAmt: how far the end
-	 * segment (metatarsus / carpus) folds back while the paw is in the air.
-	 * Target blending happens in target space so the solve stays exact.
-	 */
-	legIK( leg, upper, lower, end, tip, a, bendForward, foldAmt, w ) {
+	// rotate a bone about the body's side axis (expressed in its parent's current frame)
+	rotSide( n, a ) {
 
-		const N = this.neutral[ leg ];
-		const A = this.lp( upper ), B = this.lp( lower ), C = this.lp( end ), D = this.lp( tip );
-		// paw target on the ground (terrain under the paw, in group frame)
-		const tz = N.z + a.dz;
-		const wpos = this._v.set( N.x, 0, tz ).applyMatrix4( this.group.matrixWorld );
-		const gy = terrainHeightJS( wpos.x, wpos.z ) - this.pos.y;
-		const T = { z: lerp( D.z, tz, w ), y: lerp( D.y, Math.max( gy, - 0.5 ) + N.y + a.lift, w ) };
-		// end segment (hock->paw / wrist->paw), folded back during swing
-		const mz = D.z - C.z, my = D.y - C.y;
-		const fa = a.fold * foldAmt * w;
-		const cf = Math.cos( fa ), sf = Math.sin( fa );
-		const Hz = T.z - ( mz * cf + my * sf ), Hy = T.y - ( my * cf - mz * sf );
-		// 2-bone solve for the end joint
+		const b = this.bones[ n ];
+		const ax = new THREE.Vector3( 1, 0, 0 ).transformDirection( this.group.matrixWorld );
+		const pq = b.parent.getWorldQuaternion( new THREE.Quaternion() ).invert();
+		b.quaternion.premultiply( this._q.setFromAxisAngle( ax.applyQuaternion( pq ).normalize(), a ) );
+
+	}
+
+	/** 2-bone IK in the sagittal plane: raise the paw to the ground, keep the paw segment's angle */
+	footIK( L ) {
+
+		const [ u, l, e, t, t2 ] = L.c;
+		const D = this.lp( t ), D2 = this.lp( t2 );
+		const w = this._v.set( D.x, 0, D.z ).applyMatrix4( this.group.matrixWorld );
+		const g = terrainHeightJS( w.x, w.z ) - this.pos.y;
+		const lift = Math.max( g + L.h - D.y, g + L.h2 - D2.y );
+		if ( lift <= 0 ) return;
+		const want = D.y + lift;
+		const A = this.lp( u ), B = this.lp( l ), C = this.lp( e );
+		const Hz = C.z, Hy = C.y + ( want - D.y ); // move the end joint straight up
 		const L1 = Math.hypot( B.z - A.z, B.y - A.y ), L2 = Math.hypot( C.z - B.z, C.y - B.y );
 		const dx = Hz - A.z, dy = Hy - A.y;
-		const d = Math.hypot( dx, dy );
-		const dc = THREE.MathUtils.clamp( d, Math.abs( L1 - L2 ) * 1.05 + 1e-4, ( L1 + L2 ) * 0.995 );
+		const dc = THREE.MathUtils.clamp( Math.hypot( dx, dy ), Math.abs( L1 - L2 ) * 1.05 + 1e-4, ( L1 + L2 ) * 0.999 );
 		const phi = Math.atan2( dy, dx );
 		const alpha = Math.acos( THREE.MathUtils.clamp( ( L1 * L1 + dc * dc - L2 * L2 ) / ( 2 * L1 * dc ), - 1, 1 ) );
-		const th1 = bendForward ? phi + alpha : phi - alpha;
-		const th1c = Math.atan2( B.y - A.y, B.z - A.z );
-		const d1 = th1c - th1;
-		this.rot( upper, d1 );
+		// keep the current bend direction: pick the solution nearest the current middle joint
+		const ta = phi + alpha, tb = phi - alpha;
+		const ea = Math.hypot( A.z + L1 * Math.cos( ta ) - B.z, A.y + L1 * Math.sin( ta ) - B.y );
+		const eb = Math.hypot( A.z + L1 * Math.cos( tb ) - B.z, A.y + L1 * Math.sin( tb ) - B.y );
+		const th1 = ea < eb ? ta : tb;
+		const d1 = Math.atan2( B.y - A.y, B.z - A.z ) - th1;
+		this.rotSide( u, d1 );
 		const Bz = A.z + L1 * Math.cos( th1 ), By = A.y + L1 * Math.sin( th1 );
 		const Hz2 = A.z + dc * Math.cos( phi ), Hy2 = A.y + dc * Math.sin( phi );
-		const th2 = Math.atan2( Hy2 - By, Hz2 - Bz );
-		const th2c = Math.atan2( C.y - B.y, C.z - B.z ) - d1;
-		const d2 = th2c - th2;
-		this.rot( lower, d2 );
-		// aim the end segment at the paw target
-		const th3 = Math.atan2( T.y - Hy2, T.z - Hz2 );
-		const th3c = Math.atan2( D.y - C.y, D.z - C.z ) - d1 - d2;
-		this.rot( end, th3c - th3 );
-		if ( this.debugIK ) ( this._dbg ||= {} )[ leg ] = { T, H: { z: Hz2, y: Hy2 }, d, L1, L2, A, D };
+		const d2 = ( Math.atan2( C.y - B.y, C.z - B.z ) - d1 ) - Math.atan2( Hy2 - By, Hz2 - Bz );
+		this.rotSide( l, d2 );
+		// paw segment keeps its original body-frame angle
+		this.rotSide( e, - ( d1 + d2 ) );
 
 	}
 
-	restBehaviour( dt, m ) {
+	flicks( dt, still ) {
 
-		const L = this.look, still = 1 - m;
-		L.timer -= dt;
-		if ( L.timer <= 0 ) {
-
-			// pick a new point of interest; sometimes hold a gaze for a long time
-			const r = Math.random();
-			if ( r < 0.45 ) {
-
-				L.tYaw = 0; L.tPitch = 0;
-
-			} else {
-
-				L.tYaw = ( Math.random() < 0.5 ? - 1 : 1 ) * ( 0.2 + Math.random() * 0.45 );
-				L.tPitch = ( Math.random() - 0.6 ) * 0.2;
-
-			}
-
-			L.timer = r < 0.25 ? 9 + Math.random() * 9 : 3.5 + Math.random() * 5;
-
-		}
-
-		// slower, heavier motion when lying down
-		const hl = lerp( 0.9, 1.4, this.lieW );
-		L.yaw.step( L.tYaw * still, dt, hl );
-		L.pitch.step( L.tPitch * still, dt, hl );
-
-		// breathing (the clip breathes on its own while standing)
-		const seated = Math.max( this.sitW, this.lieW );
-		const br = Math.sin( this.time * TAU * 0.24 ) * 0.012 * still * seated;
-		this.rot( R.spine[ 1 ], br );
-		this.rot( R.spine[ 2 ], - br * 0.6 );
-
-		// occasional ear flicks
 		const E = this.ear;
 		E.timer -= dt;
 		if ( E.timer <= 0 ) {
@@ -822,17 +699,10 @@ export class Jaguar {
 
 		}
 
-		for ( const s of [ 'L', 'R' ] ) {
-
-			const tgt = E.target === s && this.time < E.until ? 0.4 : 0;
-			E[ s ].step( tgt, dt, 0.06 );
-
-		}
-
+		for ( const s of [ 'L', 'R' ] ) E[ s ].step( E.target === s && this.time < E.until ? 0.4 : 0, dt, 0.06 );
 		this.rot( R.ear.L, 0, E.L.v * still );
 		this.rot( R.ear.R, 0, - E.R.v * still );
 
-		// occasional slow tail flick
 		const T = this.tailFlick;
 		T.timer -= dt;
 		if ( T.timer <= 0 ) {
@@ -844,34 +714,6 @@ export class Jaguar {
 		}
 
 		T.s.step( this.time < T.until ? T.dir * still : 0, dt, 0.35 );
-
-	}
-
-	restPose() {
-
-		const sit = this.sitW * ( 1 - this.lieW ), lie = this.lieW;
-		if ( sit + lie < 1e-3 ) return;
-		const S = POSE.sit, L = POSE.lie;
-		const mixp = ( k ) => sit * S[ k ] + lie * L[ k ];
-		for ( const s of [ 'L', 'R' ] ) {
-
-			const G = LEG[ s ];
-			// hind legs folded under the hips, hocks and paws on the ground
-			this.rot( G.thigh, mixp( 'thigh' ) );
-			this.rot( G.calf, mixp( 'calf' ) );
-			this.rot( G.hock, mixp( 'hock' ) );
-			this.rot( G.foot, mixp( 'foot' ) );
-			// front legs: vertical when sitting, forearms forward on the ground when lying
-			this.rot( G.ua, mixp( 'ua' ) );
-			this.rot( G.fa, mixp( 'fa' ) );
-			this.rot( G.hand, mixp( 'hand' ) );
-
-		}
-
-		// keep the head level (+ = nose down): undo the sitting body pitch
-		this.rot( R.neck[ 0 ], sit * 0.2 - lie * 0.25 );
-		this.rot( R.neck[ 1 ], sit * 0.15 - lie * 0.1 );
-		this.rot( R.head, sit * 0.1 + lie * 0.2 );
 
 	}
 

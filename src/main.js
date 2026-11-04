@@ -4,7 +4,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
 
-import { U, fieldsJS, windFieldJS, advanceWind } from './tsl/world.js';
+import { U, fieldsJS, windFieldJS, advanceWind, terrainHeightJS } from './tsl/world.js';
 import { Grass } from './grass.js';
 import { Flowers } from './flowers.js';
 import { Terrain } from './terrain.js';
@@ -13,7 +13,7 @@ import { Controls } from './controls.js';
 import { Pollen } from './pollen.js';
 import { MeadowAudio } from './audio.js';
 import { Weather, sunElevation } from './weather.js';
-import { Jaguar, POSE } from './jaguar.js';
+import { Jaguar } from './jaguar.js';
 import { DeerHerd } from './deer.js';
 import { WindSpirits } from './spirits.js';
 
@@ -328,6 +328,7 @@ async function start() {
 	window.addEventListener( 'keydown', ( e ) => {
 
 		if ( e.code === 'KeyV' && jaguar.ready ) setView( settings.view.startsWith( 'third' ) ? 'first person' : 'third person (jaguar)' );
+		if ( e.code === 'KeyF' && ! e.repeat && controls.mode === 'third' ) jaguar.attack();
 
 	} );
 
@@ -615,7 +616,8 @@ async function start() {
 
 				const w = jaguar.weights;
 				const g = Object.keys( w ).reduce( ( a, b ) => ( w[ b ] > w[ a ] ? b : a ) );
-				gait = ` · jaguar: ${ g === 'idle' ? ( jaguar.lieW > 0.5 ? 'lying' : jaguar.sitW > 0.5 ? 'sitting' : 'standing' ) : g } ${ jaguar.speed.toFixed( 1 ) } m/s${ controls.autoRun ? ' (run: R)' : '' }`;
+				const st = { down: 'lying down', lying: 'lying', toSleep: 'falling asleep', sleeping: 'sleeping', wake: 'waking', up: 'getting up' }[ jaguar.state ];
+				gait = ` · jaguar: ${ st || ( jaguar.attackT >= 0 ? 'attack' : g === 'idle' ? 'standing' : g === 'run' && jaguar.speed > 9 ? 'sprint' : g ) } ${ jaguar.speed.toFixed( 1 ) } m/s${ controls.autoRun ? ' (run: R)' : '' }`;
 
 			}
 
@@ -658,7 +660,7 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { THREE, U, spirits, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, POSE, setQuality( q ) {
+	window.__meadow = { THREE, U, spirits, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, setView, terrainHeightJS, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

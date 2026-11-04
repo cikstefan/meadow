@@ -71,26 +71,27 @@ faintly in the light, as on a real black jaguar. ~1.8x real size.
   from the deer's coat, applied triplanar in bind space; a faint fur halo when backlit.
 - **Eyes:** shaded procedurally around each eye bone's gaze axis: a silver-blue iris with radial
   fibres, a dark limbal ring and a round black pupil that widens at night. A wet cornea, no glow.
-- **Idle:** the artist's own idle clip (looking around, sniffing, pawing) plays while the cat
-  stands still, with ear and tail flicks on top. It fades out as the cat moves or settles.
-  The cat **sits after 10 s and lies down (sphinx) after 20 s**, using poses fitted numerically
-  so paws, hocks and hips rest on the ground.
-- **Locomotion is procedural** on the Advanced Skeleton rig, because the model has no walk or run
-  clips. It follows the structure of False Earth's character controller (speed → 1D blend weights →
-  footstep events), with felid footfall patterns:
-  - **walk:** lateral sequence (LH, LF, RH, RF), duty ≈ 0.65
-  - **trot:** diagonal pairs, briefly, between walk and run
-  - **rotary gallop** (Shift; Shift+Space sprints): LH, RH, RF, LF. The spine arches as the hind
-    legs swing under the body (gathered suspension) and extends as they push off. The trunk pitches
-    over each leg pair, the stance shortens with speed and the head stays level.
-- Cadence is Froude-scaled for the larger size (longer, slower strides), and stride amplitude is
-  solved from speed so the paws don't slide.
-- **Foot-planting IK:** the paws are planted on the real terrain during stance and lifted in an
-  arc during swing. An analytic 2-bone solve bends the knee forward and the elbow back, then the
-  hock or wrist aims the paw. The shoulder blades roll with the stride.
+- **Motion: real animation clips from a tiger, retargeted.** The motion comes from
+  [“Tiger” by planeta-elefante](https://sketchfab.com/3d-models/tiger-5566ab23dc004b3b96f3c15c7276e681)
+  (CC BY 4.0). Its Walk, Run (a bounding gallop with flight phases), lie down, get up, sleep and
+  attack clips are baked onto the jaguar's Advanced Skeleton rig at load (`src/retarget.js`):
+  - each tiger bone's rotation change from its standing pose is applied to the matching jaguar bone,
+    with both skeletons in one shared body frame
+  - the tiger's 3-bone spine and 4-bone tail are spread over the jaguar's 5-bone spine and
+    10-bone tail
+  - root motion is scaled by the ratio of the two cats' leg lengths
+- **Blending by speed:** idle, walk and run share one stride phase. Each clip plays at the rate
+  that makes its planted paws move exactly as fast as the body (stance speed is measured from the
+  clip itself), so the feet don't slide. Walk is 1.5 m/s, run (Shift) 8 m/s and sprint
+  (Shift+Space) 11.5 m/s; **F** attacks with a lunge or a paw swipe.
+- **Foot contact:** a thin 2-bone IK pass lifts any paw the clip would push below the terrain.
+  The tiger's legs are proportioned differently, and the meadow isn't flat.
+- **Rest:** while standing, the jaguar model's own idle clip plays (looking around, sniffing,
+  pawing), with ear and tail flicks. After 10 s it **lies down**; after 25 s it **puts its head down
+  and sleeps**. Moving wakes it, and it gets up before walking off.
 - Footfalls drive soft paw-step audio. The body parts the grass and casts a soft shadow.
 - In first person the jaguar wanders around you on its own. In third person you steer it
-  camera-relative; **R** toggles always-run, and the status line shows its gait.
+  camera-relative; **R** toggles always-run, **F** attacks, and the status line shows its gait.
 
 ### The red deer
 Model: [“Deer (Demo Free Download)” by All For $19.99](https://sketchfab.com/3d-models/deer-demo-free-download-034f40010b1341e5bc352fd97c5254d6),
@@ -172,6 +173,8 @@ src/sky.js        sky dome, clouds, time-of-day palette
 src/pollen.js     floating pollen
 src/audio.js      procedural music, wind, wildlife, footsteps
 src/controls.js   walk / look / auto-tour camera
+src/jaguar.js     jaguar: materials, clip blending, rest states, foot IK
+src/retarget.js   bakes the tiger's clips onto the jaguar rig
 src/gpu.js        storage + indirect-draw helpers
 src/tsl/noise.js  bit-exact GPU/CPU hash + value noise
 src/tsl/world.js  terrain, fields, wind, clouds, sky, fog, foliage lighting
