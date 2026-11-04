@@ -31,18 +31,18 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test( navigator.userAgent ) || ( na
 
 const settings = {
 	quality: params.get( 'q' ) || ( isMobile ? 'low' : 'high' ), // desktop may start at ultra (see below)
-	hour: parseFloat( params.get( 'hour' ) || '6' ),
-	clouds: parseFloat( params.get( 'clouds' ) || '0.5' ),
-	wind: parseFloat( params.get( 'wind' ) || '1.2' ),
-	windAngle: parseFloat( params.get( 'winddir' ) || '108' ),
-	grassHeight: parseFloat( params.get( 'grass' ) || '1.6' ),
+	hour: parseFloat( params.get( 'hour' ) || '4.55' ),
+	clouds: parseFloat( params.get( 'clouds' ) || '0.51' ),
+	wind: parseFloat( params.get( 'wind' ) || '1.6' ),
+	windAngle: parseFloat( params.get( 'winddir' ) || '110' ),
+	grassHeight: parseFloat( params.get( 'grass' ) || '1.71' ),
 	dryPatches: parseFloat( params.get( 'dry' ) || '0' ),
 	flowerGlow: 1.0,
-	mist: parseFloat( params.get( 'mist' ) || '0.35' ),
-	particles: parseFloat( params.get( 'particles' ) || '0.6' ),
+	mist: parseFloat( params.get( 'mist' ) || '0' ),
+	particles: parseFloat( params.get( 'particles' ) || '0.85' ),
 	autoTime: params.get( 'auto' ) === '1',
-	windSpirits: params.get( 'spirits' ) === '1',
-	spiritAmount: 0.1,
+	windSpirits: params.get( 'spirits' ) !== '0',
+	spiritAmount: parseFloat( params.get( 'spiritamount' ) || '0.09' ),
 	sunShafts: params.get( 'shafts' ) !== '0',
 	painterly: params.get( 'grade' ) === '1',
 	view: params.get( 'view' ) === 'third' ? 'third person (jaguar)' : 'first person',
@@ -110,6 +110,7 @@ async function start() {
 	scene.add( herd.group );
 	const spirits = new WindSpirits( isMobile ? 90 : 170 );
 	spirits.mesh.visible = settings.windSpirits;
+	spirits.u.amount.value = settings.spiritAmount;
 	scene.add( spirits.mesh );
 
 	const pollen = new Pollen( isMobile ? 2500 : 6000 );

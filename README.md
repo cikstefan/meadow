@@ -26,7 +26,7 @@ Needs a browser with WebGPU: Chrome / Edge 113+, Safari 26+, Firefox 141+ (Windo
 Auto tour (the camera wandering on its own) is off by default; enable it in the panel or with `?tour=1`.
 
 **URL options:** `?q=low|medium|high|ultra` (disables adaptive quality),
-`?hour=6`, `?grass=1.6`, `?winddir=108`, `?dry=0`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
+`?hour=4.55`, `?grass=1.71`, `?winddir=108`, `?dry=0`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
 
 ## How the grass works
 
