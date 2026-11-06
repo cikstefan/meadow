@@ -46,7 +46,7 @@ const settings = {
 	spiritAmount: parseFloat( params.get( 'spiritamount' ) || '0.09' ),
 	sunShafts: params.get( 'shafts' ) !== '0',
 	painterly: params.get( 'grade' ) === '1',
-	view: { third: 'third person (jaguar)', jaguar: 'third person (jaguar)', raptor: 'third person (raptor)', human: 'third person (human)' }[ params.get( 'view' ) ] || 'first person',
+	view: { third: 'third person (jaguar)', jaguar: 'third person (jaguar)', raptor: 'third person (raptor)' }[ params.get( 'view' ) ] || 'first person',
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
 	exposure: 1.0,
@@ -111,7 +111,8 @@ async function start() {
 	const raptor = makeRaptor(), human = makeHuman();
 	scene.add( raptor.group, human.group );
 	const chars = { 'third person (jaguar)': jaguar, 'third person (raptor)': raptor, 'third person (human)': human };
-	const VIEWS = [ 'first person', ...Object.keys( chars ) ];
+	// the human is hidden from the view list for now (the character code stays in place)
+	const VIEWS = [ 'first person', ...Object.keys( chars ).filter( ( v ) => chars[ v ] !== human ) ];
 	const herd = new DeerHerd();
 	scene.add( herd.group );
 	const spirits = new WindSpirits( isMobile ? 90 : 170 );

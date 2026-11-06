@@ -94,7 +94,7 @@ faintly in the light, as on a real black jaguar. ~1.8x real size.
   camera-relative; **R** toggles always-run, **F** attacks, and the status line shows its gait.
 
 ### More characters: velociraptor and human
-**V** cycles the view: first person → jaguar → raptor → human. Each character loads the first
+**V** cycles the view: first person → jaguar → raptor. (The human character is implemented but hidden from the view list for now.) Each character loads the first
 time it's chosen and appears a few metres ahead. When you switch away it stays in the meadow,
 idling, and goes to sleep after a while. Both run on one shared controller, `src/character.js`,
 which works like the jaguar's:
