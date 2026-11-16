@@ -8,7 +8,7 @@
 // the lake, the shrubs and the ghost forest of fire-killed lenga trees.
 
 import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If } from 'three/tsl';
-import { vnoise, hash2i, hash2i2 } from '../../tsl/noise.js';
+import { vnoise, vnoiseJS, hash2i, hash2i2 } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import {
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS,
@@ -33,6 +33,17 @@ export const cloudShadowAt = ( xz, y ) => {
 };
 
 const cloudShadow = Fn( ( [ xz ] ) => cloudShadowAt( xz, float( 0 ) ) );
+
+// CPU mirror of the cloud-shadow noise (0..1 'lit' value before thresholding)
+export function cloudFieldJS( x, z, y, offset ) {
+
+	const s = U.trueSunDir.value;
+	const t = Math.min( 9, 1 / Math.max( s.y, 0.06 ) );
+	const H = Math.max( 1300 - y, 0 ) * t * 0.35;
+	const px = x + s.x * H - offset.x, pz = z + s.z * H - offset.y;
+	return vnoiseJS( px / 380, pz / 380 ) * 0.58 + vnoiseJS( px / 130 + 3, pz / 130 + 8 ) * 0.3 + vnoiseJS( px / 42 + 11, pz / 42 + 2 ) * 0.12;
+
+}
 
 // cellular noise -> (distance to nearest stone centre, edge distance, stone id hash)
 const pebbles = ( p ) => {
@@ -102,6 +113,8 @@ export const PLAINS = {
 	loading: 'walking in from Italiano…',
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo,
 	animals: false,
+	// the sun sets over the low south-western hills (not behind Paine Grande)
+	sunAzOffset: - 24,
 	// on-screen help (desktop) and credits: everything here is procedural
 	help: '<b>drag</b> look · <b>WASD</b> move · <b>shift</b> run · <b>wheel / Q E</b> height · <b>M</b> sound',
 	credit: '',
@@ -111,7 +124,7 @@ export const PLAINS = {
 
 	defaults: {
 		hour: 16.45, clouds: 0.58, wind: 2.0, windAngle: 6, grassHeight: 1.0, dryPatches: 0.48, mist: 0,
-		particles: 0.3, spirits: false, spiritAmount: 0, shafts: true,
+		particles: 0.3, spirits: false, spiritAmount: 0, shafts: true, glow: 0,
 	},
 
 	// you start on the trail looking up the French Valley

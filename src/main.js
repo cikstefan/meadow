@@ -43,7 +43,7 @@ const settings = {
 	windAngle: num( 'winddir', D.windAngle ),
 	grassHeight: num( 'grass', D.grassHeight ),
 	dryPatches: num( 'dry', D.dryPatches ),
-	flowerGlow: 1.0,
+	flowerGlow: D.glow ?? 1.0,
 	mist: num( 'mist', D.mist ),
 	particles: num( 'particles', D.particles ),
 	autoTime: params.get( 'auto' ) === '1',
@@ -276,7 +276,7 @@ async function start() {
 
 		const h = settings.hour;
 		const el = sunElevation( h );
-		const az = 90 + ( h - 6 ) / 12 * 180;
+		const az = 90 + ( h - 6 ) / 12 * 180 + ( BIOME.sunAzOffset || 0 );
 		sky.setAtmosphere( el, az, settings.clouds );
 		// eyes adapt at night: lift exposure so the moonlit meadow stays readable
 		// daylight is bright: settle at ~0.8 exposure once the sun is up; dawn,

@@ -214,8 +214,7 @@ function tangle( seed, detail ) {
 const VARIANTS = [
 	{ make: ( s, d ) => snag( s, d, true ), share: 0.26, scale: [ 0.75, 1.35 ], upright: true },
 	{ make: ( s, d ) => snag( s + 1, d, true ), share: 0.16, scale: [ 0.7, 1.2 ], upright: true },
-	{ make: ( s, d ) => snag( s + 2, d, false ), share: 0.2, scale: [ 0.8, 1.3 ], upright: true },
-	{ make: ( s, d ) => stump( s + 3, d ), share: 0.1, scale: [ 0.8, 1.4 ], upright: true },
+	{ make: ( s, d ) => snag( s + 2, d, false ), share: 0.3, scale: [ 0.6, 1.3 ], upright: true },
 	{ make: ( s, d ) => log( s + 4, d ), share: 0.16, scale: [ 0.8, 1.3 ], upright: false, near: 600 },
 	{ make: ( s, d ) => tangle( s + 5, d ), share: 0.12, scale: [ 0.8, 1.5 ], upright: false, near: 350 },
 ];
