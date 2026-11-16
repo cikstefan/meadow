@@ -107,7 +107,7 @@ function bushGeometry( sp, cards, cardScale, seed ) {
 }
 
 // scatter every species once (deterministic)
-function scatter() {
+function scatter( density = 1 ) {
 
 	const out = SPECIES.map( () => [] );
 	const cell = 4.2;
@@ -134,7 +134,7 @@ function scatter() {
 		// overall acceptance: a lot of open grassland between bushes
 		// thicker scrub close to the trail and around the start (photo: bushes line the path)
 		const close = Math.max( 0, 1 - d0 / 260 ) * 0.35 + Math.max( 0, 1 - trailDistJS( x, z ) / 14 ) * 0.4;
-		if ( roll > total * ( 0.32 + close ) ) continue;
+		if ( roll > total * ( 0.32 + close ) * density ) continue;
 		let k = 0, acc = w[ 0 ] / total;
 		while ( pick > acc && k < 3 ) {
 
@@ -161,12 +161,13 @@ export class Shrubs {
 		const t0 = performance.now();
 		this.atlas = buildFoliageAtlas();
 		this.data = scatter();
+		this.density = 1;
 		this.group = new THREE.Group();
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
 		this.meshes = SPECIES.map( ( sp, si ) => [ 0, 1, 2 ].map( ( lod ) => {
 
 			const geo = bushGeometry( sp, sp.cards[ lod ], [ 1, 1.85, 3.4 ][ lod ], 99 + si * 7 + lod );
-			const cap = this.data[ si ].length / 8;
+			const cap = Math.ceil( this.data[ si ].length / 8 * 2.4 ) + 16;
 			const a = new THREE.InstancedBufferAttribute( new Float32Array( cap * 4 ), 4 );
 			const b = new THREE.InstancedBufferAttribute( new Float32Array( cap * 4 ), 4 );
 			a.setUsage( THREE.DynamicDrawUsage ); b.setUsage( THREE.DynamicDrawUsage );
@@ -267,6 +268,15 @@ export class Shrubs {
 	}
 
 	// re-bucket instances into the near / far LOD when the camera has moved
+	// re-scatter with a new density (0..2); buffers were sized for 2.4x the default
+	setDensity( d ) {
+
+		this.density = d;
+		this.data = scatter( d );
+		this.lastPos.set( 1e9, 0, 0 );
+
+	}
+
 	update( renderer, camera ) {
 
 		const cp = camera.position;
@@ -283,6 +293,7 @@ export class Shrubs {
 				const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z;
 				const r2 = dx * dx + dz * dz;
 				const l = r2 < L0 ? 0 : r2 < L1 ? 1 : 2;
+				if ( n[ l ] * 4 >= A[ l ].length ) continue;
 				const a = A[ l ], b = B[ l ], k = ( n[ l ] ++ ) * 4;
 				a[ k ] = d[ i ]; a[ k + 1 ] = d[ i + 1 ]; a[ k + 2 ] = d[ i + 2 ]; a[ k + 3 ] = d[ i + 3 ];
 				b[ k ] = d[ i + 4 ]; b[ k + 1 ] = d[ i + 5 ]; b[ k + 2 ] = d[ i + 6 ]; b[ k + 3 ] = d[ i + 7 ];

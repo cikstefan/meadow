@@ -159,6 +159,19 @@ export const PLAINS = {
 		density: 0.5, grassFollow: 0,
 	},
 
+	// a GUI folder for the plains' own knobs
+	buildGui( gui, extras ) {
+
+		if ( ! extras ) return;
+		const f = gui.addFolder( 'Plains' );
+		const k = { scrub: 1, ghosts: 1 };
+		f.add( k, 'scrub', 0, 2, 0.05 ).name( 'scrub density' ).onFinishChange( ( v ) => extras.shrubs.setDensity( v ) );
+		f.add( k, 'ghosts', 0, 2, 0.05 ).name( 'ghost forest' ).onFinishChange( ( v ) => extras.trees.setDensity( v ) );
+		f.add( extras.caps.mesh, 'visible' ).name( 'summit clouds' );
+		f.add( extras.water, 'visible' ).name( 'lake' );
+
+	},
+
 	// systems the meadow doesn't have; loaded lazily so the meadow stays lean
 	async createExtras( ctx ) {
 

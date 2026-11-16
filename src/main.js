@@ -433,6 +433,8 @@ async function start() {
 
 	}
 
+	if ( BIOME.buildGui ) BIOME.buildGui( gui, extras, settings );
+
 	const squid = gui.addFolder( '✦ Sword of the Sea mode (prototype)' );
 	squid.add( settings, 'windSpirits' ).name( 'wind spirits' ).onChange( ( v ) => ( spirits.mesh.visible = v ) );
 	squid.add( settings, 'spiritAmount', 0, 1, 0.005 ).name( 'spirit amount' ).onChange( ( v ) => ( spirits.u.amount.value = v ) ).listen();

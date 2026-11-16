@@ -1,4 +1,4 @@
-# Meadow
+# Meadow · Torres del Paine
 
 A procedural, GPU-driven meadow for the browser: over a million wind-swept grass
 blades plus wildflowers, generated and culled every frame on the GPU with
@@ -27,6 +27,69 @@ Auto tour (the camera wandering on its own) is off by default; enable it in the 
 
 **URL options:** `?q=low|medium|high|ultra` (disables adaptive quality),
 `?hour=4.55`, `?grass=1.71`, `?winddir=108`, `?dry=0`, `?clouds=0.35`, `?wind=0.55`, `?bloom=0`, `?tour=0`, `?sound=0`, `?nogui`.
+
+## Two worlds
+
+A small switcher at the top of the page flips between two worlds. It reloads with
+`?world=plains` or `?world=meadow`, keeping your other settings.
+
+- **Torres del Paine** (the default): the windswept plains of the W Trek between Campamento
+  Italiano and Paine Grande, above Lago Skottsberg, in late spring on a stormy golden evening.
+- **Meadow**: the original endless meadow with wildflowers, deer, the black jaguar and the raptor.
+
+### Torres del Paine plains
+
+You start on the gravel trail, looking up the French Valley. Paine Grande's dark wall
+and hanging glacier are on the left, the granite Cuernos rise beyond the turquoise
+lake on the right, and the low sun stands behind your left shoulder.
+
+- **Terrain:** rolling plains with knolls and gullies, a trodden gravel trail (pebbles from
+  cellular noise), bare schist patches, and a bluff down to the lake. The height function
+  exists twice, on the GPU and bit-exact on the CPU, so the walker, the scatter and the
+  grass agree.
+- **Far landscape:** a static 16 km polar mesh. It holds the plains, the lake basin and the
+  massifs, each built from a crest polyline with ridged noise:
+  - **Paine Grande:** dark rock with strata, snow on ledges only, and Glaciar Francés with
+    crevasses.
+  - **Cuernos:** separate towers with near-vertical, fluted granite walls under pointed dark
+    sedimentary horns.
+  - **Horizon:** the pale valley head up the French Valley, and low hills.
+  - **Rock relief:** comes from grid curvature, so gullies hold shadow and ridges catch
+    light. Under the walkable area the mesh sinks below the camera-following ground mesh.
+- **Lago Skottsberg:** milky turquoise glacial water. Chop runs downwind, gusts darken and
+  roughen the water (cat's paws), and whitecaps appear in strong wind; there is a sun glint
+  and only a little sky reflection, because glacial flour scatters light.
+- **Grass:** the meadow's GPU grass with a coirón palette and tussock mode. Some clumps are
+  tall golden tussocks, the rest a short green sward. The blades are finer and flutter fast
+  in the wind, and there is none on the trail.
+- **Scrub:** about 30k bushes, each a cloud of alpha-to-coverage cards from a procedural
+  foliage atlas painted on a canvas. The bushes are built from 2–4 overlapping lobes, sway
+  with the gusts and flutter their outer sprigs, and use three LODs bucketed on the CPU as
+  you walk. Species:
+  - **notro** (Chilean firebush) in scarlet bloom, thickest along the trail
+  - **calafate** with tiny yellow flowers
+  - **mata negra**
+  - **mata barrosa** cushions on gravel
+- **Ghost forest:** about 10k silver-white dead lenga, built as procedural tapered tubes with
+  fluted bark, grain, cracks and lichen: tall snags with broken limbs, short snags, fallen
+  logs and branch tangles, with three LODs.
+- **Flowers:** the meadow's flower system with Patagonian species: capachito (slipper
+  flower), violet, white star, yellow senecio and pink oxalis. They grow low, along the
+  trail verges.
+- **Sky:** a storm deck racing east. The cloud masses are domain-warped and self-shadowed
+  along the sun direction, so they have dark bellies, silver edges and blue gaps, and they
+  open along the horizon where the low sun breaks through (sun shafts on).
+- **Summit clouds:** orographic banners wrap Paine Grande's summit and stream off the horns.
+  Billboard puffs form upwind, drift and dissolve downwind.
+- **Dappled light:** sharp-edged, fast cloud shadows are projected along the low sun, so they
+  stretch across the plains and race up the mountain flanks. At load the clouds are placed so
+  the sun breaks through on the trail ahead.
+- **Wind:** a strong westerly by default (wind 2.0, up to 2.5).
+- **Plains panel:** scrub and ghost-forest density re-scatter live; the summit clouds and the
+  lake can be switched off.
+
+Everything about the place is data in `src/biomes/plains/layout.js`: ridge lines, peak
+heights, the Cuernos towers, the lake outline and the trail.
 
 ## How the grass works
 
@@ -200,6 +263,16 @@ src/sky.js        sky dome, clouds, time-of-day palette
 src/pollen.js     floating pollen
 src/audio.js      procedural music, wind, wildlife, footsteps
 src/controls.js   walk / look / auto-tour camera
+src/biomes/       world definitions: index.js picks the world; meadow.js; plains/
+  plains/layout.js      geography (ridges, towers, lake, trail) as numbers
+  plains/terrain.js     height + fields, GPU and CPU, mountains (CPU)
+  plains/index.js       palettes, species, defaults, dappled shadows, trail gravel
+  plains/backdrop.js    16 km far landscape + rock / snow / glacier shading
+  plains/water.js       Lago Skottsberg
+  plains/shrubs.js      notro, calafate, mata negra, mata barrosa (+ atlas.js)
+  plains/deadtrees.js   the ghost forest
+  plains/summitclouds.js orographic cloud banners
+src/ui/worldswitch.js the world switcher
 src/jaguar.js     jaguar: materials, clip blending, rest states, foot IK
 src/retarget.js   bakes clips from one skeleton onto another (tiger → jaguar, Mixamo → human)
 src/character.js  clip-driven third-person character (raptor, human)

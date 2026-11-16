@@ -48,7 +48,7 @@ export async function createPlainsExtras( { scene } ) {
 	let first = true;
 	const systems = [ shrubs, trees, caps ];
 	return {
-		backdrop, water, shrubs, trees, systems,
+		backdrop, water, shrubs, trees, caps, systems,
 		update( renderer, camera, dt ) {
 
 			if ( first ) {

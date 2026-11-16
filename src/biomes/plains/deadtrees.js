@@ -219,7 +219,7 @@ const VARIANTS = [
 	{ make: ( s, d ) => tangle( s + 5, d ), share: 0.12, scale: [ 0.8, 1.5 ], upright: false, near: 350 },
 ];
 
-function scatter() {
+function scatter( density = 1 ) {
 
 	const out = VARIANTS.map( () => [] );
 	const r = rng( 424242 );
@@ -232,7 +232,7 @@ function scatter() {
 		const roll = r(), pick = r();
 		if ( d0 > RADIUS ) continue;
 		const dens = ghostDensityJS( x, z );
-		if ( roll > dens * 0.85 + 0.035 ) continue;
+		if ( roll > ( dens * 0.85 + 0.035 ) * density ) continue;
 		if ( trailDistJS( x, z ) < 2.5 || lakeDistJS( x, z ) < 12 ) continue;
 		let k = 0, acc = VARIANTS[ 0 ].share;
 		while ( pick > acc && k < VARIANTS.length - 1 ) {
@@ -262,12 +262,13 @@ export class DeadTrees {
 
 		const t0 = performance.now();
 		this.data = scatter();
+		this.density = 1;
 		this.group = new THREE.Group();
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
 		this.meshes = VARIANTS.map( ( V, vi ) => [ 2, 1, 0 ].map( ( detail ) => {
 
 			const geo = V.make( 1000 + vi * 31, detail );
-			const cap = this.data[ vi ].length / 8;
+			const cap = Math.ceil( this.data[ vi ].length / 8 * 2.4 ) + 16;
 			const a = new THREE.InstancedBufferAttribute( new Float32Array( Math.max( cap, 1 ) * 4 ), 4 );
 			const b = new THREE.InstancedBufferAttribute( new Float32Array( Math.max( cap, 1 ) * 4 ), 4 );
 			a.setUsage( THREE.DynamicDrawUsage ); b.setUsage( THREE.DynamicDrawUsage );
@@ -282,6 +283,15 @@ export class DeadTrees {
 		} ) );
 		const n = this.data.reduce( ( s, d ) => s + d.length / 8, 0 );
 		console.log( `trees: ${ n } ghost trees / logs (${ ( performance.now() - t0 ).toFixed( 0 ) } ms)` );
+
+	}
+
+	// re-scatter with a new density (0..2); buffers were sized for 2.4x the default
+	setDensity( d ) {
+
+		this.density = d;
+		this.data = scatter( d );
+		this.lastPos.set( 1e9, 0, 0 );
 
 	}
 
@@ -301,6 +311,7 @@ export class DeadTrees {
 				const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z;
 				const r2 = dx * dx + dz * dz;
 				const l = r2 < L0 ? 0 : r2 < L1 ? 1 : 2;
+				if ( n[ l ] * 4 >= A[ l ].length ) continue;
 				const k = ( n[ l ] ++ ) * 4;
 				for ( let j = 0; j < 4; j ++ ) {
 
