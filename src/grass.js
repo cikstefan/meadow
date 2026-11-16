@@ -164,9 +164,14 @@ export class Grass {
 
 			// --- meadow-scale variation
 			const tall = fieldTall( xz );
-			const dry = fieldDry( xz );
+			const dry0 = fieldDry( xz );
 
+			// tussock grassland (plains): some clumps are tall golden tussocks,
+			// the rest a short green sward between them
+			const tus = smoothstep( 0.5, 0.62, cH ).mul( G.tussock || 0 );
+			const dry = G.tussock ? max( dry0.mul( mix( 0.4, 1.0, tus ) ), tus.mul( 0.9 ) ) : dry0;
 			const h = mix( G.hMin, G.hMax, tall )
+				.mul( mix( 1.0, mix( 0.32, 1.35, tus ), G.tussock || 0 ) )
 				.mul( mix( 0.72, 1.18, cH ) )
 				.mul( mix( 0.7, 1.15, b0 ) )
 				// blades at the clump centre are taller (tussock dome)

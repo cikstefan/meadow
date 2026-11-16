@@ -44,7 +44,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const n2 = vnoise( xz.mul( 37.0 ).add( vec2( 5.0, 1.0 ) ) );
 	const n3 = vnoise( xz.mul( 2.1 ).add( vec2( 9.0, 4.0 ) ) );
 	// pale grey-brown gravel with darker pebbles and a few light quartz chips
-	const gravel = mix( vec3( 0.17, 0.155, 0.13 ), vec3( 0.3, 0.28, 0.24 ), n1.mul( 0.55 ).add( n3.mul( 0.45 ) ) )
+	const gravel = mix( vec3( 0.24, 0.225, 0.2 ), vec3( 0.42, 0.4, 0.36 ), n1.mul( 0.55 ).add( n3.mul( 0.45 ) ) )
 		.mul( mix( 0.72, 1.12, smoothstep( 0.35, 0.65, n2 ) ) );
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
 	const a = mix( albedo, soil, verge.mul( 0.55 ).mul( float( 1.0 ).sub( toCanopy ) ) ).toVar();
@@ -83,13 +83,13 @@ export const PLAINS = {
 
 	// coirón (golden tussock grass) mixed with fresh spring green
 	grass: {
-		hMin: 0.035, hMax: 0.4, wMin: 0.006, wMax: 0.016, flutter: 0.16, flutterHz: [ 4.5, 9.0 ],
-		lushBase: [ 0.03, 0.04, 0.012 ], lushTipA: [ 0.14, 0.22, 0.05 ], lushTipB: [ 0.2, 0.27, 0.06 ], lushTipC: [ 0.1, 0.2, 0.05 ],
+		hMin: 0.06, hMax: 0.42, wMin: 0.0045, wMax: 0.012, flutter: 0.16, tussock: 1, flutterHz: [ 4.5, 9.0 ],
+		lushBase: [ 0.035, 0.05, 0.014 ], lushTipA: [ 0.15, 0.25, 0.05 ], lushTipB: [ 0.22, 0.3, 0.07 ], lushTipC: [ 0.11, 0.23, 0.055 ],
 		dryBase: [ 0.13, 0.1, 0.045 ], dryTipA: [ 0.5, 0.38, 0.18 ], dryTipB: [ 0.66, 0.53, 0.3 ], dead: 0.8,
 	},
 
 	ground: {
-		soilA: [ 0.055, 0.045, 0.03 ], soilB: [ 0.12, 0.1, 0.07 ], thatch: [ 0.14, 0.115, 0.06 ],
+		soilA: [ 0.06, 0.055, 0.03 ], soilB: [ 0.11, 0.1, 0.06 ], thatch: [ 0.085, 0.11, 0.035 ],
 		lushA: [ 0.13, 0.17, 0.05 ], lushB: [ 0.21, 0.23, 0.08 ], straw: [ 0.44, 0.35, 0.17 ],
 	},
 

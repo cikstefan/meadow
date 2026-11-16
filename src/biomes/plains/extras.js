@@ -4,6 +4,7 @@ import { buildBackdrop } from './backdrop.js';
 import { buildWater } from './water.js';
 import { Shrubs } from './shrubs.js';
 import { DeadTrees } from './deadtrees.js';
+import { buildSummitClouds } from './summitclouds.js';
 
 export async function createPlainsExtras( { scene } ) {
 
@@ -15,7 +16,9 @@ export async function createPlainsExtras( { scene } ) {
 	scene.add( shrubs.group );
 	const trees = new DeadTrees();
 	scene.add( trees.group );
-	const systems = [ shrubs, trees ];
+	const caps = buildSummitClouds();
+	scene.add( caps.mesh );
+	const systems = [ shrubs, trees, caps ];
 	return {
 		backdrop, water, shrubs, trees, systems,
 		update( renderer, camera, dt ) {
