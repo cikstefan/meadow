@@ -246,7 +246,8 @@ function towersJS( x, z ) {
 		const dx = x - t.x, dz = z - t.z;
 		const ang = Math.atan2( dz, dx );
 		// irregular footprint (buttresses, chimneys)
-		const rr = t.r * ( 0.8 + 0.25 * vnoiseJS( Math.cos( ang ) * 2.2 + t.x * 0.001, Math.sin( ang ) * 2.2 + 5 ) + 0.08 * Math.sin( ang * 5 ) );
+		// irregular footprint: buttresses and chimneys run straight down the walls
+		const rr = t.r * ( 0.8 + 0.25 * vnoiseJS( Math.cos( ang ) * 2.2 + t.x * 0.001, Math.sin( ang ) * 2.2 + 5 ) + 0.07 * Math.sin( ang * 5 ) + 0.05 * Math.sin( ang * 13 + t.z * 0.01 ) + 0.035 * Math.sin( ang * 29 ) );
 		const d = Math.hypot( dx, dz ) / rr;
 		if ( d > 2.2 ) continue;
 		// walls: near-vertical between d 1.0 and 1.25, talus below

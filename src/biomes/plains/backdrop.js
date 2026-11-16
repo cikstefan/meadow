@@ -30,6 +30,7 @@ export function buildBackdrop() {
 	const nV = ( NR + 1 ) * NA;
 	const pos = new Float32Array( nV * 3 );
 	const info = new Float32Array( nV * 2 ); // massif id, lake distance
+	const curv = new Float32Array( nV ); // convexity (ridges +, gullies -)
 	for ( let i = 0; i <= NR; i ++ ) {
 
 		const r = R0 * Math.pow( R1 / R0, i / NR );
@@ -42,7 +43,21 @@ export function buildBackdrop() {
 			info[ k * 2 ] = r > 900 ? massifIdJS( x, z ) : 0;
 			info[ k * 2 + 1 ] = lakeDistJS( x, z );
 
+
 		}
+
+	}
+
+	// convexity from the grid neighbours (ridges +, gullies -), 2-ring stencil
+	for ( let i = 2; i <= NR - 2; i ++ ) for ( let j = 0; j < NA; j ++ ) {
+
+		const k = i * NA + j;
+		const h = ( ii, jj ) => pos[ ( ii * NA + ( ( jj + NA ) % NA ) ) * 3 + 1 ];
+		const r = Math.hypot( pos[ k * 3 ], pos[ k * 3 + 2 ] );
+		if ( r < 900 ) continue;
+		const lap = ( h( i - 2, j ) + h( i + 2, j ) + h( i, j - 2 ) + h( i, j + 2 ) ) * 0.25 - h( i, j );
+		const e = r * 0.025; // ~ 2 grid steps
+		curv[ k ] = Math.max( - 1, Math.min( 1, - lap / e * 2.2 ) );
 
 	}
 
@@ -59,6 +74,7 @@ export function buildBackdrop() {
 	const geo = new THREE.BufferGeometry();
 	geo.setAttribute( 'position', new THREE.BufferAttribute( pos, 3 ) );
 	geo.setAttribute( 'info', new THREE.BufferAttribute( info, 2 ) );
+	geo.setAttribute( 'curv', new THREE.BufferAttribute( curv, 1 ) );
 	geo.setIndex( new THREE.BufferAttribute( idx, 1 ) );
 	geo.computeVertexNormals();
 	geo.boundingSphere = new THREE.Sphere( new THREE.Vector3(), R1 * 1.2 );
@@ -78,6 +94,7 @@ function backdropMaterial() {
 	const vW = varying( vec3( 0 ), 'vBW' );
 	const vN = varying( vec3( 0, 1, 0 ), 'vBN' );
 	const vI = varying( vec2( 0 ), 'vBI' );
+	const vK = varying( float( 0 ), 'vBK' );
 	const nearHalf = uniform( 600 );
 
 	mat.positionNode = Fn( () => {
@@ -89,6 +106,7 @@ function backdropMaterial() {
 		vW.assign( positionLocal );
 		vN.assign( attribute( 'normal', 'vec3' ) );
 		vI.assign( attribute( 'info', 'vec2' ) );
+		vK.assign( attribute( 'curv', 'float' ) );
 		return p;
 
 	} )();
@@ -128,7 +146,7 @@ function backdropMaterial() {
 		const strata = sin( h.mul( 0.11 ).add( vnoise( xz.div( 90.0 ) ).mul( 6.0 ) ) ).mul( 0.5 ).add( 0.5 );
 		const rn = vnoise( xz.div( 25.0 ).add( vec2( 41, 3 ) ) );
 		const darkRock = mix( vec3( 0.028, 0.027, 0.026 ), vec3( 0.075, 0.068, 0.06 ), rn.mul( 0.6 ).add( strata.mul( 0.4 ) ) );
-		const granite = mix( vec3( 0.25, 0.245, 0.235 ), vec3( 0.42, 0.41, 0.39 ), rn.mul( 0.5 ).add( strata.mul( 0.2 ) ).add( 0.15 ) )
+		const granite = mix( vec3( 0.19, 0.185, 0.175 ), vec3( 0.33, 0.32, 0.3 ), rn.mul( 0.5 ).add( strata.mul( 0.2 ) ).add( 0.15 ) )
 			// vertical water streaks on the walls
 			.mul( mix( 0.78, 1.0, vnoise( vec2( xz.x.add( xz.y ).div( 6.0 ), h.div( 160.0 ) ) ) ) );
 		const capLine = float( CUERNOS.capBase ).add( vnoise( xz.div( 260.0 ) ).sub( 0.5 ).mul( 240.0 ) ).add( sin( xz.x.div( 70.0 ) ).mul( 25.0 ) );
@@ -159,7 +177,7 @@ function backdropMaterial() {
 		const snowLine = float( 1020.0 ).add( vnoise( xz.div( 240.0 ) ).sub( 0.5 ).mul( 320.0 ) );
 		const flatEnough = smoothstep( 0.5, 0.28, slope );
 		const snowN = vnoise( xz.div( 34.0 ).add( vec2( 5, 5 ) ) ).mul( 0.45 ).add( vnoise( xz.div( 130.0 ) ).mul( 0.55 ) );
-		const snow = smoothstep( snowLine, snowLine.add( 90.0 ), h ).mul( smoothstep( 0.45, 0.55, snowN.mul( 0.6 ).add( flatEnough.mul( 0.55 ) ) ) );
+		const snow = smoothstep( snowLine, snowLine.add( 90.0 ), h ).mul( smoothstep( 0.45, 0.55, snowN.mul( 0.6 ).add( flatEnough.mul( 0.55 ) ) ) ).toVar();
 		const gl = polar( PAINE_GRANDE.glacier.az, PAINE_GRANDE.glacier.d );
 		const gd = length( xz.sub( vec2( gl[ 0 ], gl[ 1 ] ) ) ).div( PAINE_GRANDE.glacier.size );
 		const glacier = smoothstep( 1.0, 0.55, gd.add( vnoise( xz.div( 70.0 ) ).sub( 0.5 ).mul( 0.6 ) ) ).mul( smoothstep( 520.0, 760.0, h ) )
@@ -168,8 +186,17 @@ function backdropMaterial() {
 			.mul( mix( 0.7, 1.0, smoothstep( 0.2, 0.6, abs( sin( xz.x.add( xz.y.mul( 0.4 ) ).div( 11.0 ) ) ) ) ) ); // crevasses
 		const snowCol = vec3( 0.86, 0.87, 0.9 );
 		const isMtn = id.greaterThan( 0.5 ).and( id.lessThan( 3.5 ) );
+		// the Cuernos' dark caps are too steep to hold snow; their granite holds only a little
+		const isCu = id.greaterThan( 1.5 ).and( id.lessThan( 2.5 ) );
+		snow.assign( select( isCu, snow.mul( 0.5 ).mul( smoothstep( capLine.add( 30.0 ), capLine.sub( 40.0 ), h ) ), snow ) );
 		const snowAmt = select( isMtn, max( snow, glacier ), float( 0 ) );
 		albedo.assign( mix( albedo, mix( snowCol, iceCol, glacier ), snowAmt ) );
+
+		// --- relief: gullies hold shadow and moisture, ridges and arêtes catch light
+		const relief = clamp( vK, - 1.0, 1.0 );
+		const reliefAO = mix( 0.55, 1.15, smoothstep( - 0.8, 0.6, relief ) );
+		const isRock = id.greaterThan( 0.5 );
+		albedo.mulAssign( select( isRock, reliefAO, float( 1.0 ) ) );
 
 		// --- lighting
 		const L = U.sunDir;
