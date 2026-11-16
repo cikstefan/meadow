@@ -125,26 +125,36 @@ export class Sky {
 			let deck = float( 0 );
 			if ( SK.storm ) {
 
-				// low storm deck: big dark rolls racing downwind, heavier overhead,
-				// breaking open along the horizon (the sun shines in through the gap)
-				const q = dir.xz.div( max( y, 0.0 ).add( 0.05 ) ).mul( 0.32 ).add( drift.mul( 2.6 ) ).toVar();
-				const dn = vnoise( q ).mul( 0.5 )
-					.add( vnoise( q.mul( 2.1 ).add( vec2( 5.1, 2.7 ) ) ).mul( 0.27 ) )
-					.add( vnoise( q.mul( 4.3 ).add( vec2( 1.3, 8.1 ) ) ).mul( 0.15 ) )
-					.add( vnoise( q.mul( 9.1 ).add( vec2( 7.7, 3.3 ) ) ).mul( 0.08 ) );
-				const gap = smoothstep( 0.05, 0.2, y );
-				const thick = smoothstep( 0.3, 0.62, dn.add( smoothstep( 0.15, 0.7, y ).mul( 0.18 ) ) );
-				deck = thick.mul( gap ).mul( SK.storm );
-				const under = U.skyAmb.mul( 0.55 ).add( U.horizon.mul( 0.12 ) );
-				// rims and undersides catch the low sun near its side of the sky
-				const rim = U.sunColor.mul( pow( mu, 3.0 ).mul( 0.22 ).add( 0.015 ) ).mul( float( 1.0 ).sub( smoothstep( 0.45, 0.85, dn ) ) );
-				const deckCol = under.mul( mix( 0.75, 1.25, vnoise( q.mul( 3.0 ).add( vec2( 2, 2 ) ) ) ) ).add( rim );
-				col.assign( mix( col, deckCol, deck.mul( 0.96 ) ) );
+				// low storm deck racing downwind: domain-warped cloud masses, self-shadowed
+				// along the sun direction (bright sun-facing edges, dark bellies), broken
+				// by gaps of deep blue and opening up along the horizon
+				const fbm = ( v ) => vnoise( v ).mul( 0.5 )
+					.add( vnoise( v.mul( 2.03 ).add( vec2( 5.1, 2.7 ) ) ).mul( 0.25 ) )
+					.add( vnoise( v.mul( 4.1 ).add( vec2( 1.3, 8.1 ) ) ).mul( 0.15 ) )
+					.add( vnoise( v.mul( 8.7 ).add( vec2( 7.7, 3.3 ) ) ).mul( 0.1 ) );
+				const q = dir.xz.div( max( y, 0.0 ).add( 0.045 ) ).mul( 0.26 ).add( drift.mul( 2.4 ) ).toVar();
+				const warp = vec2( vnoise( q.mul( 0.6 ).add( vec2( 9.0, 1.0 ) ) ), vnoise( q.mul( 0.6 ).add( vec2( 3.0, 7.0 ) ) ) ).sub( 0.5 ).mul( 1.4 );
+				const wq = q.add( warp ).toVar();
+				const d0 = fbm( wq );
+				const th = float( 0.44 ).sub( U.cloudCover.mul( 0.4 ) );
+				const gapH = smoothstep( 0.035, 0.16, y );
+				const dens2 = smoothstep( th, th.add( 0.085 ), d0 ).mul( gapH );
+				// light march toward the sun (one step in the cloud plane)
+				const sunP = normalize( vec2( U.trueSunDir.x, U.trueSunDir.z ).add( vec2( 1e-4, 0 ) ) ).mul( 0.16 );
+				const dl = fbm( wq.add( sunP ) );
+				const shadowed = smoothstep( th.sub( 0.04 ), th.add( 0.3 ), dl );
+				const thickness = smoothstep( th.add( 0.02 ), th.add( 0.3 ), d0 );
+				const ambL = dot( U.skyAmb, vec3( 0.2126, 0.7152, 0.0722 ) );
+				const dark = mix( vec3( ambL ), U.skyAmb, 0.3 ).mul( 0.42 ).add( U.horizon.mul( 0.035 ) ).mul( mix( 0.7, 1.3, vnoise( wq.mul( 3.1 ).add( vec2( 4, 4 ) ) ) ) );
+				const lit = U.sunColor.mul( 0.11 ).add( vec3( dot( U.horizon, vec3( 0.2126, 0.7152, 0.0722 ) ) ).mul( 0.3 ) ).add( U.horizonSun.mul( U.twilight.mul( 0.3 ) ) );
+				const deckCol = mix( lit, dark, max( shadowed.mul( 0.95 ), thickness.mul( 0.88 ) ) )
+					// silver lining toward the sun on thin edges
+					.add( U.trueSunColor.mul( pow( mu, 5.0 ).mul( 0.5 ).mul( float( 1.0 ).sub( thickness ) ) ) );
+				deck = dens2.mul( SK.storm );
+				col.assign( mix( col, deckCol, deck.mul( 0.97 ) ) );
 
 			}
 
-			// sun disk (HDR, picked up by bloom), dimmed behind clouds
-			// (at night the "sun" uniforms carry the moon: bigger, relatively brighter disk)
 			const clear = float( 1.0 ).sub( dens.mul( 0.85 ) ).mul( float( 1.0 ).sub( deck ) );
 			const disk = smoothstep( 0.99985, 0.99995, mu ).mul( clear );
 			col.addAssign( U.trueSunColor.mul( disk ).mul( 18.0 ) );

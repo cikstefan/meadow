@@ -229,6 +229,41 @@ function massif( m, x, z, seed ) {
 
 }
 
+// Cuernos towers: sheer granite walls (steep plateau profile) topped by a
+// pointed dark horn, all slightly irregular
+const TOWERS = CUERNOS.towers.map( ( [ az, d, h, r, horn ] ) => {
+
+	const a = az * Math.PI / 180;
+	return { x: Math.sin( a ) * d, z: - Math.cos( a ) * d, h, r, horn };
+
+} );
+
+function towersJS( x, z ) {
+
+	let m = 0;
+	for ( const t of TOWERS ) {
+
+		const dx = x - t.x, dz = z - t.z;
+		const ang = Math.atan2( dz, dx );
+		// irregular footprint (buttresses, chimneys)
+		const rr = t.r * ( 0.8 + 0.25 * vnoiseJS( Math.cos( ang ) * 2.2 + t.x * 0.001, Math.sin( ang ) * 2.2 + 5 ) + 0.08 * Math.sin( ang * 5 ) );
+		const d = Math.hypot( dx, dz ) / rr;
+		if ( d > 2.2 ) continue;
+		// walls: near-vertical between d 1.0 and 1.25, talus below
+		const wall = 1 - ss( 0.85, 1.22, d );
+		const talus = ( 1 - ss( 1.0, 2.2, d ) ) * 0.38;
+		const top = t.h * Math.max( wall, talus * ( 1 - wall ) + wall );
+		// the horn: a pointed cap on the summit plateau
+		const horn = t.horn * Math.pow( Math.max( 0, 1 - d / 0.75 ), 1.6 ) * ( 0.85 + 0.3 * vnoiseJS( dx / 60, dz / 60 ) );
+		const crag = ( ridged( x / 140, z / 140, 3 ) - 0.5 ) * 70 * wall;
+		m = Math.max( m, top + horn + crag );
+
+	}
+
+	return m;
+
+}
+
 // the far landscape: base terrain + every massif (smooth union)
 export function landHeightJS( x, z ) {
 
@@ -238,7 +273,7 @@ export function landHeightJS( x, z ) {
 	if ( k <= 0 ) return base;
 	let m = 0;
 	m = Math.max( m, massif( PAINE_GRANDE, x, z, 3.1 ) );
-	m = Math.max( m, massif( CUERNOS, x, z, 7.7 ) );
+	m = Math.max( m, massif( CUERNOS, x, z, 7.7 ), towersJS( x, z ) );
 	m = Math.max( m, massif( VALLEY_HEAD, x, z, 11.3 ) );
 	m = Math.max( m, massif( FAR_HILLS, x, z, 19.9 ) );
 	// broad foothill rise toward Paine Grande and the valley head
@@ -249,7 +284,7 @@ export function landHeightJS( x, z ) {
 // which massif dominates at a point (for materials): 0 none, 1 Paine Grande, 2 Cuernos, 3 valley head, 4 hills
 export function massifIdJS( x, z ) {
 
-	const v = [ massif( PAINE_GRANDE, x, z, 3.1 ), massif( CUERNOS, x, z, 7.7 ), massif( VALLEY_HEAD, x, z, 11.3 ), massif( FAR_HILLS, x, z, 19.9 ) ];
+	const v = [ massif( PAINE_GRANDE, x, z, 3.1 ), Math.max( massif( CUERNOS, x, z, 7.7 ), towersJS( x, z ) ), massif( VALLEY_HEAD, x, z, 11.3 ), massif( FAR_HILLS, x, z, 19.9 ) ];
 	let id = 0, best = 20;
 	v.forEach( ( h, i ) => {
 
@@ -269,9 +304,9 @@ export function massifIdJS( x, z ) {
 // 0..1 tussock height (coirón tussocks, short-grazed hollows)
 export const fieldTall = Fn( ( [ xz ] ) => {
 
-	const a = smoothstep( 0.15, 0.85, vnoise( xz.div( 31 ).add( vec2( 41.0, 3.0 ) ) ) );
+	const a = smoothstep( 0.3, 0.9, vnoise( xz.div( 31 ).add( vec2( 41.0, 3.0 ) ) ) );
 	const b = vnoise( xz.div( 7.5 ).add( vec2( 9.0, 77.0 ) ) );
-	return a.mul( 0.65 ).add( b.mul( 0.35 ) );
+	return a.mul( 0.62 ).add( b.mul( b ).mul( 0.38 ) );
 
 } );
 
@@ -280,7 +315,7 @@ export const fieldDry = Fn( ( [ xz ] ) => {
 
 	const a = vnoise( xz.div( 46 ).add( vec2( 101.0, 19.0 ) ) );
 	const b = vnoise( xz.div( 9.0 ).add( vec2( 5.0, 33.0 ) ) );
-	return smoothstep( 0.32, 0.78, a.mul( 0.72 ).add( b.mul( 0.28 ) ) ).mul( U.dry );
+	return smoothstep( 0.38, 0.8, a.mul( 0.72 ).add( b.mul( 0.28 ) ) ).mul( U.dry );
 
 } );
 
@@ -296,8 +331,9 @@ export const fieldFlowers = Fn( ( [ xz ] ) => {
 
 export function fieldsJS( x, z ) {
 
-	const tall = ss( 0.15, 0.85, vnoiseJS( x / 31 + 41, z / 31 + 3 ) ) * 0.65 + vnoiseJS( x / 7.5 + 9, z / 7.5 + 77 ) * 0.35;
-	const dry = ss( 0.32, 0.78, vnoiseJS( x / 46 + 101, z / 46 + 19 ) * 0.72 + vnoiseJS( x / 9 + 5, z / 9 + 33 ) * 0.28 ) * U.dry.value;
+	const tb = vnoiseJS( x / 7.5 + 9, z / 7.5 + 77 );
+	const tall = ss( 0.3, 0.9, vnoiseJS( x / 31 + 41, z / 31 + 3 ) ) * 0.62 + tb * tb * 0.38;
+	const dry = ss( 0.38, 0.8, vnoiseJS( x / 46 + 101, z / 46 + 19 ) * 0.72 + vnoiseJS( x / 9 + 5, z / 9 + 33 ) * 0.28 ) * U.dry.value;
 	const flowers = Math.min( 1, ss( 0.55, 0.92, vnoiseJS( x / 19 + 7, z / 19 + 140 ) * 0.7 + vnoiseJS( x / 4 + 66, z / 4 + 12 ) * 0.3 ) + ss( 4, 0.8, trailDistJS( x, z ) ) * 0.45 );
 	return { tall, dry, flowers };
 
@@ -336,7 +372,9 @@ export function shrubDensityJS( x, z ) {
 	const a = vnoiseJS( x / 38 + 5, z / 38 + 71 );
 	const b = vnoiseJS( x / 11 + 41, z / 11 + 9 );
 	const n = a * 0.7 + b * 0.3;
-	return ss( 0.38, 0.75, n );
+	// thickets crowd the trail edges (photo: notro lining the path)
+	const near = ss( 12, 3, trailDistJS( x, z ) ) * 0.35;
+	return Math.min( 1, ss( 0.38, 0.75, n ) + near );
 
 }
 

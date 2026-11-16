@@ -71,6 +71,14 @@ export const CUERNOS = {
 	steep: 1.7, // sheer granite walls
 	jag: 0.42,
 	capBase: 1020, // height (above the plains) where the dark cap starts
+	// the towers themselves: [azimuth, distance, top height, radius, horn height]
+	towers: [
+		[ 55, 3950, 1380, 330, 260 ], // Cuerno Principal
+		[ 63, 3870, 1300, 260, 200 ], // Cuerno Central
+		[ 72, 3880, 1420, 340, 230 ], // Cuerno Este
+		[ 47, 4250, 1100, 300, 160 ],
+		[ 82, 3980, 1150, 280, 150 ],
+	],
 };
 
 // Distant pale massif up the French Valley (Cerro Fortaleza / Catedral side)

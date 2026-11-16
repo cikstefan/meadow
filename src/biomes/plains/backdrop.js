@@ -107,22 +107,22 @@ function backdropMaterial() {
 		const dist = length( P.sub( cameraPosition ) );
 
 		// --- detail normal: rock facets and gullies (fades with distance)
-		const e = 3.0;
-		const nf = ( q ) => vnoise( q.div( 38.0 ) ).mul( 0.6 ).add( vnoise( q.div( 11.0 ).add( vec2( 3, 7 ) ) ).mul( 0.4 ) );
+		const e = 6.0;
+		const nf = ( q ) => vnoise( q.div( 95.0 ) ).mul( 0.6 ).add( vnoise( q.div( 31.0 ).add( vec2( 3, 7 ) ) ).mul( 0.4 ) );
 		const n0 = nf( xz ), nx = nf( xz.add( vec2( e, 0 ) ) ), nz = nf( xz.add( vec2( 0, e ) ) );
-		const bumpK = smoothstep( 9000.0, 1500.0, dist ).mul( 14.0 ).mul( smoothstep( 0.05, 0.4, slope ) );
+		const bumpK = smoothstep( 9000.0, 1500.0, dist ).mul( 0.0 ).mul( smoothstep( 0.05, 0.4, slope ) );
 		const N = normalize( Ng.add( vec3( n0.sub( nx ), 0, n0.sub( nz ) ).mul( bumpK ) ) );
 
 		// --- plains canopy (matches the near ground's far shading)
 		const c1 = vnoise( xz.mul( 0.05 ).add( vec2( 13, 2 ) ) );
 		const c2 = vnoise( xz.mul( 0.013 ).add( vec2( 3, 5 ) ) );
-		const dry = smoothstep( 0.32, 0.78, vnoise( xz.div( 46 ).add( vec2( 101.0, 19.0 ) ) ).mul( 0.72 ).add( 0.14 ) ).mul( U.dry );
+		const dry = smoothstep( 0.38, 0.8, vnoise( xz.div( 46 ).add( vec2( 101.0, 19.0 ) ) ).mul( 0.72 ).add( 0.14 ) ).mul( U.dry );
 		const canopy = mix( mix( c3( G.lushA ), c3( G.lushB ), c2 ), c3( G.straw ), dry.mul( 0.8 ) ).mul( mix( 0.75, 1.08, c1 ) ).toVar();
 		// scrub and lenga thickets darken the lower slopes, ghost-forest flecks
 		const scrub = smoothstep( 0.45, 0.75, vnoise( xz.div( 160.0 ).add( vec2( 7, 9 ) ) ) );
 		canopy.assign( mix( canopy, vec3( 0.045, 0.06, 0.025 ), scrub.mul( 0.55 ) ) );
 		const ghosts = smoothstep( 0.82, 0.9, vnoise( xz.div( 7.0 ) ) ).mul( smoothstep( 0.4, 0.7, vnoise( xz.div( 140.0 ).add( vec2( 13, 29 ) ) ) ) );
-		canopy.assign( mix( canopy, vec3( 0.42, 0.42, 0.4 ), ghosts.mul( smoothstep( 6000.0, 900.0, dist ) ).mul( 0.5 ) ) );
+		canopy.assign( mix( canopy, vec3( 0.36, 0.36, 0.34 ), ghosts.mul( smoothstep( 4000.0, 900.0, dist ) ).mul( smoothstep( 260.0, 60.0, h ) ).mul( 0.22 ) ) );
 
 		// --- rock palettes
 		const strata = sin( h.mul( 0.11 ).add( vnoise( xz.div( 90.0 ) ).mul( 6.0 ) ) ).mul( 0.5 ).add( 0.5 );

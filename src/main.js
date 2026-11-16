@@ -731,6 +731,14 @@ async function start() {
 
 	// expose for debugging / screenshots
 	mountWorldSwitch( BIOMES, BIOME );
+	if ( BIOME.help !== undefined ) document.querySelector( '#help .desk' ).innerHTML = BIOME.help;
+	if ( BIOME.credit !== undefined ) {
+
+		const c = document.getElementById( 'credit' );
+		if ( BIOME.credit ) c.innerHTML = BIOME.credit;
+		else c.remove();
+
+	}
 
 	window.__meadow = { THREE, U, BIOME, get extras() {
 
