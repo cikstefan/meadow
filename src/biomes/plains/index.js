@@ -7,8 +7,8 @@
 // meadow doesn't have: the far landscape with Paine Grande and the Cuernos,
 // the lake, the shrubs and the ghost forest of fire-killed lenga trees.
 
-import { Fn, float, vec2, vec3, mix, smoothstep, clamp, max, pow } from 'three/tsl';
-import { vnoise } from '../../tsl/noise.js';
+import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If } from 'three/tsl';
+import { vnoise, hash2i, hash2i2 } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import {
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS,
@@ -34,6 +34,33 @@ export const cloudShadowAt = ( xz, y ) => {
 
 const cloudShadow = Fn( ( [ xz ] ) => cloudShadowAt( xz, float( 0 ) ) );
 
+// cellular noise -> (distance to nearest stone centre, edge distance, stone id hash)
+const pebbles = ( p ) => {
+
+	const c = floor( p ), f = fract( p );
+	const d1 = float( 9.0 ).toVar(), d2 = float( 9.0 ).toVar(), id = float( 0 ).toVar();
+	for ( let y = - 1; y <= 1; y ++ ) for ( let x = - 1; x <= 1; x ++ ) {
+
+		const cx = int( c.x ).add( x ), cy = int( c.y ).add( y );
+		const o = hash2i2( cx, cy ).mul( 0.8 ).add( 0.1 );
+		const d = vec2( x, y ).add( o ).sub( f );
+		const dd = dot( d, d );
+		If( dd.lessThan( d1 ), () => {
+
+			d2.assign( d1 ); d1.assign( dd ); id.assign( hash2i( cx.add( 7 ), cy.add( 3 ) ) );
+
+		} ).ElseIf( dd.lessThan( d2 ), () => {
+
+			d2.assign( dd );
+
+		} );
+
+	}
+
+	return vec3( sqrt( d1 ), sqrt( d2 ).sub( sqrt( d1 ) ), id );
+
+};
+
 // trail gravel and bare schist patches on the ground
 const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 
@@ -43,15 +70,26 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const n1 = vnoise( xz.mul( 9.0 ) );
 	const n2 = vnoise( xz.mul( 37.0 ).add( vec2( 5.0, 1.0 ) ) );
 	const n3 = vnoise( xz.mul( 2.1 ).add( vec2( 9.0, 4.0 ) ) );
-	// pale grey-brown gravel with darker pebbles and a few light quartz chips
-	const gravel = mix( vec3( 0.24, 0.225, 0.2 ), vec3( 0.42, 0.4, 0.36 ), n1.mul( 0.55 ).add( n3.mul( 0.45 ) ) )
-		.mul( mix( 0.72, 1.12, smoothstep( 0.35, 0.65, n2 ) ) );
+	// pale grey-brown gravel: stones of two sizes with dark gaps between them,
+	// each stone its own shade (a few light quartz / dark schist chips)
+	const fine = pebbles( xz.mul( 24.0 ) );
+	const coarse = pebbles( xz.mul( 6.5 ).add( vec2( 17.0, 3.0 ) ) );
+	// round pebbles (distance to the cell's stone centre) on dusty ground; only some cells hold a stone
+	const pf = smoothstep( 0.42, 0.3, fine.x ).mul( smoothstep( 0.62, 0.5, fine.z ) );
+	const pc = smoothstep( 0.34, 0.27, coarse.x ).mul( smoothstep( 0.78, 0.86, coarse.z ) );
+	const stoneId = mix( fine.z, coarse.z, pc );
+	const tone = mix( vec3( 0.2, 0.19, 0.17 ), vec3( 0.47, 0.45, 0.41 ), fract( stoneId.mul( 7.13 ) ) )
+		.mul( mix( 0.96, 1.08, smoothstep( 0.3, 0.0, mix( fine.x, coarse.x, pc ) ) ) ); // rounded tops catch light
+	const dust = mix( vec3( 0.25, 0.23, 0.195 ), vec3( 0.35, 0.325, 0.28 ), n1.mul( 0.6 ).add( n2.mul( 0.4 ) ) );
+	const detailK = smoothstep( 40.0, 12.0, dist );
+	const near = mix( mix( dust.mul( 0.92 ), tone, pf ), tone, pc );
+	const gravel = mix( near, mix( vec3( 0.24, 0.225, 0.2 ), vec3( 0.36, 0.34, 0.3 ), n1 ), float( 1.0 ).sub( detailK ) );
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
 	const a = mix( albedo, soil, verge.mul( 0.55 ).mul( float( 1.0 ).sub( toCanopy ) ) ).toVar();
 	a.assign( mix( a, gravel, trail ) );
 	// schist / shale patches
 	const gp = gravelPatch( xz ).mul( float( 1.0 ).sub( toCanopy.mul( 0.6 ) ) );
-	const schist = mix( vec3( 0.12, 0.12, 0.11 ), vec3( 0.24, 0.23, 0.21 ), n1 ).mul( mix( 0.8, 1.1, n2 ) );
+	const schist = mix( vec3( 0.12, 0.12, 0.11 ), vec3( 0.24, 0.23, 0.21 ), n1 ).mul( mix( 0.75, 1.15, mix( float( 0.5 ), fract( coarse.z.mul( 3.7 ) ), detailK ) ) ).mul( mix( 1.0, mix( 0.6, 1.0, smoothstep( 0.02, 0.08, coarse.y ) ), detailK ) );
 	a.assign( mix( a, schist, gp.mul( 0.85 ) ) );
 	return a;
 
