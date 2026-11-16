@@ -81,26 +81,36 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const n1 = vnoise( xz.mul( 9.0 ) );
 	const n2 = vnoise( xz.mul( 37.0 ).add( vec2( 5.0, 1.0 ) ) );
 	const n3 = vnoise( xz.mul( 2.1 ).add( vec2( 9.0, 4.0 ) ) );
-	// pale grey-brown gravel: stones of two sizes with dark gaps between them,
-	// each stone its own shade (a few light quartz / dark schist chips)
-	const fine = pebbles( xz.mul( 24.0 ) );
-	const coarse = pebbles( xz.mul( 6.5 ).add( vec2( 17.0, 3.0 ) ) );
-	// round pebbles (distance to the cell's stone centre) on dusty ground; only some cells hold a stone
-	const pf = smoothstep( 0.42, 0.3, fine.x ).mul( smoothstep( 0.62, 0.5, fine.z ) );
-	const pc = smoothstep( 0.34, 0.27, coarse.x ).mul( smoothstep( 0.78, 0.86, coarse.z ) );
-	const stoneId = mix( fine.z, coarse.z, pc );
-	const tone = mix( vec3( 0.2, 0.19, 0.17 ), vec3( 0.47, 0.45, 0.41 ), fract( stoneId.mul( 7.13 ) ) )
-		.mul( mix( 0.96, 1.08, smoothstep( 0.3, 0.0, mix( fine.x, coarse.x, pc ) ) ) ); // rounded tops catch light
-	const dust = mix( vec3( 0.25, 0.23, 0.195 ), vec3( 0.35, 0.325, 0.28 ), n1.mul( 0.6 ).add( n2.mul( 0.4 ) ) );
+	const gp = gravelPatch( xz ).mul( float( 1.0 ).sub( toCanopy.mul( 0.6 ) ) );
 	const detailK = smoothstep( 40.0, 12.0, dist );
-	const near = mix( mix( dust.mul( 0.92 ), tone, pf ), tone, pc );
-	const gravel = mix( near, mix( vec3( 0.24, 0.225, 0.2 ), vec3( 0.36, 0.34, 0.3 ), n1 ), float( 1.0 ).sub( detailK ) );
+
+	// distant / default appearance (cheap)
+	const gravel = mix( vec3( 0.24, 0.225, 0.2 ), vec3( 0.36, 0.34, 0.3 ), n1 ).toVar();
+	const schistTone = float( 0.95 ).toVar();
+	// pebble detail only where it can be seen: near, on the trail or a gravel patch
+	If( detailK.greaterThan( 0.0 ).and( trail.add( gp ).greaterThan( 0.0 ) ), () => {
+
+		// round pebbles of two sizes on dusty ground (only some cells hold a stone),
+		// each its own shade: a few light quartz and dark schist chips
+		const fine = pebbles( xz.mul( 24.0 ) );
+		const coarse = pebbles( xz.mul( 6.5 ).add( vec2( 17.0, 3.0 ) ) );
+		const pf = smoothstep( 0.42, 0.3, fine.x ).mul( smoothstep( 0.62, 0.5, fine.z ) );
+		const pc = smoothstep( 0.34, 0.27, coarse.x ).mul( smoothstep( 0.78, 0.86, coarse.z ) );
+		const stoneId = mix( fine.z, coarse.z, pc );
+		const tone = mix( vec3( 0.2, 0.19, 0.17 ), vec3( 0.47, 0.45, 0.41 ), fract( stoneId.mul( 7.13 ) ) )
+			.mul( mix( 0.96, 1.08, smoothstep( 0.3, 0.0, mix( fine.x, coarse.x, pc ) ) ) ); // rounded tops catch light
+		const dust = mix( vec3( 0.25, 0.23, 0.195 ), vec3( 0.35, 0.325, 0.28 ), n1.mul( 0.6 ).add( n2.mul( 0.4 ) ) );
+		const near = mix( mix( dust.mul( 0.92 ), tone, pf ), tone, pc );
+		gravel.assign( mix( gravel, near, detailK ) );
+		schistTone.assign( mix( schistTone, mix( 0.75, 1.15, fract( coarse.z.mul( 3.7 ) ) ).mul( mix( 0.6, 1.0, smoothstep( 0.02, 0.08, coarse.y ) ) ), detailK ) );
+
+	} );
+
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
 	const a = mix( albedo, soil, verge.mul( 0.55 ).mul( float( 1.0 ).sub( toCanopy ) ) ).toVar();
 	a.assign( mix( a, gravel, trail ) );
 	// schist / shale patches
-	const gp = gravelPatch( xz ).mul( float( 1.0 ).sub( toCanopy.mul( 0.6 ) ) );
-	const schist = mix( vec3( 0.12, 0.12, 0.11 ), vec3( 0.24, 0.23, 0.21 ), n1 ).mul( mix( 0.75, 1.15, mix( float( 0.5 ), fract( coarse.z.mul( 3.7 ) ), detailK ) ) ).mul( mix( 1.0, mix( 0.6, 1.0, smoothstep( 0.02, 0.08, coarse.y ) ), detailK ) );
+	const schist = mix( vec3( 0.12, 0.12, 0.11 ), vec3( 0.24, 0.23, 0.21 ), n1 ).mul( schistTone );
 	a.assign( mix( a, schist, gp.mul( 0.85 ) ) );
 	return a;
 
