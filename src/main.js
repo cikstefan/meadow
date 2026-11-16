@@ -71,6 +71,9 @@ const fail = ( msg ) => {
 
 async function start() {
 
+	if ( BIOME.loading ) document.getElementById( 'loading' ).textContent = BIOME.loading;
+	if ( BIOME.title ) document.title = BIOME.title;
+
 	if ( ! navigator.gpu ) return fail( 'This meadow is rendered entirely on the GPU with <b>WebGPU</b> compute shaders and indirect drawing. Your browser does not expose WebGPU. Try a recent Chrome, Edge, Safari 26+ or Firefox 141+.' );
 
 	// Ask for the adapter's real buffer limits: the default 128 MiB storage

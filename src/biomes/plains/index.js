@@ -60,6 +60,8 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 export const PLAINS = {
 	id: 'plains',
 	name: 'Torres del Paine',
+	title: 'Torres del Paine — procedural WebGPU plains',
+	loading: 'walking in from Italiano…',
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo,
 	animals: false,
 	// on-screen help (desktop) and credits: everything here is procedural
