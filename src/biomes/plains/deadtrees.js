@@ -19,14 +19,14 @@ import { landHeightJS, ghostDensityJS, trailDistJS, lakeDistJS } from './terrain
 import { cloudShadowAt } from './index.js';
 import { rng, growTree, Builder, decimate, breakLimbs } from './grow.js';
 
-const LOD_DIST = [ 140, 520 ];
+const LOD_DIST = [ 70, 450 ];
 const RADIUS = 1300;
 
 const V3 = THREE.Vector3;
 const range = ( r, a, b ) => a + ( b - a ) * r();
-const SIDES = [ [ 3, 3 ], [ 5, 3, 3 ], [ 8, 6, 4, 3 ] ]; // per detail level and branch level
-const RINGS = [ 3, 6, 99 ];
-const MAXLV = [ 1, 2, 3 ];
+const SIDES = [ [ 3, 3 ], [ 5, 3, 3 ], [ 8, 5, 4, 3 ] ]; // per detail level and branch level
+const RINGS = [ 3, 4, 99 ];
+const MAXLV = [ 1, 1, 3 ];
 
 // Dead lenga (Nothofagus pumilio): a straight-ish trunk whose limbs spread
 // wide and ascend, snapped off by the wind years after the fire. Grown once
@@ -41,13 +41,13 @@ function growSnag( seed, tall ) {
 		trunks: [ trunk ], floor: - 0.4,
 		lv: [
 			{ segs: 10, bend: 0.12, swirl: 0.1, taper: 0.7, flare: 0.9, curveV: 0.15 },
-			{ dens: tall ? 1.1 : 1.0, range: [ 0.3, 0.92 ], down: [ 1.05, 0.3 ], len: [ 0.3, 0.55 ], up: 0.1, segs: 7, bend: 0.35, curveV: 0.3, rPow: 1.2, trop: [ 0, 0.05, 0 ] },
-			{ dens: 2.2, range: [ 0.25, 1 ], down: [ 0.8, 0.35 ], len: [ 0.3, 0.6 ], segs: 4, bend: 0.4, curveV: 0.4 },
-			{ dens: 3, range: [ 0.3, 1 ], down: [ 0.7, 0.3 ], len: [ 0.3, 0.5 ], segs: 3, minLen: 0.12, bend: 0.3 },
+			{ dens: tall ? 1.9 : 1.6, range: [ 0.22, 0.95 ], down: [ 1.0, 0.35 ], len: [ 0.3, 0.55 ], up: 0.1, segs: 8, bend: 0.6, swirl: 0.7, curveV: 0.55, rPow: 1.35, trop: [ 0, 0.05, 0 ] },
+			{ dens: 3.6, range: [ 0.2, 1 ], down: [ 0.85, 0.4 ], len: [ 0.3, 0.6 ], segs: 5, bend: 0.65, swirl: 0.8, curveV: 0.6, rPow: 1.4 },
+			{ dens: 5, range: [ 0.25, 1 ], down: [ 0.8, 0.4 ], len: [ 0.3, 0.55 ], segs: 3, minLen: 0.08, bend: 0.5, swirl: 0.6, curveV: 0.5, rPow: 1.4 },
 		],
 	} );
 	// the top is usually snapped off too
-	return breakLimbs( br, r, [ tall ? 0.6 : 0.85, 0.6, 0.7, 0.85 ], [ 0.45, 0.95 ] );
+	return breakLimbs( br, r, [ tall ? 0.6 : 0.85, 0.45, 0.4, 0.3 ], [ 0.5, 0.95 ] );
 
 }
 
@@ -62,27 +62,34 @@ function growLog( seed ) {
 			{ dens: 0.8, range: [ 0.2, 0.9 ], down: [ 1.0, 0.4 ], len: [ 0.2, 0.4 ], up: 0.5, segs: 3, bend: 0.3 },
 		],
 	} );
-	return breakLimbs( br, r, [ 0, 0.8 ], [ 0.3, 0.8 ] );
+	const out = breakLimbs( br, r, [ 0.9, 0.8 ], [ 0.75, 0.95 ] );
+	return out;
 
 }
 
+// a dead shrub skeleton (fire-killed notro / ñirre): a low fan of bleached,
+// twisted stems splitting into many fine, swirling twigs
 function growTangle( seed ) {
 
 	const r = rng( seed );
 	const trunks = [];
-	const n = 3 + ( r() * 4 | 0 );
+	const n = 5 + ( r() * 5 | 0 );
 	for ( let i = 0; i < n; i ++ ) {
 
-		const a = r() * Math.PI;
-		trunks.push( { p: new V3( range( r, - 0.8, 0.8 ), range( r, 0.05, 0.3 ), range( r, - 0.8, 0.8 ) ), d: new V3( Math.cos( a ), range( r, 0.05, 0.25 ), Math.sin( a ) ), len: range( r, 1.2, 3.2 ), r: range( r, 0.04, 0.07 ) } );
+		const a = r() * Math.PI * 2, sp = range( r, 0.5, 1.3 );
+		trunks.push( { p: new V3( range( r, - 0.15, 0.15 ), - 0.05, range( r, - 0.15, 0.15 ) ), d: new V3( Math.cos( a ) * sp, 1, Math.sin( a ) * sp ), len: range( r, 0.7, 1.5 ), r: range( r, 0.018, 0.035 ) } );
 
 	}
 
 	const br = growTree( r, {
-		trunks, floor: 0.04,
-		lv: [ { segs: 5, bend: 0.3, taper: 0.7 }, { dens: 1.2, range: [ 0.3, 0.9 ], down: [ 0.8, 0.3 ], len: [ 0.25, 0.45 ], segs: 3, bend: 0.4 } ],
+		trunks, floor: 0.02,
+		lv: [
+			{ segs: 6, bend: 0.6, swirl: 0.9, curveV: 0.5, taper: 0.7 },
+			{ dens: 4.5, range: [ 0.25, 1 ], down: [ 0.75, 0.35 ], len: [ 0.35, 0.65 ], segs: 4, bend: 0.7, swirl: 0.9, curveV: 0.6, rPow: 1.3 },
+			{ dens: 6, range: [ 0.3, 1 ], down: [ 0.7, 0.35 ], len: [ 0.3, 0.55 ], segs: 3, minLen: 0.06, bend: 0.5, swirl: 0.7, curveV: 0.5 },
+		],
 	} );
-	return breakLimbs( br, r, [ 0.4, 0.6 ], [ 0.4, 0.9 ] );
+	return breakLimbs( br, r, [ 0.3, 0.4, 0.3 ], [ 0.5, 0.95 ] );
 
 }
 
@@ -97,8 +104,14 @@ function woodGeometry( branches, detail, seed ) {
 		const k = detail === 0 ? 1.35 : 1; // far: slightly thicker so trunks don't vanish
 		// irregular cross-section: dead wood splits along the grain
 		const ph = seed * 7 + b.level;
-		const rFn = detail === 2 && b.level < 2 ? ( u, len ) => 1 + 0.07 * Math.sin( u * 6.283 * 5 + ph + len * 0.6 ) + 0.04 * Math.sin( u * 6.283 * 11 + len * 2.1 ) : null;
-		B.tube( pts, rads.map( ( v ) => v * k ), sides, { cap: b.broken || b.kids.length === 0, rFn, seed: Math.min( 0.99, b.level * 0.25 + 0.01 ) } );
+		// irregular cross-section: dead wood splits and checks along the grain
+		const rFn = detail === 2 && b.level < 2 ? ( u, len ) => 1 + 0.07 * Math.sin( u * 6.283 * 5 + ph + len * 0.6 ) + 0.04 * Math.sin( u * 6.283 * 11 + len * 2.1 )
+			- 0.09 * Math.pow( Math.abs( Math.sin( u * 6.283 * 3 + ph * 2 + len * 0.15 ) ), 24 ) : null;
+		// thick broken ends tear into splinters (near detail only)
+		const splinter = detail === 2 && b.broken && b.rads[ b.rads.length - 1 ] > 0.035 ? 1.4 : 0;
+		const lying = b.level === 0 && Math.abs( b.dir.y ) < 0.4; // a fallen log: both ends broken
+		B.tube( pts, rads.map( ( v ) => v * k ), detail === 2 && ( splinter || lying ) ? Math.max( sides, 10 ) : sides,
+			{ cap: b.broken || b.kids.length === 0, rFn, splinter, splinterStart: lying ? ( detail === 2 ? 1.2 : 0.01 ) : 0, seed: Math.min( 0.99, b.level * 0.25 + 0.01 ) } );
 
 	}
 
@@ -168,6 +181,7 @@ export class DeadTrees {
 			return [ 2, 1, 0 ].map( ( detail ) => {
 
 			const geo = woodGeometry( br, detail, vi );
+			this.tris = ( this.tris || '' ) + ( geo.index.count / 3 | 0 ) + ( detail ? '/' : ' | ' );
 			const cap = Math.ceil( this.data[ vi ].length / 8 * 2.4 ) + 16;
 			const a = new THREE.InstancedBufferAttribute( new Float32Array( Math.max( cap, 1 ) * 4 ), 4 );
 			const b = new THREE.InstancedBufferAttribute( new Float32Array( Math.max( cap, 1 ) * 4 ), 4 );
@@ -184,7 +198,7 @@ export class DeadTrees {
 
 		} );
 		const n = this.data.reduce( ( s, d ) => s + d.length / 8, 0 );
-		console.log( `trees: ${ n } ghost trees / logs (${ ( performance.now() - t0 ).toFixed( 0 ) } ms)` );
+		console.log( `trees: ${ n } ghost trees / logs, tris near/mid/far per variant: ${ this.tris } (${ ( performance.now() - t0 ).toFixed( 0 ) } ms)` );
 
 	}
 
@@ -271,7 +285,7 @@ function woodMaterial() {
 		vW.assign( world );
 		vN.assign( normalize( yaw( lean( n ) ) ) );
 		const C = attribute( 'card', 'vec4' );
-		vWood.assign( vec4( attribute( 'uv', 'vec2' ), C.y, 0 ) ); // around, along (m), branch level
+		vWood.assign( vec4( attribute( 'uv', 'vec2' ), C.y, C.z ) ); // around, along (m), branch level, ao (0.25 = exposed heartwood)
 		vS.assign( vec2( B.z, cloudShadowAt( A.xz, A.y ) ) );
 		return world;
 
@@ -292,9 +306,15 @@ function woodMaterial() {
 		base.mulAssign( mix( 0.55, 1.0, smoothstep( 0.15, 0.6, bt.a ) ) );
 		const check = smoothstep( 0.74, 0.86, vnoise( vec2( ang.mul( 9.0 ), len.mul( 0.35 ) ).add( vec2( 11, 7 ) ) ) );
 		base.mulAssign( float( 1.0 ).sub( check.mul( 0.5 ) ) );
+		// exposed heartwood at the breaks: darker, warmer, rotting
+		const heart = smoothstep( 0.6, 0.3, vWood.w );
+		base.assign( mix( base, vec3( 0.16, 0.12, 0.085 ).mul( mix( 0.7, 1.2, vnoise( P.xz.mul( 40.0 ) ) ) ), heart ) );
 		// earthy, weathered near the ground; orange lichen flecks
-		const ground = smoothstep( 1.2, 0.0, P.y.sub( attribute( 'iA', 'vec4' ).y ) );
-		base.assign( mix( base, vec3( 0.2, 0.17, 0.13 ), ground.mul( 0.45 ) ) );
+		const ground = smoothstep( 0.6, 0.0, P.y.sub( attribute( 'iA', 'vec4' ).y ) );
+		// decay where wood touches the soil: dark damp stain and green moss on the underside
+		const moss = smoothstep( 0.45, 0.7, vnoise( P.xz.mul( 2.5 ).add( vec2( P.y.mul( 3.0 ), 1 ) ) ) ).mul( smoothstep( 0.2, - 0.6, N.y ) );
+		base.assign( mix( base, vec3( 0.12, 0.1, 0.075 ), ground.mul( 0.6 ) ) );
+		base.assign( mix( base, vec3( 0.06, 0.085, 0.03 ), moss.mul( ground.add( 0.25 ).min( 1.0 ) ).mul( 0.7 ) ) );
 		const lichen = smoothstep( 0.8, 0.9, vnoise( P.xz.mul( 6.0 ).add( vec2( P.y.mul( 5.0 ), 3 ) ) ) ).mul( 0.6 );
 		base.assign( mix( base, vec3( 0.55, 0.32, 0.08 ), lichen.mul( 0.5 ) ) );
 

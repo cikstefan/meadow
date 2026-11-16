@@ -60,7 +60,7 @@ function scatter( density = 1 ) {
 		];
 		const total = w.reduce( ( a, b ) => a + b, 0 );
 		const close = Math.max( 0, 1 - d0 / 260 ) * 0.35 + Math.max( 0, 1 - trailDistJS( x, z ) / 14 ) * 0.4;
-		if ( roll > total * ( 0.32 + close ) * density ) continue;
+		if ( roll > total * ( 0.32 + close ) * density * 1.45 ) continue;
 		let k = 0, acc = w[ 0 ] / total;
 		while ( pick > acc && k < 3 ) {
 

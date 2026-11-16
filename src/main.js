@@ -661,7 +661,7 @@ async function start() {
 			post.aspect.value = camera.aspect;
 			const facing = U.trueSunDir.value.dot( camera.getWorldDirection( new THREE.Vector3() ) );
 			const low = 1 - THREE.MathUtils.smoothstep( U.trueSunDir.value.y, 0.25, 0.7 );
-			post.shaftAmt.value = THREE.MathUtils.smoothstep( facing, 0.05, 0.45 ) * ( 0.35 + 0.65 * low ) * THREE.MathUtils.smoothstep( U.trueSunDir.value.y, - 0.03, 0.04 ) * 0.9;
+			post.shaftAmt.value = THREE.MathUtils.smoothstep( facing, 0.05, 0.45 ) * ( 0.35 + 0.65 * low ) * THREE.MathUtils.smoothstep( U.trueSunDir.value.y, - 0.03, 0.04 ) * 0.9 * ( BIOME.sky && BIOME.sky.volumetric ? 0.35 : 1 );
 
 		}
 

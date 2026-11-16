@@ -214,8 +214,19 @@ export class Builder {
 				const a = j / sides * Math.PI * 2;
 				const c = Math.cos( a ), s = Math.sin( a );
 				const ox = nx.x * c + bx.x * s, oy = nx.y * c + bx.y * s, oz = nx.z * c + bx.z * s;
-				const rr = rads[ i ] * ( opt.rFn ? opt.rFn( j / sides, len, i / ( n - 1 ) ) : 1 );
-				const p = pts[ i ];
+				let rr = rads[ i ] * ( opt.rFn ? opt.rFn( j / sides, len, i / ( n - 1 ) ) : 1 );
+				let p = pts[ i ];
+				// splintered break: the last ring tears into jagged spikes along the axis
+				const endS = i === n - 1 ? opt.splinter : i === 0 ? opt.splinterStart : 0;
+				if ( endS ) {
+
+					const u = j % sides;
+					const sp = Math.abs( Math.sin( u * 2.399 + ( opt.seed || 0 ) * 40 + i ) ) * Math.abs( Math.sin( u * 0.73 + 1.3 + i * 0.5 ) );
+					p = p.clone().addScaledVector( t, ( i === 0 ? - 1 : 1 ) * rads[ i ] * endS * ( 0.2 + 2.6 * sp * sp ) );
+					rr *= 0.35 + 0.65 * ( 1 - sp );
+
+				}
+
 				this.pos.push( p.x + ox * rr, p.y + oy * rr, p.z + oz * rr );
 				const nn = new THREE.Vector3( ox - t.x * sl, oy - t.y * sl, oz - t.z * sl ).normalize();
 				this.nrm.push( nn.x, nn.y, nn.z );
@@ -233,15 +244,29 @@ export class Builder {
 
 		}
 
+		// the start of a fallen log closes too (recessed, splintered heartwood)
+		if ( opt.splinterStart ) {
+
+			const c0 = pts[ 0 ].clone().addScaledVector( T[ 0 ], - rads[ 0 ] * 0.15 );
+			const ci = this.vertexCount;
+			this.pos.push( c0.x, c0.y, c0.z );
+			this.nrm.push( - T[ 0 ].x, - T[ 0 ].y, - T[ 0 ].z );
+			this.uv.push( 0.5, 0 );
+			this.cardA.push( opt.kind ?? - 1, opt.seed ?? 0, 0.25, Math.min( 1, Math.max( 0, c0.y / H ) ) );
+			for ( let j = 0; j < sides; j ++ ) this.idx.push( base + j + 1, base + j, ci );
+
+		}
+
 		// blunt end: the broken tip closes with a small cone
 		if ( opt.cap ) {
 
-			const tip = pts[ n - 1 ].clone().addScaledVector( T[ n - 1 ], rads[ n - 1 ] * 0.8 );
+			// splintered ends: a recessed, darker heartwood centre; otherwise a rounded tip
+			const tip = pts[ n - 1 ].clone().addScaledVector( T[ n - 1 ], rads[ n - 1 ] * ( opt.splinter ? 0.15 : 0.8 ) );
 			const ti = this.vertexCount;
 			this.pos.push( tip.x, tip.y, tip.z );
 			this.nrm.push( T[ n - 1 ].x, T[ n - 1 ].y, T[ n - 1 ].z );
 			this.uv.push( 0.5, len + rads[ n - 1 ] );
-			this.cardA.push( opt.kind ?? - 1, opt.seed ?? 0, opt.ao ?? 1, Math.min( 1, tip.y / H ) );
+			this.cardA.push( opt.kind ?? - 1, opt.seed ?? 0, opt.splinter ? 0.25 : ( opt.ao ?? 1 ), Math.min( 1, tip.y / H ) );
 			const last = base + ( n - 1 ) * ( sides + 1 );
 			for ( let j = 0; j < sides; j ++ ) this.idx.push( last + j, last + j + 1, ti );
 

@@ -16,20 +16,29 @@ import {
 } from './terrain.js';
 import { TRAIL, FORWARD_AZ, WALK_RADIUS, PREVAILING_WIND } from './layout.js';
 
-// Dappled light: fast, broken cloud shadows projected along the (low) sun, so
-// they stretch across the plains and race up the mountain flanks.
+// Weather map shared by the volumetric clouds and their shadows on the ground:
+// the raw field c (high = clear sky) at a point of the cloud layer.
+const CLOUD_MID = 2400; // m: middle of the cloud slab (see sky.js)
+const weather = ( p ) => vnoise( p.div( 700.0 ) ).mul( 0.58 )
+	.add( vnoise( p.div( 240.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) )
+	.add( vnoise( p.div( 78.0 ).add( vec2( 11.0, 2.0 ) ) ).mul( 0.12 ) );
+const cloudAmount = () => smoothstep( 0.0, 0.2, U.clouds );
+
+// 0..1 cloudiness of the layer above xz (1 = solid cloud)
+export const cloudCoverageAt = ( xz ) => smoothstep( U.cloudCover.add( 0.14 ), U.cloudCover.sub( 0.1 ), weather( xz.sub( U.cloudOffset ) ) ).mul( cloudAmount() );
+
+// Dappled light: the clouds' shadows, projected along the (low) sun from the
+// cloud layer, so they stretch across the plains and race up the mountain flanks.
 export const cloudShadowAt = ( xz, y ) => {
 
 	const s = U.trueSunDir;
 	const t = clamp( float( 1.0 ).div( max( s.y, 0.06 ) ), 0.0, 9.0 );
-	const H = max( float( 1300.0 ).sub( y ), 0.0 );
-	const p = xz.add( vec2( s.x, s.z ).mul( H.mul( t ) ).mul( 0.35 ) ).sub( U.cloudOffset );
-	const c = vnoise( p.div( 380.0 ) ).mul( 0.58 )
-		.add( vnoise( p.div( 130.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) )
-		.add( vnoise( p.div( 42.0 ).add( vec2( 11.0, 2.0 ) ) ).mul( 0.12 ) );
+	const H = max( float( CLOUD_MID ).sub( y ), 0.0 );
+	const p = xz.add( vec2( s.x, s.z ).mul( H.mul( t ) ) ).sub( U.cloudOffset );
+	const c = weather( p );
 	// soft-edged: cloud shadows have a penumbra of tens of metres
-	const lit = max( smoothstep( U.cloudCover.sub( 0.07 ), U.cloudCover.add( 0.07 ), c ), smoothstep( 0.2, 0.0, U.clouds ) );
-	return mix( float( 0.1 ), float( 1.0 ), lit );
+	const lit = max( smoothstep( U.cloudCover.sub( 0.07 ), U.cloudCover.add( 0.07 ), c ), float( 1.0 ).sub( cloudAmount() ) );
+	return mix( float( 0.12 ), float( 1.0 ), lit );
 
 };
 
@@ -40,9 +49,9 @@ export function cloudFieldJS( x, z, y, offset ) {
 
 	const s = U.trueSunDir.value;
 	const t = Math.min( 9, 1 / Math.max( s.y, 0.06 ) );
-	const H = Math.max( 1300 - y, 0 ) * t * 0.35;
+	const H = Math.max( CLOUD_MID - y, 0 ) * t;
 	const px = x + s.x * H - offset.x, pz = z + s.z * H - offset.y;
-	return vnoiseJS( px / 380, pz / 380 ) * 0.58 + vnoiseJS( px / 130 + 3, pz / 130 + 8 ) * 0.3 + vnoiseJS( px / 42 + 11, pz / 42 + 2 ) * 0.12;
+	return vnoiseJS( px / 700, pz / 700 ) * 0.58 + vnoiseJS( px / 240 + 3, pz / 240 + 8 ) * 0.3 + vnoiseJS( px / 78 + 11, pz / 78 + 2 ) * 0.12;
 
 }
 
@@ -101,7 +110,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 		schist.assign( mix( schist, rockCol, detailK ) );
 		// dead grass litter and soil between the blades
 		const lt = untiled( T.litter, xz, 1.4 );
-		litter.assign( lt.rgb.mul( vec3( 0.16, 0.15, 0.12 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.1, 0.6, lt.a ) ) ) );
+		litter.assign( lt.rgb.mul( vec3( 0.12, 0.14, 0.065 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.1, 0.6, lt.a ) ) ) );
 
 	} );
 
@@ -119,7 +128,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo,
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, cloudCoverage: cloudCoverageAt,
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,
@@ -128,10 +137,10 @@ export const PLAINS = {
 	credit: '',
 
 	// a low, dark storm deck racing east, breaking open along the horizon
-	sky: { storm: 1 },
+	sky: { storm: 1, volumetric: 1 },
 
 	defaults: {
-		hour: 16.45, clouds: 0.58, wind: 2.0, windAngle: PREVAILING_WIND, grassHeight: 1.0, dryPatches: 0.48, mist: 0,
+		hour: 16.45, clouds: 0.58, wind: 2.0, windAngle: PREVAILING_WIND, grassHeight: 2.5, dryPatches: 0.48, mist: 0,
 		particles: 0.3, spirits: false, spiritAmount: 0, shafts: true, glow: 3,
 	},
 

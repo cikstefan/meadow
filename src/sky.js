@@ -10,8 +10,11 @@ import {
 import { vnoise, hash2i } from './tsl/noise.js';
 import { U, skyColor } from './tsl/world.js';
 import { BIOME } from './biomes/index.js';
+import { makeVolumetricClouds } from './tsl/clouds3d.js';
 
 const SK = BIOME.sky || {};
+// raymarched 3D clouds (biomes that provide a weather map)
+const VOLUME = SK.volumetric && BIOME.cloudCoverage ? makeVolumetricClouds( BIOME.cloudCoverage, { base: 1700, top: 3900, steps: 48, lightSteps: 4 } ) : null;
 
 // elevation (deg) -> palette. Colours are linear-ish, hand tuned.
 const KEYS = [
@@ -82,7 +85,7 @@ export class Sky {
 			const bil = ( v ) => vnoise( v ).mul( 2.0 ).sub( 1.0 ).abs();
 			const billow = bil( p.mul( 11.0 ).add( vec2( 2.2, 6.1 ) ) ).mul( 0.6 ).add( bil( p.mul( 23.0 ).add( vec2( 8.4, 1.9 ) ) ).mul( 0.4 ) );
 			const fE = f.sub( billow.mul( 0.08 ).mul( detK ) );
-			const dens = smoothstep( this.u.skyCover, this.u.skyCover.add( mix( 0.3, 0.12, detK ) ), fE ).mul( smoothstep( 0.0, 0.18, y ) ).mul( cAmt );
+			const dens = VOLUME ? float( 0 ) : smoothstep( this.u.skyCover, this.u.skyCover.add( mix( 0.3, 0.12, detK ) ), fE ).mul( smoothstep( 0.0, 0.18, y ) ).mul( cAmt );
 			// darker, thicker cores; bright sun-facing rims (silver lining)
 			const core = smoothstep( this.u.skyCover.add( 0.08 ), this.u.skyCover.add( 0.45 ), f );
 			const shadowCol = mix( U.skyAmb.mul( 1.6 ), U.horizon.mul( 0.7 ), 0.4 );
@@ -130,7 +133,7 @@ export class Sky {
 			col.assign( mix( col, mix( U.horizon, cloudCol, haze ), dens.mul( 0.92 ) ) );
 
 			let deck = float( 0 );
-			if ( SK.storm ) {
+			if ( SK.storm && ! VOLUME ) {
 
 				// low storm deck racing downwind: domain-warped cloud masses, self-shadowed
 				// along the sun direction (bright sun-facing edges, dark bellies), broken
@@ -175,7 +178,15 @@ export class Sky {
 
 			}
 
-			const clear = float( 1.0 ).sub( dens.mul( 0.85 ) ).mul( float( 1.0 ).sub( deck ) );
+			let clear = float( 1.0 ).sub( dens.mul( 0.85 ) ).mul( float( 1.0 ).sub( deck ) );
+			if ( VOLUME ) {
+
+				const vc = VOLUME( dir );
+				col.assign( col.mul( vc.w ).add( vc.xyz ) );
+				clear = clear.mul( vc.w );
+
+			}
+
 			const disk = smoothstep( 0.99985, 0.99995, mu ).mul( clear );
 			col.addAssign( U.trueSunColor.mul( disk ).mul( 18.0 ) );
 			// the moon: its own (bigger) disk, only while it lights the scene

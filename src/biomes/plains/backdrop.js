@@ -20,7 +20,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec2, vec3, mix, smoothstep, clamp, max, pow, abs, dot, normalize, length, cameraPosition,
-	attribute, varying, positionLocal, sin, fract, select, uniform, texture, min
+	attribute, varying, positionLocal, sin, fract, select, uniform, texture, min, exp
 } from 'three/tsl';
 import { vnoise } from '../../tsl/noise.js';
 import { U, applyFog, windField, gustSheen } from '../../tsl/world.js';
@@ -266,6 +266,18 @@ function backdropMaterial( hmTex ) {
 		const nR = normalize( mix( select( useCliff, nCliff, nRock ), select( useCliff, nCliffD, nRockD ), dk.mul( 0.5 ) ) );
 		const N = normalize( mix( Ng, nR, rockK.mul( smoothstep( 22000.0, 4000.0, dist ) ) ) ).toVar();
 
+		// fall-line striations: the ribbed gullies that score Paine Grande's flanks,
+		// following the steepest descent, with a wandering spacing of ~15-40 m
+		const down = normalize( Ng.xz.add( vec2( 1e-4, 0 ) ) );
+		const acrossV = vec2( down.y.negate(), down.x );
+		const ac = dot( xz, acrossV ).add( vnoise( xz.div( 320.0 ) ).mul( 90.0 ) );
+		const alongH = h.div( 520.0 );
+		const rib = ( a ) => vnoise( vec2( a.div( 26.0 ), alongH ) ).mul( 0.65 ).add( vnoise( vec2( a.div( 9.0 ), alongH.mul( 2.3 ) ).add( vec2( 7, 3 ) ) ).mul( 0.35 ) );
+		const r0 = rib( ac ), r1 = rib( ac.add( 2.0 ) );
+		const ribK = smoothstep( 0.18, 0.5, slope ).mul( rockK ).mul( smoothstep( 14000.0, 2500.0, dist ) );
+		N.assign( normalize( N.add( vec3( acrossV.x, 0.0, acrossV.y ).mul( r1.sub( r0 ).div( 2.0 ).mul( - 22.0 ).mul( ribK ) ) ) ) );
+		const groove = smoothstep( 0.42, 0.25, r0 ); // bottom of a gully
+
 		// --- snow and ice, controlled by U.snow (0 = bare rock .. 1 = deep winter)
 		const sAmt = U.snow;
 		const snowLine = mix( float( 2100.0 ), float( 380.0 ), sAmt ).add( vnoise( xz.div( 240.0 ) ).sub( 0.5 ).mul( 320.0 ) );
@@ -293,6 +305,10 @@ function backdropMaterial( hmTex ) {
 		const snowCol = vec3( 0.86, 0.87, 0.9 ).mul( mix( 1.0, lum( snowTex.rgb ).div( 0.65 ).clamp( 0.85, 1.08 ), dk ) );
 		// the Cuernos' dark caps are too steep to hold snow; their granite holds only a little
 		snow.assign( select( isCu, snow.mul( 0.5 ).mul( smoothstep( capLine.add( 30.0 ), capLine.sub( 40.0 ), h ) ), snow ) );
+		// snow lies in the couloirs and gully floors well below the general snow line
+		const coul = groove.mul( smoothstep( snowLine.sub( 520.0 ), snowLine.sub( 120.0 ), h ) ).mul( smoothstep( 0.25, 0.45, slope ) )
+			.mul( smoothstep( 0.0, 0.1, sAmt ) ).mul( select( isCu.and( h.greaterThan( capLine ) ), float( 0.3 ), float( 1.0 ) ) );
+		snow.assign( max( snow, coul.mul( 0.9 ) ) );
 		const snowAmt = select( isMtn, max( snow, glacier ), float( 0 ) );
 		albedo.assign( mix( albedo, mix( snowCol, iceCol, glacier ), snowAmt ) );
 		// snow surfaces: smoother normal (wind-packed), with the snow scan's ripples
@@ -303,6 +319,7 @@ function backdropMaterial( hmTex ) {
 		const relief = clamp( vK, - 1.0, 1.0 );
 		const reliefAO = mix( 0.55, 1.15, smoothstep( - 0.8, 0.6, relief ) ).mul( mix( 0.7, 1.05, relH.mul( rockK ).add( float( 1.0 ).sub( rockK ).mul( 0.6 ) ) ) );
 		albedo.mulAssign( select( id.greaterThan( 0.5 ), reliefAO, float( 1.0 ) ) );
+		albedo.mulAssign( mix( float( 1.0 ), mix( 0.72, 1.08, r0 ), ribK.mul( float( 1.0 ).sub( snowAmt ) ) ) );
 
 		// --- cast shadows: march the heightmap toward the light
 		const L = U.sunDir;
@@ -333,7 +350,10 @@ function backdropMaterial( hmTex ) {
 		const spec = pow( clamp( dot( N, Hh ), 0.0, 1.0 ), mix( 18.0, 60.0, glacier ) ).mul( snowAmt.mul( 0.22 ).add( glacier.mul( 0.25 ) ).add( rockK.mul( 0.03 ) ) );
 		const sheen = mix( float( 1.0 ), gustSheen( windField( xz ) ), smoothstep( 40.0, 10.0, h ).mul( 0.6 ) );
 		const col = albedo.mul( sheen ).mul( U.sunColor.mul( diff ).mul( sunVis ).add( amb ) ).add( U.sunColor.mul( spec ).mul( sunVis ) );
-		return applyFog( col, P );
+		// aerial perspective: distant rock goes cool blue-grey before the fog proper
+		const air = float( 1.0 ).sub( exp( dist.div( - 16000.0 ) ) ).mul( 0.25 );
+		const airCol = mix( U.horizon, U.skyAmb.mul( 2.5 ), 0.5 );
+		return applyFog( mix( col, airCol, air ), P );
 
 	} )();
 

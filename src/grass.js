@@ -214,7 +214,9 @@ export class Grass {
 				// biome mask (e.g. a trail through the plains)
 				.mul( BIOME.grassMask ? BIOME.grassMask( xz ) : float( 1.0 ) );
 
-			const w = mix( G.wMin, G.wMax, cW ).mul( mix( 0.7, 1.3, b1 ) ).mul( mix( 1.0, 0.8, dry ) ).mul( u.widthScale ).mul( u.widthMul );
+			const w = mix( G.wMin, G.wMax, cW ).mul( mix( 0.7, 1.3, b1 ) ).mul( mix( 1.0, 0.8, dry ) ).mul( u.widthScale ).mul( u.widthMul )
+				// short sward between tussocks: fine blades, not leaf-like slivers
+				.mul( mix( 1.0, mix( 0.55, 1.0, tus ), G.tussock || 0 ) );
 			const bend = mix( 0.15, 0.6, cB ).mul( mix( 0.6, 1.35, b2 ) ).mul( float( 0.55 ).add( dC.mul( 0.9 ) ) ).add( dry.mul( 0.15 ) );
 
 			// yaw: lean outward from clump centre, randomised near clump borders

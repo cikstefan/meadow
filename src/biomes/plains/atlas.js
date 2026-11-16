@@ -277,7 +277,7 @@ function tile( g, i, I ) {
 }
 
 // bleed colour into transparent texels (a few dilation passes, then the mean)
-function bleed( d, W, H ) {
+export function bleed( d, W, H ) {
 
 	const has = new Uint8Array( W * H );
 	let sr = 0, sg = 0, sb = 0, sn = 0;

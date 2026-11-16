@@ -142,7 +142,7 @@ function growBarrosa( r ) {
 }
 
 export const SPECIES = [
-	{ name: 'notro', h: [ 1.5, 3.6 ], variants: 4, grow: growNotro, leaf: [ TILE.notro, TILE.notro2, TILE.notroYoung ], flower: [ TILE.notroFl, TILE.notroFl2 ], bloom: 0.7, glow: 1, keep: [ 1, 0.24, 0.06 ], woodLv: [ 2, 1, 0 ] },
+	{ name: 'notro', h: [ 1.0, 3.2 ], variants: 4, grow: growNotro, leaf: [ TILE.notro, TILE.notro2, TILE.notroYoung ], flower: [ TILE.notroFl, TILE.notroFl2 ], bloom: 0.5, glow: 1, keep: [ 1, 0.24, 0.06 ], woodLv: [ 2, 1, 0 ] },
 	{ name: 'calafate', h: [ 0.6, 1.35 ], variants: 3, grow: growCalafate, leaf: [ TILE.cala ], flower: [ TILE.calaFl ], bloom: 0.5, glow: 0, keep: [ 1, 0.25, 0.07 ], woodLv: [ 0, - 1, - 1 ] },
 	{ name: 'mata negra', h: [ 0.45, 1.0 ], variants: 3, grow: growNegra, leaf: [ TILE.negra ], flower: [], bloom: 0, glow: 0, keep: [ 1, 0.25, 0.07 ], woodLv: [ 0, - 1, - 1 ] },
 	{ name: 'mata barrosa', h: [ 0.22, 0.5 ], variants: 2, grow: growBarrosa, leaf: [ TILE.barrosa ], flower: [], bloom: 0, glow: 0, keep: [ 1, 0.3, 0.1 ], woodLv: [ - 1, - 1, - 1 ] },
@@ -196,19 +196,27 @@ export function plantLODs( sp, seed ) {
 			const d = l.d.clone();
 			const roll = new V3( lr() - 0.5, lr() - 0.5, lr() - 0.5 ).multiplyScalar( 1.4 );
 			const n = radial.clone().add( roll ).normalize();
-			const flower = sp.flower.length && p.y > 0.3 && shell > 0.4 && lr() < 0.9;
+			const flower = sp.flower.length && p.y > 0.35 && shell > 0.5 && lr() < 0.7;
 			const tiles = flower ? sp.flower : sp.leaf;
 			const tile = tiles[ ( lr() * tiles.length ) | 0 ];
 			// flower cards carry their tile + 100 so the bush's bloom can switch them to leaves
 			const kind = flower ? 100 + tile * 16 + sp.leaf[ ( lr() * sp.leaf.length ) | 0 ] : tile;
 			const ao = 0.35 + 0.65 * smooth( 0.2, 1.0, shell );
-			B.card( p.clone().addScaledVector( d, - s * 0.08 ), d, n, s, s * range( lr, 0.85, 1.1 ), kind, l.seed, ao, p.y );
-			// blend the stored card normal toward the canopy normal (soft volume shading)
+			// crossed pair (near LODs): the sprig has volume from every side, never a sliver
+			const pair = lod < 2 ? 2 : 1;
+			const w0 = s * range( lr, 0.85, 1.1 );
+			// soft canopy normal shared by both cards (volume shading)
 			const nn = n.clone().lerp( radial.clone().multiply( new V3( 1, 0.7, 1 ) ).add( new V3( 0, 0.35, 0 ) ).normalize(), 0.7 ).normalize();
-			const at = B.nrm.length - 12;
-			for ( let v = 0; v < 4; v ++ ) {
+			for ( let c = 0; c < pair; c ++ ) {
 
-				B.nrm[ at + v * 3 ] = nn.x; B.nrm[ at + v * 3 + 1 ] = nn.y; B.nrm[ at + v * 3 + 2 ] = nn.z;
+				const nc = c === 0 ? n : new V3().crossVectors( d, n ).normalize();
+				B.card( p.clone().addScaledVector( d, - s * 0.08 ), d, nc, s * ( c ? 0.9 : 1 ), w0 * ( c ? 0.85 : 1 ), kind, ( l.seed + c * 0.37 ) % 1, ao, p.y );
+				const at = B.nrm.length - 12;
+				for ( let v = 0; v < 4; v ++ ) {
+
+					B.nrm[ at + v * 3 ] = nn.x; B.nrm[ at + v * 3 + 1 ] = nn.y; B.nrm[ at + v * 3 + 2 ] = nn.z;
+
+				}
 
 			}
 
