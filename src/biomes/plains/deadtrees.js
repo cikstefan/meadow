@@ -246,7 +246,7 @@ function scatter() {
 		if ( V.near && d0 > V.near ) continue;
 		const y = landHeightJS( x, z );
 		// no trees on the steep high walls
-		if ( y > 160 || ( d0 > 1000 && r() < 0.6 ) ) continue;
+		if ( y > 70 || ( d0 > 1000 && r() < 0.6 ) ) continue;
 		const sc = V.scale[ 0 ] + ( V.scale[ 1 ] - V.scale[ 0 ] ) * r();
 		const lean = V.upright ? ( r() - 0.5 ) * 0.22 : 0;
 		out[ k ].push( x, y, z, sc, r() * Math.PI * 2, lean, r(), ( r() - 0.5 ) * 0.2 );

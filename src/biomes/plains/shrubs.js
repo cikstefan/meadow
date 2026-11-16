@@ -132,7 +132,9 @@ function scatter() {
 		];
 		const total = w.reduce( ( a, b ) => a + b, 0 );
 		// overall acceptance: a lot of open grassland between bushes
-		if ( roll > total * 0.32 ) continue;
+		// thicker scrub close to the trail and around the start (photo: bushes line the path)
+		const close = Math.max( 0, 1 - d0 / 260 ) * 0.35 + Math.max( 0, 1 - trailDistJS( x, z ) / 14 ) * 0.4;
+		if ( roll > total * ( 0.32 + close ) ) continue;
 		let k = 0, acc = w[ 0 ] / total;
 		while ( pick > acc && k < 3 ) {
 

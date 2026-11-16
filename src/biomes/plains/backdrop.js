@@ -125,10 +125,10 @@ function backdropMaterial() {
 		const dist = length( P.sub( cameraPosition ) );
 
 		// --- detail normal: rock facets and gullies (fades with distance)
-		const e = 6.0;
-		const nf = ( q ) => vnoise( q.div( 95.0 ) ).mul( 0.6 ).add( vnoise( q.div( 31.0 ).add( vec2( 3, 7 ) ) ).mul( 0.4 ) );
+		const e = 8.0;
+		const nf = ( q ) => vnoise( q.div( 150.0 ) ).mul( 0.55 ).add( vnoise( q.div( 52.0 ).add( vec2( 3, 7 ) ) ).mul( 0.45 ) );
 		const n0 = nf( xz ), nx = nf( xz.add( vec2( e, 0 ) ) ), nz = nf( xz.add( vec2( 0, e ) ) );
-		const bumpK = smoothstep( 9000.0, 1500.0, dist ).mul( 0.0 ).mul( smoothstep( 0.05, 0.4, slope ) );
+		const bumpK = smoothstep( 6000.0, 1500.0, dist ).mul( 3.0 ).mul( smoothstep( 0.05, 0.4, slope ) );
 		const N = normalize( Ng.add( vec3( n0.sub( nx ), 0, n0.sub( nz ) ).mul( bumpK ) ) );
 
 		// --- plains canopy (matches the near ground's far shading)
@@ -144,7 +144,7 @@ function backdropMaterial() {
 
 		// --- rock palettes
 		const strata = sin( h.mul( 0.11 ).add( vnoise( xz.div( 90.0 ) ).mul( 6.0 ) ) ).mul( 0.5 ).add( 0.5 );
-		const rn = vnoise( xz.div( 25.0 ).add( vec2( 41, 3 ) ) );
+		const rn = vnoise( xz.div( 25.0 ).add( vec2( 41, 3 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 7.0 ).add( vec2( 2, 9 ) ) ).mul( 0.4 ) );
 		const darkRock = mix( vec3( 0.028, 0.027, 0.026 ), vec3( 0.075, 0.068, 0.06 ), rn.mul( 0.6 ).add( strata.mul( 0.4 ) ) );
 		const granite = mix( vec3( 0.19, 0.185, 0.175 ), vec3( 0.33, 0.32, 0.3 ), rn.mul( 0.5 ).add( strata.mul( 0.2 ) ).add( 0.15 ) )
 			// vertical water streaks on the walls
@@ -203,7 +203,8 @@ function backdropMaterial() {
 		const NdL = dot( N, L );
 		const wrap = 0.12;
 		const diff = clamp( NdL.add( wrap ).div( 1.0 + wrap ), 0.0, 1.0 );
-		const sunVis = cloudShadowAt( xz, h ).mul( smoothstep( - 0.04, 0.06, L.y ) );
+		// distant cloud shadows: softer and less deep (scattered light fills them in)
+		const sunVis = mix( cloudShadowAt( xz, h ), float( 0.7 ), smoothstep( 1500.0, 6000.0, dist ).mul( 0.6 ) ).max( 0.3 ).mul( smoothstep( - 0.04, 0.06, L.y ) );
 		const amb = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( mix( 0.75, 1.0, smoothstep( 0.0, 0.5, N.y ) ) );
 		const V = normalize( cameraPosition.sub( P ) );
 		const H = normalize( L.add( V ) );
