@@ -146,7 +146,7 @@ export const PLAINS = {
 
 	// coirón (golden tussock grass) mixed with fresh spring green
 	grass: {
-		hMin: 0.06, hMax: 0.42, wMin: 0.0045, wMax: 0.012, flutter: 0.16, tussock: 1, flutterHz: [ 4.5, 9.0 ],
+		hMin: 0.06, hMax: 0.46, wMin: 0.006, wMax: 0.016, flutter: 0.16, tussock: 1, multi: 3, flutterHz: [ 4.5, 9.0 ],
 		lushBase: [ 0.035, 0.05, 0.014 ], lushTipA: [ 0.15, 0.25, 0.05 ], lushTipB: [ 0.22, 0.3, 0.07 ], lushTipC: [ 0.11, 0.23, 0.055 ],
 		dryBase: [ 0.13, 0.1, 0.045 ], dryTipA: [ 0.5, 0.38, 0.18 ], dryTipB: [ 0.66, 0.53, 0.3 ], dead: 0.8,
 	},

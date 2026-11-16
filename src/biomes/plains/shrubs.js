@@ -209,7 +209,7 @@ export class Shrubs {
 
 			// bark: notro smooth grey-brown, calafate yellow-brown, mata dark
 			const barkK = vC.x.negate().sub( 1.0 );
-			const barkCol = select( barkK.lessThan( 0.5 ), vec3( 0.16, 0.13, 0.11 ), select( barkK.lessThan( 1.5 ), vec3( 0.2, 0.15, 0.09 ), vec3( 0.09, 0.08, 0.06 ) ) )
+			const barkCol = select( barkK.lessThan( 0.5 ), vec3( 0.085, 0.078, 0.072 ), select( barkK.lessThan( 1.5 ), vec3( 0.14, 0.1, 0.065 ), vec3( 0.07, 0.062, 0.05 ) ) )
 				.mul( vnoise( uv().mul( vec2( 3.0, 9.0 ) ).add( vT.w.mul( 50.0 ) ) ).mul( 0.5 ).add( 0.75 ) );
 			const albedo = select( isWood, barkCol, sample.rgb.mul( vT.xyz ) ).toVar();
 			const ao = vC.y.mul( mix( 0.6, 1.0, vC.z ) );

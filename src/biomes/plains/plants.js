@@ -15,21 +15,21 @@ const flag = ( k ) => ( d ) => d.x < - 0.25 ? 0.4 + 0.3 * ( 1 - k ) : d.x > 0.25
 
 function growNotro( r ) {
 
-	const lean = range( r, 0.25, 0.75 ); // tan of the lean angle
+	const lean = range( r, 0.15, 0.6 ); // tan of the lean angle
 	const trunks = [];
 	const nt = r() < 0.55 ? 1 : 2 + ( r() * 2 | 0 );
 	for ( let i = 0; i < nt; i ++ ) {
 
 		const a = r() * 6.28, o = i ? range( r, 0.05, 0.25 ) : 0;
-		trunks.push( { p: new V3( Math.cos( a ) * o, 0, Math.sin( a ) * o ), d: new V3( lean + range( r, - 0.15, 0.15 ), 1, range( r, - 0.3, 0.3 ) ), len: range( r, 1.5, 2.4 ) * ( i ? 0.8 : 1 ), r: range( r, 0.045, 0.075 ) * ( i ? 0.75 : 1 ) } );
+		trunks.push( { p: new V3( Math.cos( a ) * o, 0, Math.sin( a ) * o ), d: new V3( lean + range( r, - 0.15, 0.15 ), 1, range( r, - 0.3, 0.3 ) ), len: range( r, 1.5, 2.4 ) * ( i ? 0.8 : 1 ), r: range( r, 0.06, 0.1 ) * ( i ? 0.75 : 1 ) } );
 
 	}
 
-	const trop = [ 0.3 + lean * 0.3, 0.06, 0 ];
+	const trop = [ 0.18 + lean * 0.25, 0.1, 0 ];
 	const branches = growTree( r, {
 		trunks,
 		lv: [
-			{ segs: 9, bend: 0.22, swirl: 0.2, trop, taper: 0.75, flare: 0.5, curveV: 0.2 },
+			{ segs: 9, bend: 0.22, swirl: 0.2, trop: [ lean * 0.12, 0.12, 0 ], taper: 0.75, flare: 0.5, curveV: 0.2 },
 			{ dens: 2.6, range: [ 0.3, 0.97 ], down: [ 0.8, 0.3 ], len: [ 0.4, 0.7 ], up: 0.12, segs: 6, bend: 0.35, trop, rPow: 1.3, filter: flag( lean ) },
 			{ dens: 5, range: [ 0.2, 1 ], down: [ 0.75, 0.3 ], len: [ 0.35, 0.6 ], up: 0.1, segs: 4, bend: 0.4, trop, filter: flag( lean ) },
 			{ dens: 7, range: [ 0.35, 1 ], down: [ 0.7, 0.3 ], len: [ 0.35, 0.65 ], segs: 3, bend: 0.3, minLen: 0.06, trop: [ trop[ 0 ], 0.15, 0 ] },
@@ -39,10 +39,10 @@ function growNotro( r ) {
 	for ( const b of branches ) {
 
 		if ( b.level < 2 || ( b.level === 2 && b.kids.length > 2 ) ) continue;
-		for ( const f of b.level === 3 ? [ 0.45, 1 ] : [ 0.7, 1 ] ) {
+		for ( const f of b.level === 3 ? [ 0.2, 0.6, 1 ] : [ 0.45, 0.75, 1 ] ) {
 
 			const q = branchAt( b, f );
-			leaves.push( { p: q.p, d: q.T.clone().lerp( new V3( 0.25, 1, 0 ), 0.3 ).normalize(), s: range( r, 0.38, 0.52 ), seed: r() } );
+			leaves.push( { p: q.p, d: q.T.clone().lerp( new V3( 0.25, 1, 0 ), 0.3 ).normalize(), s: range( r, 0.42, 0.58 ), seed: r() } );
 
 		}
 
@@ -142,7 +142,7 @@ function growBarrosa( r ) {
 }
 
 export const SPECIES = [
-	{ name: 'notro', h: [ 1.5, 3.6 ], variants: 4, grow: growNotro, leaf: [ TILE.notro, TILE.notro2, TILE.notroYoung ], flower: [ TILE.notroFl, TILE.notroFl2 ], bloom: 0.65, glow: 1, keep: [ 1, 0.24, 0.06 ], woodLv: [ 2, 1, 0 ] },
+	{ name: 'notro', h: [ 1.5, 3.6 ], variants: 4, grow: growNotro, leaf: [ TILE.notro, TILE.notro2, TILE.notroYoung ], flower: [ TILE.notroFl, TILE.notroFl2 ], bloom: 0.7, glow: 1, keep: [ 1, 0.24, 0.06 ], woodLv: [ 2, 1, 0 ] },
 	{ name: 'calafate', h: [ 0.6, 1.35 ], variants: 3, grow: growCalafate, leaf: [ TILE.cala ], flower: [ TILE.calaFl ], bloom: 0.5, glow: 0, keep: [ 1, 0.25, 0.07 ], woodLv: [ 0, - 1, - 1 ] },
 	{ name: 'mata negra', h: [ 0.45, 1.0 ], variants: 3, grow: growNegra, leaf: [ TILE.negra ], flower: [], bloom: 0, glow: 0, keep: [ 1, 0.25, 0.07 ], woodLv: [ 0, - 1, - 1 ] },
 	{ name: 'mata barrosa', h: [ 0.22, 0.5 ], variants: 2, grow: growBarrosa, leaf: [ TILE.barrosa ], flower: [], bloom: 0, glow: 0, keep: [ 1, 0.3, 0.1 ], woodLv: [ - 1, - 1, - 1 ] },
@@ -196,7 +196,7 @@ export function plantLODs( sp, seed ) {
 			const d = l.d.clone();
 			const roll = new V3( lr() - 0.5, lr() - 0.5, lr() - 0.5 ).multiplyScalar( 1.4 );
 			const n = radial.clone().add( roll ).normalize();
-			const flower = sp.flower.length && p.y > 0.4 && shell > 0.55 && lr() < 0.85;
+			const flower = sp.flower.length && p.y > 0.3 && shell > 0.4 && lr() < 0.9;
 			const tiles = flower ? sp.flower : sp.leaf;
 			const tile = tiles[ ( lr() * tiles.length ) | 0 ];
 			// flower cards carry their tile + 100 so the bush's bloom can switch them to leaves

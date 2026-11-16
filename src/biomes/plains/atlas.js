@@ -158,7 +158,7 @@ function tile( g, i, I ) {
 	g.clearRect( 0, 0, T, T );
 	g.filter = 'none';
 	// glossy, leathery, deep green; some sun-yellowed, some reddish when young
-	const notroF = ( k ) => ( r ) => `brightness(${ ( 0.56 + r() * 0.2 ) * k }) saturate(${ 0.8 + r() * 0.3 }) hue-rotate(${ - 6 + r() * 14 }deg) contrast(1.1)`;
+	const notroF = ( k ) => ( r ) => `brightness(${ ( 0.42 + r() * 0.16 ) * k }) saturate(${ 1.0 + r() * 0.3 }) hue-rotate(${ 6 + r() * 14 }deg) contrast(1.15)`;
 	const notro = { leaves: 9, start: 0.18, reach: [ 0.55, 0.85 ], spread: 1.5, angle: [ 0.5, 1.1 ], size: [ 0.26, 0.38 ], shrink: 0.35, stemW: 2.2, stem: 'rgb(70,48,34)', filter: notroF( 1 ) };
 	switch ( i ) {
 
@@ -173,8 +173,8 @@ function tile( g, i, I ) {
 		case TILE.notroFl2: {
 
 			for ( let k = 0; k < 3; k ++ ) leafSpray( g, r, I.ovs, 4, { ...notro, leaves: 6, reach: [ 0.45, 0.7 ] } );
-			const nr = i === TILE.notroFl ? 3 : 5;
-			for ( let c = 0; c < nr; c ++ ) notroRaceme( g, r, T * range( r, 0.22, 0.78 ), T * range( r, 0.2, 0.62 ), 9 + ( r() * 8 | 0 ), i === TILE.notroFl ? 1.15 : 0.95 );
+			const nr = i === TILE.notroFl ? 4 : 7;
+			for ( let c = 0; c < nr; c ++ ) notroRaceme( g, r, T * range( r, 0.2, 0.8 ), T * range( r, 0.15, 0.65 ), 12 + ( r() * 9 | 0 ), i === TILE.notroFl ? 1.25 : 1.05 );
 			break;
 
 		}

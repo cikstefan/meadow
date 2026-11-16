@@ -15,9 +15,9 @@ import * as THREE from 'three/webgpu';
 import {
 	Fn, uniform, float, int, uint, vec2, vec3, vec4, If, instanceIndex, uv, varying, floor, fract,
 	mix, smoothstep, clamp, max, min, pow, sin, cos, atan, dot, length, normalize, cross, abs, sqrt,
-	cameraPosition, faceDirection, select
+	cameraPosition, faceDirection, select, attribute
 } from 'three/tsl';
-import { hash2i, hash2i2, pcg } from './tsl/noise.js';
+import { hash2i, hash2i2, pcg, vnoise } from './tsl/noise.js';
 import {
 	U, terrainHeight, terrainNormal, fieldTall, fieldDry, fieldFlowers, windField, cloudShadow, shadeFoliage, gustSheen, flowerGlowLight, actorPush, actorShadowAt
 } from './tsl/world.js';
@@ -35,11 +35,40 @@ export const GRASS_DEFAULTS = {
 	clumpSize: 1.1,
 };
 
+// sub-blades per instance: a biome can draw each blade as a small tuft
+// (fanned blades of different heights), so the sward reads thick and bushy
+const subBlades = ( segments ) => {
+
+	const m = G.multi || 1;
+	return segments >= 5 ? m : segments >= 2 ? Math.min( 2, m ) : 1;
+
+};
+
 function bladeGeometry( segments ) {
 
+	const K = subBlades( segments );
 	const g = new THREE.PlaneGeometry( 1, 1, 1, segments );
 	g.translate( 0, 0.5, 0 );
-	return g;
+	g.userData.K = K;
+	if ( K === 1 ) return g;
+	// K copies of the strip, tagged with their sub-blade index
+	const P = g.attributes.position.array, UV = g.attributes.uv.array, I = g.index.array;
+	const nv = P.length / 3;
+	const pos = new Float32Array( P.length * K ), uvs = new Float32Array( UV.length * K ), sub = new Float32Array( nv * K ), idx = [];
+	for ( let k = 0; k < K; k ++ ) {
+
+		pos.set( P, k * P.length ); uvs.set( UV, k * UV.length ); sub.fill( k, k * nv, ( k + 1 ) * nv );
+		for ( let i = 0; i < I.length; i ++ ) idx.push( I[ i ] + k * nv );
+
+	}
+
+	const out = new THREE.BufferGeometry();
+	out.setAttribute( 'position', new THREE.BufferAttribute( pos, 3 ) );
+	out.setAttribute( 'uv', new THREE.BufferAttribute( uvs, 2 ) );
+	out.setAttribute( 'sub', new THREE.BufferAttribute( sub, 1 ) );
+	out.setIndex( idx );
+	out.userData.K = K;
+	return out;
 
 }
 
@@ -121,7 +150,9 @@ export class Grass {
 			const n = terrainNormal( xz );
 
 			// --- Voronoi clumps: find nearest + second nearest feature point
-			const cp = xz.div( u.clumpSize );
+			// domain-warped clump cells: irregular tussock shapes, no grid look from above
+			const warp = G.tussock ? vec2( vnoise( xz.mul( 0.31 ).add( vec2( 3.1, 7.7 ) ) ), vnoise( xz.mul( 0.31 ).add( vec2( 9.4, 1.3 ) ) ) ).sub( 0.5 ).mul( 1.6 ) : vec2( 0 );
+			const cp = xz.add( warp ).div( u.clumpSize );
 			const cell = floor( cp );
 			const f = fract( cp );
 			const d1 = float( 1e9 ).toVar();
@@ -168,7 +199,10 @@ export class Grass {
 
 			// tussock grassland (plains): some clumps are tall golden tussocks,
 			// the rest a short green sward between them
-			const tus = smoothstep( 0.5, 0.62, cH ).mul( G.tussock || 0 );
+			// which clumps grow into tall tussocks: drifts of them at several scales
+			// (not a per-clump coin toss, which reads as camouflage dots from above)
+			const tf = G.tussock ? vnoise( xz.div( 23.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.45 ).add( vnoise( xz.div( 7.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( cH.mul( 0.35 ) ) : cH;
+			const tus = smoothstep( 0.52, 0.66, tf ).mul( G.tussock || 0 );
 			const dry = G.tussock ? max( dry0.mul( mix( 0.4, 1.0, tus ) ), tus.mul( 0.9 ) ) : dry0;
 			const h = mix( G.hMin, G.hMax, tall )
 				.mul( mix( 1.0, mix( 0.32, 1.35, tus ), G.tussock || 0 ) )
@@ -293,9 +327,17 @@ export class Grass {
 			// instead of popping; heights are otherwise untouched -> no visible seam
 			const keep = smoothstep( u.fadeIn.x, u.fadeIn.y, distXZ ).mul( float( 1.0 ).sub( smoothstep( u.fadeOut.x, u.fadeOut.y, distXZ ) ) );
 			const cellHash = hash2i( int( K.x ).add( 5 ), int( K.y ) );
-			const h = A.w.mul( smoothstep( 0.0, 0.08, keep.sub( cellHash ) ) );
-			const bend = B.y;
-			const yaw = B.z;
+			const h0 = A.w.mul( smoothstep( 0.0, 0.08, keep.sub( cellHash ) ) );
+			const subK = lod.geometry.userData.K || 1;
+			const sub = subK > 1 ? attribute( 'sub', 'float' ) : float( 0 );
+			// sub-blades of a tuft: fanned out, shorter, bent differently, rooted a little apart
+			const r1 = fract( seed.mul( sub.mul( 7.31 ).add( 13.7 ) ).add( sub.mul( 0.618 ) ) );
+			const r2 = fract( seed.mul( sub.mul( 3.7 ).add( 29.3 ) ).add( sub.mul( 0.37 ) ) );
+			const isSub = sub.greaterThan( 0.5 );
+			const seedF = fract( seed.add( sub.mul( 0.371 ) ) );
+			const h = h0.mul( select( isSub, mix( 0.55, 0.95, r2 ), float( 1.0 ) ) );
+			const bend = B.y.mul( select( isSub, mix( 0.8, 1.5, r2 ), float( 1.0 ) ) );
+			const yaw = B.z.add( select( isSub, sub.sub( ( subK - 1 ) * 0.5 + 0.5 ).mul( 1.9 ).add( r1.sub( 0.5 ).mul( 1.2 ) ), float( 0.0 ) ) );
 			const wind = D.x;
 			const push = D.zw;
 
@@ -309,7 +351,7 @@ export class Grass {
 
 			// sway: a travelling phase (moves with the gust field) + per-blade flutter
 			const phase = dot( root.xz, U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( seed.mul( 1.5 ) );
-			const flutter = sin( U.time.mul( mix( ( G.flutterHz || [ 2.2, 4.2 ] )[ 0 ], ( G.flutterHz || [ 2.2, 4.2 ] )[ 1 ], seed ) ).add( seed.mul( 61.0 ) ) );
+			const flutter = sin( U.time.mul( mix( ( G.flutterHz || [ 2.2, 4.2 ] )[ 0 ], ( G.flutterHz || [ 2.2, 4.2 ] )[ 1 ], seedF ) ).add( seedF.mul( 61.0 ) ) );
 			const wAmt = wind.mul( float( 1.0 ).add( sin( phase ).mul( 0.35 ) ) );
 			const wh = wAmt.mul( h );
 
@@ -359,9 +401,10 @@ export class Grass {
 
 			const widthBoost = float( 1.0 ).add( smoothstep( 6.0, u.radius, camDist ).mul( 1.6 ) );
 			const profile = pow( it, 0.8 ).mul( mix( 0.55, 1.0, smoothstep( 0.0, 0.15, t ) ) );
-			const w = B.x.mul( profile ).mul( widthBoost );
+			const w = B.x.mul( profile ).mul( widthBoost ).mul( select( isSub, float( 0.85 ), float( 1.0 ) ) );
 
-			const world = root.add( spine ).add( side.mul( s.mul( w ) ) );
+			const rootOff = select( isSub, vec3( sin( yaw ).negate(), 0, cos( yaw ) ).mul( r1.mul( 0.025 ).add( 0.008 ) ), vec3( 0 ) );
+			const world = root.add( rootOff ).add( spine ).add( side.mul( s.mul( w ) ) );
 
 			vT.assign( t );
 			vS.assign( s );
@@ -405,6 +448,8 @@ export class Grass {
 			albedo.mulAssign( mix( 0.8, 1.15, bSeed ) );
 			// midrib: slightly lighter centre line
 			albedo.mulAssign( mix( 1.12, 0.94, smoothstep( 0.0, 0.35, abs( vS ) ) ) );
+			// fine parallel veins along the blade (close up only)
+			albedo.mulAssign( sin( vS.mul( 17.0 ).add( bSeed.mul( 20.0 ) ) ).mul( 0.09 ).mul( smoothstep( 12.0, 2.0, vDist ) ).add( 1.0 ) );
 
 			// --- normal: rounded blade + blend toward ground normal (canopy
 			// behaves like a volume, stabilises lighting at distance)
