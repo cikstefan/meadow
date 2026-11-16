@@ -15,7 +15,7 @@ export async function createPlainsExtras( { scene } ) {
 	const water = buildWater();
 	scene.add( backdrop, water );
 
-	const shrubs = new Shrubs();
+	const shrubs = await Shrubs.create();
 	scene.add( shrubs.group );
 	const trees = new DeadTrees();
 	scene.add( trees.group );

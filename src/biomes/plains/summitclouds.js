@@ -100,7 +100,7 @@ export function buildSummitClouds() {
 		.add( vnoise( q.mul( 11.0 ).add( vec2( seed.mul( 7.0 ), t.mul( 2.3 ) ) ) ).mul( 0.15 ) );
 	const r2 = dot( q, q );
 	const shape = smoothstep( 1.0, 0.2, r2.add( n.sub( 0.5 ).mul( 0.9 ) ) );
-	mat.opacityNode = shape.mul( vA.y ).mul( vA.z ).mul( smoothstep( 0.25, 0.6, n ).mul( 0.6 ).add( 0.4 ) );
+	mat.opacityNode = shape.mul( vA.y ).mul( vA.z ).mul( smoothstep( 0.03, 0.3, U.clouds ) ).mul( smoothstep( 0.25, 0.6, n ).mul( 0.6 ).add( 0.4 ) );
 
 	mat.colorNode = Fn( () => {
 

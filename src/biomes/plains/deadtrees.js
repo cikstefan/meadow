@@ -11,212 +11,108 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec2, vec3, vec4, mix, smoothstep, clamp, max, pow, sin, cos, dot, normalize, length, attribute, varying,
-	cameraPosition, abs
+	cameraPosition, abs, texture
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, applyFog } from '../../tsl/world.js';
 import { landHeightJS, ghostDensityJS, trailDistJS, lakeDistJS } from './terrain.js';
 import { cloudShadowAt } from './index.js';
+import { rng, growTree, Builder, decimate, breakLimbs } from './grow.js';
 
 const LOD_DIST = [ 140, 520 ];
 const RADIUS = 1300;
 
-function rng( seed ) {
+const V3 = THREE.Vector3;
+const range = ( r, a, b ) => a + ( b - a ) * r();
+const SIDES = [ [ 3, 3 ], [ 5, 3, 3 ], [ 8, 6, 4, 3 ] ]; // per detail level and branch level
+const RINGS = [ 3, 6, 99 ];
+const MAXLV = [ 1, 2, 3 ];
 
-	let s = seed >>> 0;
-	return () => {
-
-		s = ( Math.imul( s, 1664525 ) + 1013904223 ) >>> 0;
-		return s / 4294967296;
-
-	};
-
-}
-
-// --- tube builder: polyline with radii -> rings (attributes: position, normal, wood = (length m, angle, radius, tip))
-class Builder {
-
-	constructor() {
-
-		this.pos = []; this.nrm = []; this.wood = []; this.idx = [];
-
-	}
-
-	tube( pts, radii, sides, cap = true ) {
-
-		const base = this.pos.length / 3;
-		let len = 0;
-		const n = pts.length;
-		let prevN = null;
-		for ( let i = 0; i < n; i ++ ) {
-
-			const p = pts[ i ];
-			const t = new THREE.Vector3().subVectors( pts[ Math.min( i + 1, n - 1 ) ], pts[ Math.max( i - 1, 0 ) ] ).normalize();
-			if ( i > 0 ) len += p.distanceTo( pts[ i - 1 ] );
-			// stable frame
-			let nx = prevN ? prevN.clone().sub( t.clone().multiplyScalar( prevN.dot( t ) ) ) : new THREE.Vector3( 1, 0, 0 ).sub( t.clone().multiplyScalar( t.x ) );
-			if ( nx.lengthSq() < 1e-6 ) nx = new THREE.Vector3( 0, 0, 1 ).sub( t.clone().multiplyScalar( t.z ) );
-			nx.normalize();
-			prevN = nx;
-			const ny = new THREE.Vector3().crossVectors( t, nx );
-			for ( let k = 0; k <= sides; k ++ ) {
-
-				const a = k / sides * Math.PI * 2;
-				// irregular, fluted cross-section
-				const fl = 1 + 0.12 * Math.sin( a * 3 + i * 0.7 ) + 0.06 * Math.sin( a * 7 );
-				const d = nx.clone().multiplyScalar( Math.cos( a ) ).addScaledVector( ny, Math.sin( a ) );
-				const q = p.clone().addScaledVector( d, radii[ i ] * fl );
-				this.pos.push( q.x, q.y, q.z );
-				this.nrm.push( d.x, d.y, d.z );
-				this.wood.push( len, k / sides, radii[ i ], i / ( n - 1 ) );
-
-			}
-
-		}
-
-		for ( let i = 0; i < n - 1; i ++ ) for ( let k = 0; k < sides; k ++ ) {
-
-			const a = base + i * ( sides + 1 ) + k, b = a + sides + 1;
-			this.idx.push( a, b, a + 1, a + 1, b, b + 1 );
-
-		}
-
-		if ( cap ) {
-
-			// jagged broken end: collapse the last ring to a ragged point
-			const last = base + ( n - 1 ) * ( sides + 1 );
-			const tip = pts[ n - 1 ];
-			const c = this.pos.length / 3;
-			this.pos.push( tip.x, tip.y + radii[ n - 1 ] * 0.8, tip.z );
-			this.nrm.push( 0, 1, 0 );
-			this.wood.push( len + radii[ n - 1 ], 0, 0, 1 );
-			for ( let k = 0; k < sides; k ++ ) this.idx.push( last + k, c, last + k + 1 );
-
-		}
-
-	}
-
-	geometry() {
-
-		const g = new THREE.InstancedBufferGeometry();
-		g.setAttribute( 'position', new THREE.Float32BufferAttribute( this.pos, 3 ) );
-		g.setAttribute( 'normal', new THREE.Float32BufferAttribute( this.nrm, 3 ) );
-		g.setAttribute( 'wood', new THREE.Float32BufferAttribute( this.wood, 4 ) );
-		g.setIndex( this.idx );
-		return g;
-
-	}
-
-}
-
-// a limb from p0 in direction dir, bending, tapering
-function limb( b, r, p0, dir, L, r0, r1, segs, sides, droop = 0.0, wiggle = 0.25 ) {
-
-	const pts = [], rad = [];
-	const d = dir.clone().normalize();
-	const p = p0.clone();
-	for ( let i = 0; i <= segs; i ++ ) {
-
-		pts.push( p.clone() );
-		rad.push( r0 + ( r1 - r0 ) * ( i / segs ) );
-		d.x += ( r() - 0.5 ) * wiggle; d.z += ( r() - 0.5 ) * wiggle; d.y += ( r() - 0.5 ) * wiggle * 0.6 - droop;
-		d.normalize();
-		p.addScaledVector( d, L / segs );
-
-	}
-
-	b.tube( pts, rad, sides );
-	return pts;
-
-}
-
-// --- variants (unit: metres at scale 1)
-function snag( seed, detail, tall ) {
+// Dead lenga (Nothofagus pumilio): a straight-ish trunk whose limbs spread
+// wide and ascend, snapped off by the wind years after the fire. Grown once
+// per variant, then turned into tubes at three levels of detail.
+function growSnag( seed, tall ) {
 
 	const r = rng( seed );
-	const b = new Builder();
-	const H = tall ? 6 + r() * 3 : 2.4 + r() * 1.8;
-	const R = tall ? 0.16 + r() * 0.06 : 0.13 + r() * 0.06;
-	const sides = [ 3, 4, 8 ][ detail ];
-	const trunk = limb( b, r, new THREE.Vector3( 0, - 0.3, 0 ), new THREE.Vector3( ( r() - 0.5 ) * 0.15, 1, ( r() - 0.5 ) * 0.15 ), H, R, R * 0.35, [ 2, 4, 8 ][ detail ], sides, 0, 0.12 );
-	// buttress flare at the base
-	if ( detail === 2 ) b.tube( [ new THREE.Vector3( 0, - 0.3, 0 ), new THREE.Vector3( 0, 0.35, 0 ) ], [ R * 1.6, R * 1.05 ], sides, false );
-	const limbs = detail === 0 ? ( tall ? 2 : 0 ) : tall ? 3 + ( r() * 4 | 0 ) : 1 + ( r() * 2 | 0 );
-	for ( let i = 0; i < limbs; i ++ ) {
-
-		const k = 0.35 + r() * 0.55;
-		const at = trunk[ Math.min( trunk.length - 1, Math.round( k * ( trunk.length - 1 ) ) ) ];
-		const a = r() * Math.PI * 2;
-		const up = 0.35 + r() * 0.9; // lenga limbs spread wide, slightly up
-		const L = ( tall ? 1.2 + r() * 2.2 : 0.5 + r() * 1.0 ) * ( 1.1 - k * 0.5 );
-		const pts = limb( b, r, at, new THREE.Vector3( Math.cos( a ), up, Math.sin( a ) ), L, R * ( 0.45 - k * 0.2 ), R * 0.08, detail ? 4 : 1, [ 3, 3, 5 ][ detail ], 0.03 );
-		// a broken twig or two
-		if ( detail === 2 && r() < 0.7 ) {
-
-			const a2 = a + ( r() - 0.5 ) * 1.6;
-			limb( b, r, pts[ 2 ] || pts[ pts.length - 1 ], new THREE.Vector3( Math.cos( a2 ), 0.8 + r(), Math.sin( a2 ) ), L * 0.45, R * 0.1, R * 0.03, 2, 4, 0 );
-
-		}
-
-	}
-
-	return b.geometry();
+	const H = tall ? range( r, 5.5, 8.5 ) : range( r, 2.4, 4.2 );
+	const R = tall ? range( r, 0.15, 0.22 ) : range( r, 0.12, 0.18 );
+	const trunk = { p: new V3( 0, - 0.35, 0 ), d: new V3( range( r, - 0.12, 0.12 ), 1, range( r, - 0.12, 0.12 ) ), len: H, r: R };
+	const br = growTree( r, {
+		trunks: [ trunk ], floor: - 0.4,
+		lv: [
+			{ segs: 10, bend: 0.12, swirl: 0.1, taper: 0.7, flare: 0.9, curveV: 0.15 },
+			{ dens: tall ? 1.1 : 1.0, range: [ 0.3, 0.92 ], down: [ 1.05, 0.3 ], len: [ 0.3, 0.55 ], up: 0.1, segs: 7, bend: 0.35, curveV: 0.3, rPow: 1.2, trop: [ 0, 0.05, 0 ] },
+			{ dens: 2.2, range: [ 0.25, 1 ], down: [ 0.8, 0.35 ], len: [ 0.3, 0.6 ], segs: 4, bend: 0.4, curveV: 0.4 },
+			{ dens: 3, range: [ 0.3, 1 ], down: [ 0.7, 0.3 ], len: [ 0.3, 0.5 ], segs: 3, minLen: 0.12, bend: 0.3 },
+		],
+	} );
+	// the top is usually snapped off too
+	return breakLimbs( br, r, [ tall ? 0.6 : 0.85, 0.6, 0.7, 0.85 ], [ 0.45, 0.95 ] );
 
 }
 
-function stump( seed, detail ) {
+function growLog( seed ) {
 
 	const r = rng( seed );
-	const b = new Builder();
-	const H = 0.5 + r() * 1.1, R = 0.2 + r() * 0.12;
-	limb( b, r, new THREE.Vector3( 0, - 0.25, 0 ), new THREE.Vector3( ( r() - 0.5 ) * 0.3, 1, ( r() - 0.5 ) * 0.3 ), H, R, R * 0.75, detail ? 3 : 1, [ 3, 5, 9 ][ detail ], 0, 0.2 );
-	return b.geometry();
+	const L = range( r, 3, 8 ), R = range( r, 0.12, 0.22 );
+	const br = growTree( r, {
+		trunks: [ { p: new V3( - L / 2, R * 0.55, 0 ), d: new V3( 1, 0.0, range( r, - 0.1, 0.1 ) ), len: L, r: R } ], floor: R * 0.4,
+		lv: [
+			{ segs: 8, bend: 0.06, swirl: 0, taper: 0.55, trop: [ 0, - 0.03, 0 ] },
+			{ dens: 0.8, range: [ 0.2, 0.9 ], down: [ 1.0, 0.4 ], len: [ 0.2, 0.4 ], up: 0.5, segs: 3, bend: 0.3 },
+		],
+	} );
+	return breakLimbs( br, r, [ 0, 0.8 ], [ 0.3, 0.8 ] );
 
 }
 
-function log( seed, detail ) {
+function growTangle( seed ) {
 
 	const r = rng( seed );
-	const b = new Builder();
-	const L = 3 + r() * 5, R = 0.12 + r() * 0.1;
-	const sides = [ 3, 4, 7 ][ detail ];
-	const pts = limb( b, r, new THREE.Vector3( - L / 2, R * 0.55, 0 ), new THREE.Vector3( 1, 0.02, ( r() - 0.5 ) * 0.2 ), L, R, R * 0.45, [ 1, 3, 6 ][ detail ], sides, 0.004, 0.08 );
-	const stubs = detail === 0 ? 0 : 1 + ( r() * 4 | 0 );
-	for ( let i = 0; i < stubs; i ++ ) {
-
-		const at = pts[ 1 + ( r() * ( pts.length - 2 ) | 0 ) ];
-		const a = ( r() - 0.5 ) * 2.4;
-		limb( b, r, at, new THREE.Vector3( Math.sin( a ) * 0.5, 0.4 + r() * 0.8, Math.cos( a ) ), 0.4 + r() * 1.3, R * 0.35, R * 0.08, 2, detail === 2 ? 4 : 3, 0.02 );
-
-	}
-
-	return b.geometry();
-
-}
-
-function tangle( seed, detail ) {
-
-	const r = rng( seed );
-	const b = new Builder();
-	const n = detail === 0 ? 2 : 3 + ( r() * 4 | 0 );
+	const trunks = [];
+	const n = 3 + ( r() * 4 | 0 );
 	for ( let i = 0; i < n; i ++ ) {
 
 		const a = r() * Math.PI;
-		limb( b, r, new THREE.Vector3( ( r() - 0.5 ) * 1.5, 0.05 + r() * 0.2, ( r() - 0.5 ) * 1.5 ), new THREE.Vector3( Math.cos( a ), 0.08 + r() * 0.15, Math.sin( a ) ), 1 + r() * 2.2, 0.045 + r() * 0.03, 0.012, detail ? 3 : 1, detail === 2 ? 5 : 3, 0.03, 0.3 );
+		trunks.push( { p: new V3( range( r, - 0.8, 0.8 ), range( r, 0.05, 0.3 ), range( r, - 0.8, 0.8 ) ), d: new V3( Math.cos( a ), range( r, 0.05, 0.25 ), Math.sin( a ) ), len: range( r, 1.2, 3.2 ), r: range( r, 0.04, 0.07 ) } );
 
 	}
 
-	return b.geometry();
+	const br = growTree( r, {
+		trunks, floor: 0.04,
+		lv: [ { segs: 5, bend: 0.3, taper: 0.7 }, { dens: 1.2, range: [ 0.3, 0.9 ], down: [ 0.8, 0.3 ], len: [ 0.25, 0.45 ], segs: 3, bend: 0.4 } ],
+	} );
+	return breakLimbs( br, r, [ 0.4, 0.6 ], [ 0.4, 0.9 ] );
 
 }
 
-// variant table: builder, share of instances, scale range, placement
+function woodGeometry( branches, detail, seed ) {
+
+	const B = new Builder();
+	for ( const b of branches ) {
+
+		if ( b.level > MAXLV[ detail ] ) continue;
+		const sides = SIDES[ detail ][ Math.min( b.level, SIDES[ detail ].length - 1 ) ];
+		const [ pts, rads ] = decimate( b.pts, b.rads, b.level === 0 ? Math.max( RINGS[ detail ], 3 ) : RINGS[ detail ] );
+		const k = detail === 0 ? 1.35 : 1; // far: slightly thicker so trunks don't vanish
+		// irregular cross-section: dead wood splits along the grain
+		const ph = seed * 7 + b.level;
+		const rFn = detail === 2 && b.level < 2 ? ( u, len ) => 1 + 0.07 * Math.sin( u * 6.283 * 5 + ph + len * 0.6 ) + 0.04 * Math.sin( u * 6.283 * 11 + len * 2.1 ) : null;
+		B.tube( pts, rads.map( ( v ) => v * k ), sides, { cap: b.broken || b.kids.length === 0, rFn, seed: Math.min( 0.99, b.level * 0.25 + 0.01 ) } );
+
+	}
+
+	return B.geometry( true );
+
+}
+
+// variant table: grower, share of instances, scale range, placement
 const VARIANTS = [
-	{ make: ( s, d ) => snag( s, d, true ), share: 0.26, scale: [ 0.75, 1.35 ], upright: true },
-	{ make: ( s, d ) => snag( s + 1, d, true ), share: 0.16, scale: [ 0.7, 1.2 ], upright: true },
-	{ make: ( s, d ) => snag( s + 2, d, false ), share: 0.3, scale: [ 0.6, 1.3 ], upright: true },
-	{ make: ( s, d ) => log( s + 4, d ), share: 0.16, scale: [ 0.8, 1.3 ], upright: false, near: 600 },
-	{ make: ( s, d ) => tangle( s + 5, d ), share: 0.12, scale: [ 0.8, 1.5 ], upright: false, near: 350 },
+	{ grow: ( s ) => growSnag( s, true ), share: 0.26, scale: [ 0.8, 1.3 ], upright: true },
+	{ grow: ( s ) => growSnag( s + 1, true ), share: 0.16, scale: [ 0.75, 1.2 ], upright: true },
+	{ grow: ( s ) => growSnag( s + 2, false ), share: 0.3, scale: [ 0.7, 1.3 ], upright: true },
+	{ grow: ( s ) => growLog( s + 4 ), share: 0.16, scale: [ 0.8, 1.3 ], upright: false, near: 600 },
+	{ grow: ( s ) => growTangle( s + 5 ), share: 0.12, scale: [ 0.8, 1.5 ], upright: false, near: 350 },
 ];
 
 function scatter( density = 1 ) {
@@ -265,22 +161,28 @@ export class DeadTrees {
 		this.density = 1;
 		this.group = new THREE.Group();
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
-		this.meshes = VARIANTS.map( ( V, vi ) => [ 2, 1, 0 ].map( ( detail ) => {
+		const mat = woodMaterial();
+		this.meshes = VARIANTS.map( ( V, vi ) => {
 
-			const geo = V.make( 1000 + vi * 31, detail );
+			const br = V.grow( 1000 + vi * 31 );
+			return [ 2, 1, 0 ].map( ( detail ) => {
+
+			const geo = woodGeometry( br, detail, vi );
 			const cap = Math.ceil( this.data[ vi ].length / 8 * 2.4 ) + 16;
 			const a = new THREE.InstancedBufferAttribute( new Float32Array( Math.max( cap, 1 ) * 4 ), 4 );
 			const b = new THREE.InstancedBufferAttribute( new Float32Array( Math.max( cap, 1 ) * 4 ), 4 );
 			a.setUsage( THREE.DynamicDrawUsage ); b.setUsage( THREE.DynamicDrawUsage );
 			geo.setAttribute( 'iA', a ); geo.setAttribute( 'iB', b );
 			geo.instanceCount = 0;
-			const mesh = new THREE.Mesh( geo, woodMaterial() );
+			const mesh = new THREE.Mesh( geo, mat );
 			mesh.frustumCulled = false;
 			mesh.renderOrder = 7;
 			this.group.add( mesh );
 			return mesh;
 
-		} ) );
+			} );
+
+		} );
 		const n = this.data.reduce( ( s, d ) => s + d.length / 8, 0 );
 		console.log( `trees: ${ n } ghost trees / logs (${ ( performance.now() - t0 ).toFixed( 0 ) } ms)` );
 
@@ -336,6 +238,16 @@ export class DeadTrees {
 
 }
 
+const BARK = ( () => {
+
+	const t = new THREE.TextureLoader().load( new URL( '../../assets/plains/bark_willow_02_c.webp', import.meta.url ).href );
+	t.wrapS = t.wrapT = THREE.RepeatWrapping;
+	t.colorSpace = THREE.SRGBColorSpace;
+	t.anisotropy = 4;
+	return t;
+
+} )();
+
 function woodMaterial() {
 
 	const mat = new THREE.MeshBasicNodeMaterial();
@@ -350,7 +262,7 @@ function woodMaterial() {
 		const A = attribute( 'iA', 'vec4' ); // x y z scale
 		const B = attribute( 'iB', 'vec4' ); // yaw, lean, seed, roll
 		const p = attribute( 'position', 'vec3' ).mul( A.w );
-		const n = attribute( 'normal', 'vec3' );
+		const n = attribute( 'cnorm', 'vec3' );
 		const cy = cos( B.x ), sy = sin( B.x ), cl = cos( B.y ), sl = sin( B.y );
 		// lean about X, then yaw about Y
 		const lean = ( v ) => vec3( v.x, v.y.mul( cl ).sub( v.z.mul( sl ) ), v.y.mul( sl ).add( v.z.mul( cl ) ) );
@@ -358,7 +270,8 @@ function woodMaterial() {
 		const world = A.xyz.add( yaw( lean( p ) ) );
 		vW.assign( world );
 		vN.assign( normalize( yaw( lean( n ) ) ) );
-		vWood.assign( attribute( 'wood', 'vec4' ) );
+		const C = attribute( 'card', 'vec4' );
+		vWood.assign( vec4( attribute( 'uv', 'vec2' ), C.y, 0 ) ); // around, along (m), branch level
 		vS.assign( vec2( B.z, cloudShadowAt( A.xz, A.y ) ) );
 		return world;
 
@@ -368,14 +281,17 @@ function woodMaterial() {
 
 		const P = vW;
 		const N = normalize( vN );
-		const len = vWood.x, ang = vWood.y, rad = vWood.z, tip = vWood.w;
+		const ang = vWood.x, len = vWood.y;
 		const seed = vS.x;
-		// bleached silver wood: long grain streaks, dark checks, warmer near the ground
-		const grain = vnoise( vec2( ang.mul( 22.0 ).add( seed.mul( 50.0 ) ), len.mul( 1.4 ) ) );
-		const fine = vnoise( vec2( ang.mul( 70.0 ), len.mul( 6.0 ) ).add( vec2( 5, 3 ) ) );
-		const check = smoothstep( 0.72, 0.86, vnoise( vec2( ang.mul( 9.0 ), len.mul( 0.35 ) ).add( vec2( 11, 7 ) ) ) );
-		const base = mix( vec3( 0.36, 0.355, 0.33 ), vec3( 0.6, 0.59, 0.56 ), grain.mul( 0.6 ).add( fine.mul( 0.4 ) ) ).mul( mix( 0.9, 1.08, seed ) ).toVar();
-		base.mulAssign( float( 1.0 ).sub( check.mul( 0.55 ) ) );
+		// scanned willow bark, bleached silver by years of sun and wind; the scan's
+		// relief (alpha) darkens the cracks, long checks split the grain
+		const tuv = vec2( ang.mul( 1.4 ).add( seed.mul( 3.0 ) ), len.mul( 0.45 ) );
+		const bt = texture( BARK, tuv );
+		const lum = dot( bt.rgb, vec3( 0.3, 0.5, 0.2 ) );
+		const base = mix( vec3( 0.3, 0.3, 0.28 ), vec3( 0.72, 0.7, 0.66 ), smoothstep( 0.08, 0.5, lum ) ).mul( mix( 0.88, 1.08, seed ) ).toVar();
+		base.mulAssign( mix( 0.55, 1.0, smoothstep( 0.15, 0.6, bt.a ) ) );
+		const check = smoothstep( 0.74, 0.86, vnoise( vec2( ang.mul( 9.0 ), len.mul( 0.35 ) ).add( vec2( 11, 7 ) ) ) );
+		base.mulAssign( float( 1.0 ).sub( check.mul( 0.5 ) ) );
 		// earthy, weathered near the ground; orange lichen flecks
 		const ground = smoothstep( 1.2, 0.0, P.y.sub( attribute( 'iA', 'vec4' ).y ) );
 		base.assign( mix( base, vec3( 0.2, 0.17, 0.13 ), ground.mul( 0.45 ) ) );

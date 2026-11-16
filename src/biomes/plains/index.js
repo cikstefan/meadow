@@ -13,7 +13,7 @@ import { U } from '../../tsl/uniforms.js';
 import {
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS,
 } from './terrain.js';
-import { TRAIL, FORWARD_AZ, WALK_RADIUS } from './layout.js';
+import { TRAIL, FORWARD_AZ, WALK_RADIUS, PREVAILING_WIND } from './layout.js';
 
 // Dappled light: fast, broken cloud shadows projected along the (low) sun, so
 // they stretch across the plains and race up the mountain flanks.
@@ -27,7 +27,7 @@ export const cloudShadowAt = ( xz, y ) => {
 		.add( vnoise( p.div( 130.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) )
 		.add( vnoise( p.div( 42.0 ).add( vec2( 11.0, 2.0 ) ) ).mul( 0.12 ) );
 	// soft-edged: cloud shadows have a penumbra of tens of metres
-	const lit = smoothstep( U.cloudCover.sub( 0.07 ), U.cloudCover.add( 0.07 ), c );
+	const lit = max( smoothstep( U.cloudCover.sub( 0.07 ), U.cloudCover.add( 0.07 ), c ), smoothstep( 0.2, 0.0, U.clouds ) );
 	return mix( float( 0.1 ), float( 1.0 ), lit );
 
 };
@@ -133,8 +133,8 @@ export const PLAINS = {
 	sky: { storm: 1 },
 
 	defaults: {
-		hour: 16.45, clouds: 0.58, wind: 2.0, windAngle: 6, grassHeight: 1.0, dryPatches: 0.48, mist: 0,
-		particles: 0.3, spirits: false, spiritAmount: 0, shafts: true, glow: 0,
+		hour: 16.45, clouds: 0.58, wind: 2.0, windAngle: PREVAILING_WIND, grassHeight: 1.0, dryPatches: 0.48, mist: 0,
+		particles: 0.3, spirits: false, spiritAmount: 0, shafts: true, glow: 3,
 	},
 
 	// you start on the trail looking up the French Valley

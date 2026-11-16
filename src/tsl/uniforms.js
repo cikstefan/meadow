@@ -38,6 +38,7 @@ export const U = {
 	actors: [ 0, 1, 2, 3, 4 ].map( () => uniform( new THREE.Vector4( 0, - 1e4, 0, 1.2 ) ) ),
 	actorShadows: [ 0, 1, 2, 3, 4 ].map( () => uniform( new THREE.Vector4( 0, 0, 0, 1 ) ) ),
 
+	clouds: uniform( 0.5 ), // raw cloud amount (0 = perfectly clear sky)
 	cloudCover: uniform( 0.5 ),
 	cloudDark: uniform( 0.45 ),
 	cloudSpeed: uniform( 4.0 ),

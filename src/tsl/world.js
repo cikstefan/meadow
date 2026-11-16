@@ -69,7 +69,7 @@ const cloudShadowDefault = Fn( ( [ xz ] ) => {
 
 	const p = xz.sub( U.cloudOffset );
 	const c = vnoise( p.div( 85.0 ) ).mul( 0.7 ).add( vnoise( p.div( 27.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) );
-	const lit = smoothstep( U.cloudCover.sub( 0.1 ), U.cloudCover.add( 0.1 ), c );
+	const lit = max( smoothstep( U.cloudCover.sub( 0.1 ), U.cloudCover.add( 0.1 ), c ), smoothstep( 0.2, 0.0, U.clouds ) );
 	return mix( float( 1.0 ).sub( U.cloudDark ), float( 1.0 ), lit );
 
 } );

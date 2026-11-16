@@ -115,3 +115,7 @@ export const FAR_HILLS = {
 export const MOUNTAIN_FREE_RADIUS = 950;
 // The walker is kept within this radius of the origin.
 export const WALK_RADIUS = 260;
+
+// the westerlies: direction (deg, as the wind-direction setting) the wind blows toward;
+// trees and shrubs lean and flag this way
+export const PREVAILING_WIND = 6;

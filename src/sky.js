@@ -75,7 +75,14 @@ export class Sky {
 				.add( vnoise( p.mul( 4.1 ).add( vec2( 7.3, 2.1 ) ) ).mul( 0.125 ) )
 				.add( vnoise( p.mul( 8.3 ).add( vec2( 1.3, 9.9 ) ) ).mul( 0.0625 ) )
 				.div( 0.9375 );
-			const dens = smoothstep( this.u.skyCover, this.u.skyCover.add( 0.3 ), f ).mul( smoothstep( 0.0, 0.18, y ) );
+			// 0 clouds = a perfectly clear sky
+			const cAmt = smoothstep( 0.0, 0.2, U.clouds );
+			// high-frequency billows eat into the edges: crisp cauliflower rims, not blur
+			const detK = smoothstep( 0.05, 0.3, y );
+			const bil = ( v ) => vnoise( v ).mul( 2.0 ).sub( 1.0 ).abs();
+			const billow = bil( p.mul( 11.0 ).add( vec2( 2.2, 6.1 ) ) ).mul( 0.6 ).add( bil( p.mul( 23.0 ).add( vec2( 8.4, 1.9 ) ) ).mul( 0.4 ) );
+			const fE = f.sub( billow.mul( 0.08 ).mul( detK ) );
+			const dens = smoothstep( this.u.skyCover, this.u.skyCover.add( mix( 0.3, 0.12, detK ) ), fE ).mul( smoothstep( 0.0, 0.18, y ) ).mul( cAmt );
 			// darker, thicker cores; bright sun-facing rims (silver lining)
 			const core = smoothstep( this.u.skyCover.add( 0.08 ), this.u.skyCover.add( 0.45 ), f );
 			const shadowCol = mix( U.skyAmb.mul( 1.6 ), U.horizon.mul( 0.7 ), 0.4 );
@@ -83,7 +90,7 @@ export class Sky {
 			const litCol = U.sunColor.mul( 0.32 ).add( U.horizon.mul( 0.55 ) )
 				.add( U.horizonSun.mul( U.twilight.mul( pow( mu, 2.0 ).mul( 0.9 ).add( 0.12 ) ) ) )
 				.add( vec3( 0.32, 0.12, 0.2 ).mul( U.twilight.mul( 0.35 ) ) );
-			const cloudCol = mix( litCol, shadowCol, core.mul( 0.75 ) )
+			const cloudCol = mix( litCol, shadowCol, core.mul( 0.75 ).add( billow.sub( 0.5 ).mul( 0.25 ).mul( detK ) ).clamp( 0.0, 1.0 ) )
 				.add( U.trueSunColor.mul( pow( mu, 6.0 ).mul( 0.35 ).mul( float( 1.0 ).sub( core ) ) ) );
 			// --- night sky: stars + a faint milky way, hidden by clouds and haze
 			const above = smoothstep( 0.0, 0.12, y );
@@ -135,19 +142,32 @@ export class Sky {
 				const q = dir.xz.div( max( y, 0.0 ).add( 0.045 ) ).mul( 0.26 ).add( drift.mul( 2.4 ) ).toVar();
 				const warp = vec2( vnoise( q.mul( 0.6 ).add( vec2( 9.0, 1.0 ) ) ), vnoise( q.mul( 0.6 ).add( vec2( 3.0, 7.0 ) ) ) ).sub( 0.5 ).mul( 1.4 );
 				const wq = q.add( warp ).toVar();
-				const d0 = fbm( wq );
 				const th = float( 0.44 ).sub( U.cloudCover.mul( 0.4 ) );
+				// billowy erosion near the edges (fades out toward the horizon, where
+				// the projection would alias): crisp, textured rims instead of fuzz
+				const dk = smoothstep( 0.05, 0.28, y );
+				const bil = ( v ) => vnoise( v ).mul( 2.0 ).sub( 1.0 ).abs();
+				const bq = wq.add( drift.mul( 0.6 ) );
+				const billow2 = bil( bq.mul( 7.3 ).add( vec2( 2.2, 6.1 ) ) ).mul( 0.55 )
+					.add( bil( bq.mul( 15.9 ).add( vec2( 8.4, 1.9 ) ) ).mul( 0.3 ) )
+					.add( bil( bq.mul( 33.0 ).add( vec2( 4.7, 3.3 ) ) ).mul( 0.15 ) );
+				const d00 = fbm( wq );
+				const edge = float( 1.0 ).sub( smoothstep( th, th.add( 0.2 ), d00 ) );
+				const d0 = d00.sub( billow2.mul( edge.mul( 0.75 ).add( 0.25 ) ).mul( 0.1 ).mul( dk ) );
 				const gapH = smoothstep( 0.035, 0.16, y );
-				const dens2 = smoothstep( th, th.add( 0.085 ), d0 ).mul( gapH );
+				const dens2 = smoothstep( th, th.add( mix( 0.085, 0.03, dk ) ), d0 ).mul( gapH ).mul( cAmt );
 				// light march toward the sun (one step in the cloud plane)
 				const sunP = normalize( vec2( U.trueSunDir.x, U.trueSunDir.z ).add( vec2( 1e-4, 0 ) ) ).mul( 0.16 );
 				const dl = fbm( wq.add( sunP ) );
 				const shadowed = smoothstep( th.sub( 0.04 ), th.add( 0.3 ), dl );
 				const thickness = smoothstep( th.add( 0.02 ), th.add( 0.3 ), d0 );
 				const ambL = dot( U.skyAmb, vec3( 0.2126, 0.7152, 0.0722 ) );
-				const dark = mix( vec3( ambL ), U.skyAmb, 0.3 ).mul( 0.42 ).add( U.horizon.mul( 0.035 ) ).mul( mix( 0.7, 1.3, vnoise( wq.mul( 3.1 ).add( vec2( 4, 4 ) ) ) ) );
+				const dark = mix( vec3( ambL ), U.skyAmb, 0.3 ).mul( 0.42 ).add( U.horizon.mul( 0.035 ) )
+					.mul( mix( 0.7, 1.3, vnoise( wq.mul( 3.1 ).add( vec2( 4, 4 ) ) ) ) )
+					// lumpy bellies: each billow catches a little more sky light on its top
+					.mul( mix( 1.0, mix( 0.78, 1.22, billow2 ), dk ) );
 				const lit = U.sunColor.mul( 0.11 ).add( vec3( dot( U.horizon, vec3( 0.2126, 0.7152, 0.0722 ) ) ).mul( 0.3 ) ).add( U.horizonSun.mul( U.twilight.mul( 0.3 ) ) );
-				const deckCol = mix( lit, dark, max( shadowed.mul( 0.95 ), thickness.mul( 0.88 ) ) )
+				const deckCol = mix( lit, dark, max( shadowed.mul( 0.95 ), thickness.mul( 0.88 ) ).sub( billow2.sub( 0.5 ).mul( 0.18 ).mul( dk ) ).clamp( 0.0, 1.0 ) )
 					// silver lining toward the sun on thin edges
 					.add( U.trueSunColor.mul( pow( mu, 5.0 ).mul( 0.5 ).mul( float( 1.0 ).sub( thickness ) ) ) );
 				deck = dens2.mul( SK.storm );
@@ -229,6 +249,7 @@ export class Sky {
 		const g = [ 0.09, 0.12, 0.04 ];
 		U.groundAmb.value.setRGB( ...g.map( ( v, i ) => v * ( p.sun[ i ] * 0.12 + p.amb[ i ] * 0.6 ) ) );
 
+		U.clouds.value = cloudiness;
 		U.cloudCover.value = 0.15 + cloudiness * 0.6;
 		U.cloudDark.value = 0.35 + cloudiness * 0.35;
 		this.u.skyCover.value = THREE.MathUtils.lerp( 0.78, 0.3, cloudiness );
