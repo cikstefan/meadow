@@ -7,7 +7,8 @@
 // meadow doesn't have: the far landscape with Paine Grande and the Cuernos,
 // the lake, the shrubs and the ghost forest of fire-killed lenga trees.
 
-import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If } from 'three/tsl';
+import * as THREE from 'three/webgpu';
+import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If, texture } from 'three/tsl';
 import { vnoise, vnoiseJS, hash2i, hash2i2 } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import {
@@ -45,72 +46,69 @@ export function cloudFieldJS( x, z, y, offset ) {
 
 }
 
-// cellular noise -> (distance to nearest stone centre, edge distance, stone id hash)
-const pebbles = ( p ) => {
+// photoscanned ground (Poly Haven, CC0; colour + height in alpha)
+const groundTex = ( n ) => {
 
-	const c = floor( p ), f = fract( p );
-	const d1 = float( 9.0 ).toVar(), d2 = float( 9.0 ).toVar(), id = float( 0 ).toVar();
-	for ( let y = - 1; y <= 1; y ++ ) for ( let x = - 1; x <= 1; x ++ ) {
+	const t = new THREE.TextureLoader().load( new URL( `../../assets/plains/${ n }.webp`, import.meta.url ).href );
+	t.wrapS = t.wrapT = THREE.RepeatWrapping;
+	t.colorSpace = THREE.SRGBColorSpace;
+	t.anisotropy = 8;
+	return t;
 
-		const cx = int( c.x ).add( x ), cy = int( c.y ).add( y );
-		const o = hash2i2( cx, cy ).mul( 0.8 ).add( 0.1 );
-		const d = vec2( x, y ).add( o ).sub( f );
-		const dd = dot( d, d );
-		If( dd.lessThan( d1 ), () => {
+};
+let GT = null; // created on first use (the meadow never loads these)
+const scans = () => GT || ( GT = { trail: groundTex( 'rocky_trail_c' ), rocks: groundTex( 'dry_ground_rocks_c' ), litter: groundTex( 'withered_grass_c' ) } );
 
-			d2.assign( d1 ); d1.assign( dd ); id.assign( hash2i( cx.add( 7 ), cy.add( 3 ) ) );
+// two rotated, differently scaled samples: no visible tiling
+const untiled = ( tex, xz, scale ) => {
 
-		} ).ElseIf( dd.lessThan( d2 ), () => {
-
-			d2.assign( dd );
-
-		} );
-
-	}
-
-	return vec3( sqrt( d1 ), sqrt( d2 ).sub( sqrt( d1 ) ), id );
+	const a = texture( tex, xz.div( scale ) );
+	const r = vec2( xz.x.mul( 0.8 ).sub( xz.y.mul( 0.6 ) ), xz.x.mul( 0.6 ).add( xz.y.mul( 0.8 ) ) );
+	const b = texture( tex, r.div( scale * 2.7 ).add( vec2( 0.37, 0.71 ) ) );
+	const m = smoothstep( 0.35, 0.65, vnoise( xz.div( scale * 3.0 ).add( vec2( 7, 3 ) ) ) );
+	return mix( a, b, m.mul( 0.6 ) );
 
 };
 
-// trail gravel and bare schist patches on the ground
+// trail gravel, bare schist patches and the litter under the tussocks
 const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 
+	const T = scans();
 	const d = trailDist( xz );
 	const trail = float( 1.0 ).sub( smoothstep( TRAIL.halfWidth * 0.75, TRAIL.halfWidth + 0.25, d ) );
 	const verge = float( 1.0 ).sub( smoothstep( TRAIL.halfWidth, TRAIL.halfWidth + TRAIL.verge + 0.4, d ) );
 	const n1 = vnoise( xz.mul( 9.0 ) );
-	const n2 = vnoise( xz.mul( 37.0 ).add( vec2( 5.0, 1.0 ) ) );
 	const n3 = vnoise( xz.mul( 2.1 ).add( vec2( 9.0, 4.0 ) ) );
 	const gp = gravelPatch( xz ).mul( float( 1.0 ).sub( toCanopy.mul( 0.6 ) ) );
-	const detailK = smoothstep( 40.0, 12.0, dist );
+	const detailK = smoothstep( 60.0, 15.0, dist );
 
 	// distant / default appearance (cheap)
 	const gravel = mix( vec3( 0.24, 0.225, 0.2 ), vec3( 0.36, 0.34, 0.3 ), n1 ).toVar();
-	const schistTone = float( 0.95 ).toVar();
-	// pebble detail only where it can be seen: near, on the trail or a gravel patch
-	If( detailK.greaterThan( 0.0 ).and( trail.add( gp ).greaterThan( 0.0 ) ), () => {
+	const schist = mix( vec3( 0.12, 0.12, 0.11 ), vec3( 0.24, 0.23, 0.21 ), n1 ).toVar();
+	const litterK = float( 1.0 ).sub( toCanopy ).mul( detailK );
+	const litter = vec3( 0 ).toVar();
+	If( detailK.greaterThan( 0.0 ), () => {
 
-		// round pebbles of two sizes on dusty ground (only some cells hold a stone),
-		// each its own shade: a few light quartz and dark schist chips
-		const fine = pebbles( xz.mul( 24.0 ) );
-		const coarse = pebbles( xz.mul( 6.5 ).add( vec2( 17.0, 3.0 ) ) );
-		const pf = smoothstep( 0.42, 0.3, fine.x ).mul( smoothstep( 0.62, 0.5, fine.z ) );
-		const pc = smoothstep( 0.34, 0.27, coarse.x ).mul( smoothstep( 0.78, 0.86, coarse.z ) );
-		const stoneId = mix( fine.z, coarse.z, pc );
-		const tone = mix( vec3( 0.2, 0.19, 0.17 ), vec3( 0.47, 0.45, 0.41 ), fract( stoneId.mul( 7.13 ) ) )
-			.mul( mix( 0.96, 1.08, smoothstep( 0.3, 0.0, mix( fine.x, coarse.x, pc ) ) ) ); // rounded tops catch light
-		const dust = mix( vec3( 0.25, 0.23, 0.195 ), vec3( 0.35, 0.325, 0.28 ), n1.mul( 0.6 ).add( n2.mul( 0.4 ) ) );
-		const near = mix( mix( dust.mul( 0.92 ), tone, pf ), tone, pc );
-		gravel.assign( mix( gravel, near, detailK ) );
-		schistTone.assign( mix( schistTone, mix( 0.75, 1.15, fract( coarse.z.mul( 3.7 ) ) ).mul( mix( 0.6, 1.0, smoothstep( 0.02, 0.08, coarse.y ) ) ), detailK ) );
+		// scanned trail: packed dust and pebbles, cavities darkened by the scan's relief
+		const tr = untiled( T.trail, xz, 1.7 );
+		const tl = dot( tr.rgb, vec3( 0.3, 0.55, 0.15 ) );
+		const trailCol = mix( vec3( tl ).mul( vec3( 1.0, 0.97, 0.92 ) ), tr.rgb, 0.35 ).mul( 0.52 ).mul( mix( 0.7, 1.08, smoothstep( 0.2, 0.7, tr.a ) ) );
+		gravel.assign( mix( gravel, trailCol, detailK ) );
+		// broken schist and stones on the bare patches (greyer than the scan)
+		const rk = untiled( T.rocks, xz, 2.6 );
+		const rl = dot( rk.rgb, vec3( 0.3, 0.55, 0.15 ) );
+		const rockCol = mix( vec3( rl ), rk.rgb, 0.45 ).mul( 0.42 ).mul( mix( 0.65, 1.1, smoothstep( 0.15, 0.6, rk.a ) ) );
+		schist.assign( mix( schist, rockCol, detailK ) );
+		// dead grass litter and soil between the blades
+		const lt = untiled( T.litter, xz, 1.4 );
+		litter.assign( lt.rgb.mul( vec3( 0.16, 0.15, 0.12 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.1, 0.6, lt.a ) ) ) );
 
 	} );
 
+	const a = mix( albedo, litter.add( albedo.mul( 0.35 ) ), litterK.mul( 0.75 ) ).toVar();
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
-	const a = mix( albedo, soil, verge.mul( 0.55 ).mul( float( 1.0 ).sub( toCanopy ) ) ).toVar();
+	a.assign( mix( a, soil, verge.mul( 0.4 ).mul( float( 1.0 ).sub( toCanopy ) ) ) );
 	a.assign( mix( a, gravel, trail ) );
-	// schist / shale patches
-	const schist = mix( vec3( 0.12, 0.12, 0.11 ), vec3( 0.24, 0.23, 0.21 ), n1 ).mul( schistTone );
 	a.assign( mix( a, schist, gp.mul( 0.85 ) ) );
 	return a;
 
