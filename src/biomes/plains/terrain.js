@@ -190,34 +190,38 @@ function ridged( x, z, oct ) {
 
 }
 
-// nearest point on a crest polyline -> { d, h }
+// nearest point on a crest polyline -> { d, h, s } (s: distance along the crest)
 function crestDist( m, x, z ) {
 
 	const P = m.crest;
-	let best = 1e9, bh = 0;
+	let best = 1e9, bh = 0, bs = 0, acc = 0;
 	for ( let i = 0; i < P.length - 1; i ++ ) {
 
 		const [ ax, az, ah ] = P[ i ], [ bx, bz, bh2 ] = P[ i + 1 ];
 		const abx = bx - ax, abz = bz - az;
-		const t = Math.min( 1, Math.max( 0, ( ( x - ax ) * abx + ( z - az ) * abz ) / ( abx * abx + abz * abz ) ) );
+		const L2 = abx * abx + abz * abz, L = Math.sqrt( L2 );
+		const t = Math.min( 1, Math.max( 0, ( ( x - ax ) * abx + ( z - az ) * abz ) / L2 ) );
 		const d = Math.hypot( x - ( ax + abx * t ), z - ( az + abz * t ) );
 		if ( d < best ) {
 
 			best = d;
 			const s = t * t * ( 3 - 2 * t );
 			bh = ah + ( bh2 - ah ) * s;
+			bs = acc + t * L;
 
 		}
 
+		acc += L;
+
 	}
 
-	return { d: best, h: bh };
+	return { d: best, h: bh, s: bs };
 
 }
 
 function massif( m, x, z, seed ) {
 
-	const { d, h } = crestDist( m, x, z );
+	const { d, h, s } = crestDist( m, x, z );
 	// jagged crest line: the width wanders, so spurs and couloirs form
 	const wob = 0.75 + 0.5 * vnoiseJS( x / 900 + seed, z / 900 - seed );
 	const u = d / ( m.width * wob );
@@ -225,7 +229,14 @@ function massif( m, x, z, seed ) {
 	const prof = Math.pow( 1 - u, m.steep );
 	const r = ridged( x / 520 + seed, z / 520 + seed * 0.7, 5 );
 	const jag = ( r - 0.45 ) * m.jag * h * Math.pow( 1 - u, 0.6 );
-	return Math.max( 0, h * prof + jag * ( 0.35 + 0.65 * prof ) );
+	// erosion: couloirs and spurs running straight down the fall line (noise
+	// stretched across the crest), deepest on the mid slopes, plus finer rills
+	const wv = vnoiseJS( d / 380 + seed, s / 380 ) * 2.2;
+	const coul = 1 - Math.abs( vnoiseJS( s / 85 + wv + seed * 3, d / 900 ) * 2 - 1 );
+	const rill = 1 - Math.abs( vnoiseJS( s / 26 + wv * 2 + seed, d / 300 + 7 ) * 2 - 1 );
+	const mid = Math.sin( Math.PI * Math.min( 1, u * 1.15 ) );
+	const carve = ( coul * coul * 0.075 + rill * rill * 0.022 ) * h * mid;
+	return Math.max( 0, h * prof + jag * ( 0.35 + 0.65 * prof ) - carve + 0.04 * h * mid );
 
 }
 

@@ -175,6 +175,7 @@ export const PLAINS = {
 		if ( ! extras ) return;
 		const f = gui.addFolder( 'Plains' );
 		const k = { scrub: 1, ghosts: 1 };
+		f.add( U.snow, 'value', 0, 1, 0.01 ).name( 'snow & ice' );
 		f.add( k, 'scrub', 0, 2, 0.05 ).name( 'scrub density' ).onFinishChange( ( v ) => extras.shrubs.setDensity( v ) );
 		f.add( k, 'ghosts', 0, 2, 0.05 ).name( 'ghost forest' ).onFinishChange( ( v ) => extras.trees.setDensity( v ) );
 		f.add( extras.caps.mesh, 'visible' ).name( 'summit clouds' );
