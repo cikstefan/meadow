@@ -9,6 +9,9 @@ import {
 } from 'three/tsl';
 import { vnoise, hash2i } from './tsl/noise.js';
 import { U, skyColor } from './tsl/world.js';
+import { BIOME } from './biomes/index.js';
+
+const SK = BIOME.sky || {};
 
 // elevation (deg) -> palette. Colours are linear-ish, hand tuned.
 const KEYS = [
@@ -119,9 +122,30 @@ export class Sky {
 			const haze = smoothstep( 0.0, 0.35, y );
 			col.assign( mix( col, mix( U.horizon, cloudCol, haze ), dens.mul( 0.92 ) ) );
 
+			let deck = float( 0 );
+			if ( SK.storm ) {
+
+				// low storm deck: big dark rolls racing downwind, heavier overhead,
+				// breaking open along the horizon (the sun shines in through the gap)
+				const q = dir.xz.div( max( y, 0.0 ).add( 0.05 ) ).mul( 0.32 ).add( drift.mul( 2.6 ) ).toVar();
+				const dn = vnoise( q ).mul( 0.5 )
+					.add( vnoise( q.mul( 2.1 ).add( vec2( 5.1, 2.7 ) ) ).mul( 0.27 ) )
+					.add( vnoise( q.mul( 4.3 ).add( vec2( 1.3, 8.1 ) ) ).mul( 0.15 ) )
+					.add( vnoise( q.mul( 9.1 ).add( vec2( 7.7, 3.3 ) ) ).mul( 0.08 ) );
+				const gap = smoothstep( 0.05, 0.2, y );
+				const thick = smoothstep( 0.3, 0.62, dn.add( smoothstep( 0.15, 0.7, y ).mul( 0.18 ) ) );
+				deck = thick.mul( gap ).mul( SK.storm );
+				const under = U.skyAmb.mul( 0.55 ).add( U.horizon.mul( 0.12 ) );
+				// rims and undersides catch the low sun near its side of the sky
+				const rim = U.sunColor.mul( pow( mu, 3.0 ).mul( 0.22 ).add( 0.015 ) ).mul( float( 1.0 ).sub( smoothstep( 0.45, 0.85, dn ) ) );
+				const deckCol = under.mul( mix( 0.75, 1.25, vnoise( q.mul( 3.0 ).add( vec2( 2, 2 ) ) ) ) ).add( rim );
+				col.assign( mix( col, deckCol, deck.mul( 0.96 ) ) );
+
+			}
+
 			// sun disk (HDR, picked up by bloom), dimmed behind clouds
 			// (at night the "sun" uniforms carry the moon: bigger, relatively brighter disk)
-			const clear = float( 1.0 ).sub( dens.mul( 0.85 ) );
+			const clear = float( 1.0 ).sub( dens.mul( 0.85 ) ).mul( float( 1.0 ).sub( deck ) );
 			const disk = smoothstep( 0.99985, 0.99995, mu ).mul( clear );
 			col.addAssign( U.trueSunColor.mul( disk ).mul( 18.0 ) );
 			// the moon: its own (bigger) disk, only while it lights the scene

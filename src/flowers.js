@@ -13,6 +13,11 @@ import {
 import { hash2i, hash2i2, pcg, vnoise } from './tsl/noise.js';
 import { U, terrainHeight, fieldTall, fieldFlowers, windField, cloudShadow, shadeFoliage, actorPush, actorShadowAt } from './tsl/world.js';
 import { storageVec, createLODs, createResetCompute, routeLOD, visibleSlot, disposeStorage } from './gpu.js';
+import { BIOME } from './biomes/index.js';
+
+const S = BIOME.flowers; // species table (5 slots)
+// slot k is of a given role (petal detail / gloss); k < 0 disables it
+const isT = ( type, k ) => k < 0 ? float( 0 ) : float( 1 ).sub( smoothstep( 0.4, 0.6, abs( type.sub( k ) ) ) );
 
 const TYPES = 5;
 const RENDER_ORDER = 5; // 0 daisy, 1 buttercup, 2 poppy, 3 cornflower, 4 campion
@@ -126,7 +131,7 @@ export class Flowers {
 			cullPos: uniform( new THREE.Vector3() ),
 			pusher: uniform( new THREE.Vector3( 0, - 1000, 0 ) ),
 			heightScale: uniform( 1 ),
-			density: uniform( 0.9 ),
+			density: uniform( S.density ),
 			epoch: uniform( 0 ),
 		};
 
@@ -173,17 +178,17 @@ export class Flowers {
 			const r2 = hash2i( gx.add( 23 ), gz.add( 1 ) );
 			const r3 = hash2i( gx.add( 2 ), gz.add( 41 ) );
 
-			const dens = fieldFlowers( xz ).mul( 0.8 ).add( 0.06 ).mul( u.density );
+			const dens = fieldFlowers( xz ).mul( 0.8 ).add( 0.06 ).mul( u.density ).mul( BIOME.grassMask ? BIOME.grassMask( xz ) : float( 1.0 ) );
 			const accept = r0.lessThan( dens );
 
 			// species form drifts: low-frequency noise + a little per-flower randomness
 			const sp = vnoise( xz.div( 21.0 ).add( vec2( 300.0, 11.0 ) ) ).mul( 1.6 ).add( vnoise( xz.div( 6.0 ) ).mul( 0.4 ) ).add( r1.mul( 0.45 ) );
 			const type = floor( fract( sp ).mul( TYPES ) );
 
-			const grassH = mix( 0.14, 1.05, fieldTall( xz ) ).mul( u.heightScale );
-			const minH = pick( type, [ 0.32, 0.26, 0.38, 0.4, 0.4 ] );
+			const grassH = mix( BIOME.grass.hMin, BIOME.grass.hMax, fieldTall( xz ) ).mul( u.heightScale ).mul( S.grassFollow ?? 1 );
+			const minH = pick( type, S.minH );
 			const h = max( grassH.mul( mix( 0.95, 1.35, r2 ) ), minH.mul( mix( 0.9, 1.3, r2 ) ) );
-			const size = pick( type, [ 1.0, 0.75, 1.15, 0.85, 0.85 ] ).mul( mix( 0.8, 1.2, r3 ) );
+			const size = pick( type, S.size ).mul( mix( 0.8, 1.2, r3 ) );
 
 			st.element( idx.mul( 3 ).add( 0 ) ).assign( vec4( xz.x, y, xz.y, select( accept, h, float( 0 ) ) ) );
 			st.element( idx.mul( 3 ).add( 1 ) ).assign( vec4( type, size, r1.mul( 6.2831 ), r3 ) );
@@ -342,11 +347,11 @@ export class Flowers {
 			} ).ElseIf( part.lessThan( 1.5 ), () => {
 
 				// --- petal
-				const count = pick( type, [ 12, 5, 4, 8, 5 ] ).mul( lodIndex === 0 ? 1 : 0.5 );
-				const L = pick( type, [ 1.0, 0.62, 1.05, 0.85, 0.85 ] ).mul( sz );
-				const Wd = pick( type, [ 0.17, 0.42, 0.62, 0.22, 0.34 ] ).mul( sz );
-				const cup = pick( type, [ - 0.12, 0.65, 0.55, 0.15, 0.08 ] );
-				const inner = pick( type, [ 0.28, 0.2, 0.15, 0.28, 0.12 ] ).mul( sz );
+				const count = pick( type, S.petals ).mul( lodIndex === 0 ? 1 : 0.5 );
+				const L = pick( type, S.length ).mul( sz );
+				const Wd = pick( type, S.width ).mul( sz );
+				const cup = pick( type, S.cup );
+				const inner = pick( type, S.inner ).mul( sz );
 				const alive = k.lessThan( count );
 
 				const a = k.add( fract( seed.mul( 7.0 ) ) ).div( max( count, 1.0 ) ).mul( PI.mul( 2.0 ) ).add( yaw );
@@ -368,8 +373,8 @@ export class Flowers {
 				const r = g.x;
 				const a = g.y.mul( PI.mul( 2.0 ) );
 				const radial = ax.mul( cos( a ) ).add( bx.mul( sin( a ) ) );
-				const cr = pick( type, [ 0.3, 0.22, 0.2, 0.26, 0.12 ] ).mul( sz );
-				const dome = pick( type, [ 0.16, 0.12, 0.22, 0.2, 0.05 ] ).mul( sz );
+				const cr = pick( type, S.centreR ).mul( sz );
+				const dome = pick( type, S.dome ).mul( sz );
 				world.assign( top.add( radial.mul( r.mul( cr ) ) ).add( n.mul( float( 1.0 ).sub( r.mul( r ) ).mul( dome ).add( sz.mul( 0.08 ) ) ) ) );
 				nrm.assign( normalize( n.add( radial.mul( r.mul( 0.9 ) ) ) ) );
 				pu.assign( r );
@@ -388,9 +393,8 @@ export class Flowers {
 		mat.opacityNode = Fn( () => {
 
 			const part = vP.x, type = vP.y, pu = vP.z, pv = abs( vP.w );
-			const notch = select( type.greaterThan( 3.5 ), smoothstep( 0.8, 1.0, pu ).mul( float( 1.0 ).sub( smoothstep( 0.0, 0.35, pv ) ) ), float( 0 ) );
-			const frill = select( type.greaterThan( 2.5 ).and( type.lessThan( 3.5 ) ),
-				smoothstep( 0.75, 1.0, pu ).mul( abs( sin( pv.mul( 9.0 ) ) ) ).mul( 0.8 ), float( 0 ) );
+			const notch = isT( type, S.notched ).mul( smoothstep( 0.8, 1.0, pu ).mul( float( 1.0 ).sub( smoothstep( 0.0, 0.35, pv ) ) ) );
+			const frill = isT( type, S.frilly ).mul( smoothstep( 0.75, 1.0, pu ).mul( abs( sin( pv.mul( 9.0 ) ) ) ).mul( 0.8 ) );
 			const tip = smoothstep( 1.0, 0.82, pu.add( pv.mul( pv ).mul( 0.22 ) ) );
 			const petal = tip.sub( notch ).sub( frill );
 			return select( part.greaterThan( 0.5 ).and( part.lessThan( 1.5 ) ), petal.add( 0.5 ), float( 1.0 ) );
@@ -403,25 +407,13 @@ export class Flowers {
 			const part = vP.x, type = vP.y, pu = vP.z, pv = vP.w;
 			const seed = vI.x, cloud = vI.y;
 
-			const petalCol = pick3( type, [
-				[ 0.78, 0.78, 0.72 ], // daisy
-				[ 0.82, 0.55, 0.012 ], // buttercup
-				[ 0.62, 0.025, 0.012 ], // poppy
-				[ 0.07, 0.16, 0.62 ], // cornflower
-				[ 0.66, 0.16, 0.36 ], // campion
-			] ).toVar();
-			const centreCol = pick3( type, [
-				[ 0.7, 0.4, 0.02 ],
-				[ 0.55, 0.42, 0.03 ],
-				[ 0.02, 0.02, 0.015 ],
-				[ 0.08, 0.05, 0.22 ],
-				[ 0.75, 0.6, 0.5 ],
-			] );
-			// petal details
+			const petalCol = pick3( type, S.petalCol ).toVar();
+		const centreCol = pick3( type, S.centreCol );
+		// petal details
 			petalCol.mulAssign( mix( 0.85, 1.1, seed ) );
-			const poppyBlotch = select( type.greaterThan( 1.5 ).and( type.lessThan( 2.5 ) ), smoothstep( 0.22, 0.05, pu ), float( 0 ) );
+			const poppyBlotch = isT( type, S.blotch ).mul( smoothstep( 0.22, 0.05, pu ) );
 			petalCol.assign( mix( petalCol, vec3( 0.02, 0.015, 0.012 ), poppyBlotch ) );
-			const daisyBase = select( type.lessThan( 0.5 ), smoothstep( 0.25, 0.0, pu ), float( 0 ) );
+			const daisyBase = isT( type, S.daisy ).mul( smoothstep( 0.25, 0.0, pu ) );
 			petalCol.assign( mix( petalCol, vec3( 0.7, 0.62, 0.3 ), daisyBase.mul( 0.4 ) ) );
 			// veins
 			petalCol.mulAssign( float( 1.0 ).sub( smoothstep( 0.6, 1.0, abs( sin( pv.mul( 7.0 ) ) ) ).mul( 0.08 ) ) );
@@ -432,7 +424,7 @@ export class Flowers {
 			const N = normalize( vN ).mul( faceDirection );
 			const isPetal = part.greaterThan( 0.5 ).and( part.lessThan( 1.5 ) );
 			const transmit = select( isPetal, float( 1.0 ), float( 0.4 ) );
-			const spec = select( type.greaterThan( 0.5 ).and( type.lessThan( 1.5 ) ).and( isPetal ), float( 0.9 ), float( 0.12 ) );
+			const spec = select( isPetal, mix( float( 0.12 ), float( 0.9 ), isT( type, S.glossy ) ), float( 0.12 ) );
 			const ao = select( part.lessThan( 0.5 ), mix( 0.2, 1.0, pu ), float( 1.0 ) );
 
 			// night: bioluminescent blue petals, brighter centres (picked up by bloom)

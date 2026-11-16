@@ -4,80 +4,23 @@
 // grass roots sit on the terrain, that distant terrain is tinted like the grass
 // canopy, and that fog matches the sky at the horizon (no seam).
 
-import * as THREE from 'three/webgpu';
 import {
-	Fn, uniform, float, vec2, vec3, mix, smoothstep, clamp, max, pow, exp, dot, normalize, length, cameraPosition, select, abs
+	Fn, float, vec2, vec3, mix, smoothstep, clamp, max, pow, exp, dot, normalize, length, cameraPosition, select, abs
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from './noise.js';
 
-// ---------------------------------------------------------------- uniforms
+import { U } from './uniforms.js';
+import { BIOME } from '../biomes/index.js';
+export { U };
 
-export const U = {
-	time: uniform( 0 ),
+// ---------------------------------------------------------------- terrain & fields (per biome)
 
-	// sunDir / sunColor: the directional LIGHT (sun by day, moon at night) used for shading.
-	// trueSunDir / trueSunColor: the actual sun, used by the sky (glow, halo, twilight
-	// bands, mist scattering) so dusk and dawn never jump when the light hands over.
-	sunDir: uniform( new THREE.Vector3( 0.3, 0.2, - 1 ).normalize() ),
-	trueSunDir: uniform( new THREE.Vector3( 0.3, 0.2, - 1 ).normalize() ),
-	trueSunColor: uniform( new THREE.Color( 1, 0.8, 0.6 ) ),
-	sunColor: uniform( new THREE.Color( 1, 0.8, 0.6 ) ),
-	zenith: uniform( new THREE.Color( 0.2, 0.4, 0.7 ) ),
-	horizon: uniform( new THREE.Color( 0.7, 0.7, 0.7 ) ),
-	horizonSun: uniform( new THREE.Color( 1.0, 0.7, 0.4 ) ),
-	skyAmb: uniform( new THREE.Color( 0.3, 0.35, 0.45 ) ),
-	groundAmb: uniform( new THREE.Color( 0.08, 0.09, 0.04 ) ),
-	fogDensity: uniform( 0.0011 ),
-	terrainFar: uniform( 560 ),
-
-	windDir: uniform( new THREE.Vector2( 1, 0.35 ).normalize() ),
-	windStrength: uniform( 0.55 ),
-	windSpeed: uniform( 3.2 ),
-	// integrated offsets (advanced on the CPU every frame) so wind / cloud speed
-	// and direction can change smoothly without the whole field jumping
-	windOffset: uniform( new THREE.Vector2() ), // ∫ windDir * windSpeed dt
-	windPhase: uniform( 0 ), // ∫ windSpeed dt
-	cloudOffset: uniform( new THREE.Vector2() ),
-	skyOffset: uniform( new THREE.Vector2() ),
-	driftOffset: uniform( new THREE.Vector3() ), // pollen drift ∫ W * strength dt
-	particles: uniform( 0.6 ), // fraction of floating particles shown
-	mist: uniform( 0.35 ), // morning inversion / valley mist amount
-	twilight: uniform( 0 ), // 0..1 peaks around sunrise / sunset (belt of Venus, afterglow)
-	// animals pushing plants aside: xyz + push radius; shadows: centre xz, strength, radius
-	actors: [ 0, 1, 2, 3, 4 ].map( () => uniform( new THREE.Vector4( 0, - 1e4, 0, 1.2 ) ) ),
-	actorShadows: [ 0, 1, 2, 3, 4 ].map( () => uniform( new THREE.Vector4( 0, 0, 0, 1 ) ) ),
-
-	cloudCover: uniform( 0.5 ),
-	cloudDark: uniform( 0.45 ),
-	cloudSpeed: uniform( 4.0 ),
-
-	dry: uniform( 0 ), // amount of dry straw patches (0 = lush everywhere)
-	night: uniform( 0 ), // 0 day .. 1 full night
-	glowColor: uniform( new THREE.Color( 0.04, 0.32, 1.0 ) ), // bioluminescent flowers
-	glow: uniform( 1 ),
-};
-
-// ---------------------------------------------------------------- terrain
-
-const T1 = 150, T2 = 48, T3 = 13;
-const A1 = 16, A2 = 4, A3 = 0.6;
-
-export const terrainHeight = Fn( ( [ xz ] ) => {
-
-	const h1 = vnoise( xz.div( T1 ).add( vec2( 13.1, 7.7 ) ) ).sub( 0.5 ).mul( A1 );
-	const h2 = vnoise( xz.div( T2 ).add( vec2( 3.3, 91.2 ) ) ).sub( 0.5 ).mul( A2 );
-	const h3 = vnoise( xz.div( T3 ).add( vec2( 57.0, 21.0 ) ) ).sub( 0.5 ).mul( A3 );
-	return h1.add( h2 ).add( h3 );
-
-} );
-
-export function terrainHeightJS( x, z ) {
-
-	return ( vnoiseJS( x / T1 + 13.1, z / T1 + 7.7 ) - 0.5 ) * A1 +
-		( vnoiseJS( x / T2 + 3.3, z / T2 + 91.2 ) - 0.5 ) * A2 +
-		( vnoiseJS( x / T3 + 57.0, z / T3 + 21.0 ) - 0.5 ) * A3;
-
-}
+export const terrainHeight = BIOME.terrainHeight;
+export const terrainHeightJS = BIOME.terrainHeightJS;
+export const fieldTall = BIOME.fieldTall;
+export const fieldDry = BIOME.fieldDry;
+export const fieldFlowers = BIOME.fieldFlowers;
+export const fieldsJS = BIOME.fieldsJS;
 
 export const terrainNormal = Fn( ( [ xz ] ) => {
 
@@ -86,52 +29,6 @@ export const terrainNormal = Fn( ( [ xz ] ) => {
 	const hx = terrainHeight( xz.add( vec2( e, 0 ) ) );
 	const hz = terrainHeight( xz.add( vec2( 0, e ) ) );
 	return normalize( vec3( h.sub( hx ), e, h.sub( hz ) ) );
-
-} );
-
-// ---------------------------------------------------------------- meadow fields
-
-// CPU mirrors (spawn-point search)
-const ss = ( a, b, x ) => {
-
-	const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) );
-	return t * t * ( 3 - 2 * t );
-
-};
-
-export function fieldsJS( x, z ) {
-
-	const tall = ss( 0.2, 0.8, vnoiseJS( x / 26 + 41, z / 26 + 3 ) ) * 0.72 + vnoiseJS( x / 6.5 + 9, z / 6.5 + 77 ) * 0.28;
-	const dry = ss( 0.6, 0.92, vnoiseJS( x / 38 + 101, z / 38 + 19 ) * 0.78 + vnoiseJS( x / 8 + 5, z / 8 + 33 ) * 0.22 ) * U.dry.value;
-	const flowers = ss( 0.45, 0.9, vnoiseJS( x / 17 + 7, z / 17 + 140 ) * 0.75 + vnoiseJS( x / 5 + 66, z / 5 + 12 ) * 0.25 );
-	return { tall, dry, flowers };
-
-}
-
-// 0..1 : how tall the grass is (tussocks / mown-looking hollows)
-export const fieldTall = Fn( ( [ xz ] ) => {
-
-	const a = smoothstep( 0.2, 0.8, vnoise( xz.div( 26 ).add( vec2( 41.0, 3.0 ) ) ) );
-	const b = vnoise( xz.div( 6.5 ).add( vec2( 9.0, 77.0 ) ) );
-	return a.mul( 0.72 ).add( b.mul( 0.28 ) );
-
-} );
-
-// 0..1 : dried, straw-coloured areas
-export const fieldDry = Fn( ( [ xz ] ) => {
-
-	const a = vnoise( xz.div( 38 ).add( vec2( 101.0, 19.0 ) ) );
-	const b = vnoise( xz.div( 8.0 ).add( vec2( 5.0, 33.0 ) ) );
-	return smoothstep( 0.6, 0.92, a.mul( 0.78 ).add( b.mul( 0.22 ) ) ).mul( U.dry );
-
-} );
-
-// 0..1 : wildflower density (drifts of flowers)
-export const fieldFlowers = Fn( ( [ xz ] ) => {
-
-	const a = vnoise( xz.div( 17 ).add( vec2( 7.0, 140.0 ) ) );
-	const b = vnoise( xz.div( 5.0 ).add( vec2( 66.0, 12.0 ) ) );
-	return smoothstep( 0.45, 0.9, a.mul( 0.75 ).add( b.mul( 0.25 ) ) );
 
 } );
 
@@ -168,7 +65,7 @@ export function windFieldJS( x, z ) {
 }
 
 // 0..1 multiplier for direct sunlight under drifting cloud shadows
-export const cloudShadow = Fn( ( [ xz ] ) => {
+const cloudShadowDefault = Fn( ( [ xz ] ) => {
 
 	const p = xz.sub( U.cloudOffset );
 	const c = vnoise( p.div( 85.0 ) ).mul( 0.7 ).add( vnoise( p.div( 27.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) );
@@ -176,6 +73,7 @@ export const cloudShadow = Fn( ( [ xz ] ) => {
 	return mix( float( 1.0 ).sub( U.cloudDark ), float( 1.0 ), lit );
 
 } );
+export const cloudShadow = BIOME.cloudShadow || cloudShadowDefault;
 
 // Push vector (xz, 0..1) that the animals' bodies apply to a plant at `xz`.
 export const actorPush = ( xz, y ) => {

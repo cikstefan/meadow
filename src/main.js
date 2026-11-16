@@ -17,6 +17,8 @@ import { Jaguar } from './jaguar.js';
 import { makeRaptor, makeHuman } from './characters.js';
 import { DeerHerd } from './deer.js';
 import { WindSpirits } from './spirits.js';
+import { BIOME, BIOMES } from './biomes/index.js';
+import { mountWorldSwitch } from './ui/worldswitch.js';
 
 const QUALITY = {
 	// three nested grass rings, each coarser (wider blades) than the last:
@@ -30,23 +32,26 @@ const QUALITY = {
 const params = new URLSearchParams( location.search );
 const isMobile = /Android|iPhone|iPad|iPod/i.test( navigator.userAgent ) || ( navigator.maxTouchPoints > 1 && window.innerWidth < 1100 );
 
+const D = BIOME.defaults;
+const num = ( k, def ) => ( params.has( k ) ? parseFloat( params.get( k ) ) : def );
+
 const settings = {
 	quality: params.get( 'q' ) || ( isMobile ? 'low' : 'high' ), // desktop may start at ultra (see below)
-	hour: parseFloat( params.get( 'hour' ) || '4.55' ),
-	clouds: parseFloat( params.get( 'clouds' ) || '0.51' ),
-	wind: parseFloat( params.get( 'wind' ) || '1.6' ),
-	windAngle: parseFloat( params.get( 'winddir' ) || '110' ),
-	grassHeight: parseFloat( params.get( 'grass' ) || '1.71' ),
-	dryPatches: parseFloat( params.get( 'dry' ) || '0' ),
+	hour: num( 'hour', D.hour ),
+	clouds: num( 'clouds', D.clouds ),
+	wind: num( 'wind', D.wind ),
+	windAngle: num( 'winddir', D.windAngle ),
+	grassHeight: num( 'grass', D.grassHeight ),
+	dryPatches: num( 'dry', D.dryPatches ),
 	flowerGlow: 1.0,
-	mist: parseFloat( params.get( 'mist' ) || '0' ),
-	particles: parseFloat( params.get( 'particles' ) || '0.85' ),
+	mist: num( 'mist', D.mist ),
+	particles: num( 'particles', D.particles ),
 	autoTime: params.get( 'auto' ) === '1',
-	windSpirits: params.get( 'spirits' ) !== '0',
-	spiritAmount: parseFloat( params.get( 'spiritamount' ) || '0.09' ),
-	sunShafts: params.get( 'shafts' ) !== '0',
+	windSpirits: params.has( 'spirits' ) ? params.get( 'spirits' ) !== '0' : D.spirits,
+	spiritAmount: num( 'spiritamount', D.spiritAmount ),
+	sunShafts: params.has( 'shafts' ) ? params.get( 'shafts' ) !== '0' : D.shafts,
 	painterly: params.get( 'grade' ) === '1',
-	view: { third: 'third person (jaguar)', jaguar: 'third person (jaguar)', raptor: 'third person (raptor)' }[ params.get( 'view' ) ] || 'first person',
+	view: ( BIOME.animals && { third: 'third person (jaguar)', jaguar: 'third person (jaguar)', raptor: 'third person (raptor)' }[ params.get( 'view' ) ] ) || 'first person',
 	flowers: true,
 	bloom: params.get( 'bloom' ) !== '0',
 	exposure: 1.0,
@@ -81,7 +86,9 @@ async function start() {
 
 	} catch ( e ) { /* fall back to defaults */ }
 
-	const renderer = new THREE.WebGPURenderer( { antialias: true, powerPreference: 'high-performance', requiredLimits } );
+	// long views (mountains 4-16 km away) need a reversed depth buffer for precision
+	const reversedDepth = !! BIOME.atmosphere;
+	const renderer = new THREE.WebGPURenderer( { antialias: true, powerPreference: 'high-performance', requiredLimits, reversedDepthBuffer: reversedDepth } );
 	// capable desktop GPUs start at ultra; adaptive quality steps down if it struggles
 	if ( ! params.has( 'q' ) && ! isMobile && ( requiredLimits.maxStorageBufferBindingSize || 0 ) >= 512 * 1024 * 1024 ) settings.quality = 'ultra';
 	await renderer.init();
@@ -93,10 +100,18 @@ async function start() {
 	document.body.appendChild( renderer.domElement );
 
 	const scene = new THREE.Scene();
-	const camera = new THREE.PerspectiveCamera( 55, 1, 0.05, 4000 );
+	const ATM = BIOME.atmosphere;
+	const camera = new THREE.PerspectiveCamera( 55, 1, ATM ? 0.08 : 0.05, ATM ? ATM.far : 4000 );
 
 	const sky = new Sky();
+	if ( ATM ) sky.mesh.scale.setScalar( ATM.skyRadius );
 	scene.add( sky.mesh );
+	if ( ATM ) {
+
+		U.fogDensity.value = ATM.fogDensity;
+		U.terrainFar.value = ATM.terrainFar;
+
+	}
 
 	// Lights only affect the jaguar (everything else uses the custom foliage
 	// model); they mirror the sky uniforms. Intensity PI matches three's
@@ -112,7 +127,7 @@ async function start() {
 	scene.add( raptor.group, human.group );
 	const chars = { 'third person (jaguar)': jaguar, 'third person (raptor)': raptor, 'third person (human)': human };
 	// the human is hidden from the view list for now (the character code stays in place)
-	const VIEWS = [ 'first person', ...Object.keys( chars ).filter( ( v ) => chars[ v ] !== human ) ];
+	const VIEWS = BIOME.animals ? [ 'first person', ...Object.keys( chars ).filter( ( v ) => chars[ v ] !== human ) ] : [ 'first person' ];
 	const herd = new DeerHerd();
 	scene.add( herd.group );
 	const spirits = new WindSpirits( isMobile ? 90 : 170 );
@@ -127,8 +142,9 @@ async function start() {
 	const controls = new Controls( camera, renderer.domElement );
 	controls.tour = settings.tour;
 
-	// spawn somewhere lush, flowery and not too short
-	spawn: for ( let r = 0; r < 400; r += 6 ) for ( let a = 0; a < Math.PI * 2; a += Math.max( 0.15, 6 / Math.max( r, 1 ) ) ) {
+	// spawn: the biome's chosen spot, or somewhere lush, flowery and not too short
+	if ( BIOME.spawn ) controls.pos.set( BIOME.spawn.pos[ 0 ], 0, BIOME.spawn.pos[ 1 ] );
+	else spawn: for ( let r = 0; r < 400; r += 6 ) for ( let a = 0; a < Math.PI * 2; a += Math.max( 0.15, 6 / Math.max( r, 1 ) ) ) {
 
 		const x = Math.cos( a ) * r, z = Math.sin( a ) * r;
 		const f = fieldsJS( x, z );
@@ -140,6 +156,9 @@ async function start() {
 		}
 
 	}
+
+	// biome-specific systems (plains: mountains, lake, shrubs, ghost forest)
+	const extras = BIOME.createExtras ? await BIOME.createExtras( { scene, renderer, camera, settings } ) : null;
 
 	let grass = null, midGrass = null, farGrass = null, flowers = null, terrain = null;
 	const grassRings = () => [ grass, midGrass, farGrass ].filter( Boolean );
@@ -229,7 +248,7 @@ async function start() {
 			// light shafts: bright sky near the sun, radially smeared toward the sun;
 			// grass blades and animals cut dark rays into it
 			const depth = scenePass.getTextureNode( 'depth' ).x;
-			const sky = step( 0.99997, depth );
+			const sky = reversedDepth ? step( depth, 0.00003 ) : step( 0.99997, depth );
 			const d = length( uv().sub( post.sunUV ).mul( vec2( post.aspect, 1.0 ) ) );
 			const near = smoothstep( 0.55, 0.0, d );
 			const src = vec4( color.rgb.mul( sky ).mul( near ), 1.0 );
@@ -278,11 +297,12 @@ async function start() {
 	}
 
 	applySky();
-	// start facing the sun: backlit translucent blades are the money shot
-	controls.lookAtAzimuth( sky.az + 12 );
+	// start facing the sun (backlit translucent blades are the money shot), or the biome's view
+	controls.lookAtAzimuth( BIOME.spawn ? BIOME.spawn.az : sky.az + 12 );
+	if ( BIOME.spawn && BIOME.spawn.eye ) controls.eye = controls.eyeTarget = BIOME.spawn.eye;
 
 	// the jaguar appears a few metres ahead, crossing the view
-	jaguar._loading = jaguar.load().then( () => {
+	if ( BIOME.animals ) jaguar._loading = jaguar.load().then( () => {
 
 		const f = new THREE.Vector3( - Math.sin( controls.yaw ), 0, - Math.cos( controls.yaw ) );
 		jaguar.place( controls.pos.x + f.x * 11, controls.pos.z + f.z * 11, controls.yaw + Math.PI / 2 );
@@ -295,7 +315,7 @@ async function start() {
 
 		const a = controls.yaw + 0.5;
 		const f = new THREE.Vector3( - Math.sin( a ), 0, - Math.cos( a ) );
-		herd.load( new THREE.Vector3( controls.pos.x + f.x * 55, 0, controls.pos.z + f.z * 55 ), 4 )
+		if ( BIOME.animals ) herd.load( new THREE.Vector3( controls.pos.x + f.x * 55, 0, controls.pos.z + f.z * 55 ), 4 )
 			.catch( ( e ) => console.warn( 'deer failed to load', e ) );
 
 	}
@@ -363,11 +383,11 @@ async function start() {
 	} );
 
 	// ------------------------------------------------------------ gui
-	const gui = new GUI( { title: 'Meadow' } );
+	const gui = new GUI( { title: BIOME.name } );
 	if ( isMobile || params.has( 'nogui' ) ) gui.close();
 	gui.add( settings, 'hour', 0, 24, 0.05 ).name( 'time of day' ).onChange( applySky ).listen();
 	gui.add( settings, 'clouds', 0, 1, 0.01 ).onChange( applySky ).listen();
-	gui.add( settings, 'wind', 0, 1.6, 0.01 ).onChange( applySky ).listen();
+	gui.add( settings, 'wind', 0, 2.5, 0.01 ).onChange( applySky ).listen();
 	gui.add( settings, 'windAngle', 0, 360, 1 ).name( 'wind direction' ).onChange( applySky ).listen();
 	gui.add( settings, 'grassHeight', 0.3, 3.0, 0.01 ).name( 'grass height' ).onChange( ( v ) => {
 
@@ -403,8 +423,12 @@ async function start() {
 	} ).listen();
 	gui.add( controls, 'tour' ).name( 'auto tour' ).listen();
 	gui.add( controls, 'mouseSteer' ).name( 'look follows cursor' );
-	gui.add( settings, 'view', VIEWS ).name( 'view (V)' ).onChange( setView ).listen();
-	gui.add( herd.group, 'visible' ).name( 'deer' );
+	if ( BIOME.animals ) {
+
+		gui.add( settings, 'view', VIEWS ).name( 'view (V)' ).onChange( setView ).listen();
+		gui.add( herd.group, 'visible' ).name( 'deer' );
+
+	}
 
 	const squid = gui.addFolder( '✦ Sword of the Sea mode (prototype)' );
 	squid.add( settings, 'windSpirits' ).name( 'wind spirits' ).onChange( ( v ) => ( spirits.mesh.visible = v ) );
@@ -554,6 +578,14 @@ async function start() {
 
 		} else controls.update( dt, settings.tour );
 
+		// biome bounds: keep the walker on the plains (soft wall)
+		if ( BIOME.walkRadius ) {
+
+			const r = Math.hypot( controls.pos.x, controls.pos.z );
+			if ( r > BIOME.walkRadius ) controls.pos.multiplyScalar( BIOME.walkRadius / r );
+
+		}
+
 		const freeze = window.__jaguarFreeze;
 		if ( jaguar.ready && ! freeze && ! ( third && active === jaguar ) ) jaguar.update( dt, null, third ? active.pos : controls.pos );
 		for ( const c of [ raptor, human ] ) if ( c.ready && c.group.visible && ! freeze && ! ( third && active === c ) ) c.update( dt, null );
@@ -585,6 +617,7 @@ async function start() {
 		} );
 		sky.update( camera );
 		terrain.update( camera );
+		if ( extras ) extras.update( renderer, camera, dt );
 		grass.update( renderer, camera, controls.pusher );
 		midGrass.update( renderer, camera, null );
 		farGrass.update( renderer, camera, null );
@@ -697,7 +730,13 @@ async function start() {
 	renderer.setAnimationLoop( frame );
 
 	// expose for debugging / screenshots
-	window.__meadow = { THREE, U, spirits, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, raptor, human, setView, terrainHeightJS, setQuality( q ) {
+	mountWorldSwitch( BIOMES, BIOME );
+
+	window.__meadow = { THREE, U, BIOME, get extras() {
+
+		return extras;
+
+	}, spirits, renderer, scene, camera, controls, settings, applySky, audio, jaguar, herd, raptor, human, setView, terrainHeightJS, setQuality( q ) {
 
 		settings.quality = q;
 		settings.adaptive = false;

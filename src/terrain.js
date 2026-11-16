@@ -9,7 +9,11 @@ import {
 	Fn, uniform, float, vec2, vec3, positionLocal, varying, mix, smoothstep, length, abs, dot, cameraPosition, normalize
 } from 'three/tsl';
 import { vnoise } from './tsl/noise.js';
+import { BIOME } from './biomes/index.js';
 import { U, terrainHeight, terrainNormal, fieldDry, fieldTall, fieldFlowers, windField, cloudShadow, shadeFoliage, gustSheen, flowerGlowLight } from './tsl/world.js';
+
+const GR = BIOME.ground;
+const c3 = ( a ) => vec3( ...a );
 
 export class Terrain {
 
@@ -56,8 +60,8 @@ export class Terrain {
 			// soil / thatch under the blades
 			const n1 = vnoise( xz.mul( 1.7 ) );
 			const n2 = vnoise( xz.mul( 6.0 ).add( vec2( 4, 9 ) ) );
-			const soil = mix( vec3( 0.05, 0.04, 0.022 ), vec3( 0.11, 0.09, 0.05 ), n1.mul( 0.6 ).add( n2.mul( 0.4 ) ) );
-			const thatch = mix( soil, vec3( 0.07, 0.09, 0.025 ), smoothstep( 0.3, 0.7, n2 ) );
+			const soil = mix( c3( GR.soilA ), c3( GR.soilB ), n1.mul( 0.6 ).add( n2.mul( 0.4 ) ) );
+			const thatch = mix( soil, c3( GR.thatch ), smoothstep( 0.3, 0.7, n2 ) );
 
 			// canopy colour as seen from a distance: matches lit blade tips, with
 			// clump-scale and patch-scale texture so it reads as grass, not paint
@@ -66,10 +70,10 @@ export class Terrain {
 			const detail = float( 1.0 ).sub( smoothstep( 50.0, 220.0, dist ) );
 			const c1 = vnoise( xz.mul( 0.9 ).add( vec2( 13, 2 ) ) );
 			const c2 = vnoise( xz.mul( 3.3 ).add( vec2( 7, 41 ) ) );
-			const c3 = vnoise( xz.mul( 0.21 ).add( vec2( 3, 5 ) ) );
+			const c3n = vnoise( xz.mul( 0.21 ).add( vec2( 3, 5 ) ) );
 			const tex = mix( float( 0.5 ), c1.mul( 0.65 ).add( c2.mul( 0.35 ) ), detail );
-			const lush = mix( vec3( 0.085, 0.17, 0.03 ), vec3( 0.13, 0.2, 0.04 ), c3 );
-			const straw = vec3( 0.36, 0.28, 0.13 );
+			const lush = mix( c3( GR.lushA ), c3( GR.lushB ), c3n );
+			const straw = c3( GR.straw );
 			const canopy = mix( lush, straw, dry.mul( 0.8 ) )
 				.mul( mix( 0.72, 1.1, tex ) )
 				.mul( mix( 0.82, 1.05, tall ) );
@@ -82,7 +86,9 @@ export class Terrain {
 			const toCanopy = smoothstep( this.u.grassRadius.mul( 0.35 ), this.u.grassRadius.mul( 0.8 ), dist );
 			// wind waves rolling across the distant canopy
 			const sheen = mix( float( 1.0 ), gustSheen( windField( xz ) ), toCanopy );
-			const albedo = mix( thatch, canopy, toCanopy ).mul( sheen );
+			const albedo0 = mix( thatch, canopy, toCanopy ).mul( sheen );
+			// biome hook: paths, gravel, rock outcrops ...
+			const albedo = BIOME.groundAlbedo ? BIOME.groundAlbedo( xz, albedo0, dist, toCanopy ) : albedo0;
 			const emit = flowerGlowLight( vField.z, toCanopy.mul( 0.8 ) ).mul( albedo.mul( 3.0 ).add( 0.1 ) );
 			const ao = mix( 0.4, mix( 0.65, 0.95, tex ).mul( mix( 1.0, 0.55, steep ) ), toCanopy );
 

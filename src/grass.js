@@ -22,6 +22,10 @@ import {
 	U, terrainHeight, terrainNormal, fieldTall, fieldDry, fieldFlowers, windField, cloudShadow, shadeFoliage, gustSheen, flowerGlowLight, actorPush, actorShadowAt
 } from './tsl/world.js';
 import { storageVec, createLODs, createResetCompute, routeLOD, visibleSlot, disposeStorage } from './gpu.js';
+import { BIOME } from './biomes/index.js';
+
+const G = BIOME.grass;
+const c3 = ( a ) => vec3( ...a );
 
 const RENDER_ORDER = 0;
 
@@ -162,14 +166,16 @@ export class Grass {
 			const tall = fieldTall( xz );
 			const dry = fieldDry( xz );
 
-			const h = mix( 0.14, 1.05, tall )
+			const h = mix( G.hMin, G.hMax, tall )
 				.mul( mix( 0.72, 1.18, cH ) )
 				.mul( mix( 0.7, 1.15, b0 ) )
 				// blades at the clump centre are taller (tussock dome)
 				.mul( mix( 0.78, 1.0, clamp( float( 1.0 ).sub( dC.mul( 1.1 ) ), 0, 1 ) ) )
-				.mul( u.heightScale );
+				.mul( u.heightScale )
+				// biome mask (e.g. a trail through the plains)
+				.mul( BIOME.grassMask ? BIOME.grassMask( xz ) : float( 1.0 ) );
 
-			const w = mix( 0.009, 0.024, cW ).mul( mix( 0.7, 1.3, b1 ) ).mul( mix( 1.0, 0.8, dry ) ).mul( u.widthScale ).mul( u.widthMul );
+			const w = mix( G.wMin, G.wMax, cW ).mul( mix( 0.7, 1.3, b1 ) ).mul( mix( 1.0, 0.8, dry ) ).mul( u.widthScale ).mul( u.widthMul );
 			const bend = mix( 0.15, 0.6, cB ).mul( mix( 0.6, 1.35, b2 ) ).mul( float( 0.55 ).add( dC.mul( 0.9 ) ) ).add( dry.mul( 0.15 ) );
 
 			// yaw: lean outward from clump centre, randomised near clump borders
@@ -298,7 +304,7 @@ export class Grass {
 
 			// sway: a travelling phase (moves with the gust field) + per-blade flutter
 			const phase = dot( root.xz, U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( seed.mul( 1.5 ) );
-			const flutter = sin( U.time.mul( mix( 2.2, 4.2, seed ) ).add( seed.mul( 61.0 ) ) );
+			const flutter = sin( U.time.mul( mix( ( G.flutterHz || [ 2.2, 4.2 ] )[ 0 ], ( G.flutterHz || [ 2.2, 4.2 ] )[ 1 ], seed ) ).add( seed.mul( 61.0 ) ) );
 			const wAmt = wind.mul( float( 1.0 ).add( sin( phase ).mul( 0.35 ) ) );
 			const wh = wAmt.mul( h );
 
@@ -306,7 +312,7 @@ export class Grass {
 			const p1 = up.mul( h.mul( 0.33 ) ).add( fwd.mul( h.mul( bend ).mul( 0.1 ) ) ).add( W.mul( wh.mul( 0.08 ) ) ).toVar();
 			const p2 = up.mul( h.mul( 0.66 ) ).add( fwd.mul( h.mul( bend ).mul( 0.36 ) ) ).add( W.mul( wh.mul( 0.34 ) ) ).toVar();
 			const p3 = up.mul( h.mul( float( 1.0 ).sub( bend.mul( 0.3 ) ) ) ).add( fwd.mul( h.mul( bend ).mul( 0.72 ) ) )
-				.add( W.mul( wh.mul( 0.8 ) ) ).add( Wp.mul( flutter.mul( wh ).mul( 0.07 ) ) ).toVar();
+				.add( W.mul( wh.mul( 0.8 ) ) ).add( Wp.mul( flutter.mul( wh ).mul( G.flutter ) ) ).toVar();
 
 			// walker push: lay the blade over, away from the walker
 			const pushLen = length( push );
@@ -375,14 +381,14 @@ export class Grass {
 			const cloud = vInfo.w;
 
 			// --- albedo (linear)
-			const lushBase = vec3( 0.025, 0.05, 0.012 );
-			const lushTip = mix( vec3( 0.11, 0.23, 0.04 ), vec3( 0.17, 0.26, 0.05 ), cSeed ).toVar();
-			lushTip.assign( mix( lushTip, vec3( 0.08, 0.22, 0.06 ), smoothstep( 0.75, 1.0, cSeed ) ) );
-			const dryBase = vec3( 0.12, 0.1, 0.04 );
-			const dryTip = mix( vec3( 0.42, 0.33, 0.15 ), vec3( 0.55, 0.45, 0.25 ), bSeed );
+			const lushBase = c3( G.lushBase );
+			const lushTip = mix( c3( G.lushTipA ), c3( G.lushTipB ), cSeed ).toVar();
+			lushTip.assign( mix( lushTip, c3( G.lushTipC ), smoothstep( 0.75, 1.0, cSeed ) ) );
+			const dryBase = c3( G.dryBase );
+			const dryTip = mix( c3( G.dryTipA ), c3( G.dryTipB ), bSeed );
 
 			// dead blades scattered everywhere + dry patches
-			const dead = smoothstep( 0.9, 0.97, fract( bSeed.mul( 13.37 ) ) );
+			const dead = smoothstep( G.dead, G.dead + 0.07, fract( bSeed.mul( 13.37 ) ) );
 			const dryness = clamp( dryF.mul( mix( 0.55, 1.0, bSeed ) ).add( dead.mul( 0.8 ) ), 0, 1 );
 
 			const grad = smoothstep( 0.0, 1.0, pow( t, 0.75 ) );
