@@ -292,7 +292,12 @@ function backdropMaterial( hmTex ) {
 		const snowN = vnoise( xz.div( 34.0 ).add( vec2( 5, 5 ) ) ).mul( 0.45 ).add( vnoise( xz.div( 130.0 ) ).mul( 0.55 ) );
 		// snow settles on ledges and in hollows first: the scan relief breaks its edges
 		const relH = select( useCliff, cliffH, rockH );
-		const snowField = snowN.mul( 0.45 ).add( flatEnough.mul( 0.6 ) ).add( float( 0.5 ).sub( relH ).mul( 0.35 ) ).add( lee.sub( 0.5 ).mul( 0.3 ) );
+		// snow lies in hollows, couloirs and on ledges; convex ribs and buttresses blow clear;
+		// small-scale noise tears the edges into patches (as in the photos)
+		const concave = smoothstep( 0.25, - 0.35, vK );
+		const tear = vnoise( xz.div( 16.0 ).add( vec2( 3, 11 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 5.5 ) ).mul( 0.4 ) );
+		const snowField = snowN.mul( 0.3 ).add( flatEnough.mul( 0.45 ) ).add( float( 0.5 ).sub( relH ).mul( 0.3 ) ).add( lee.sub( 0.5 ).mul( 0.25 ) )
+			.add( concave.mul( 0.3 ) ).add( tear.sub( 0.5 ).mul( 0.35 ) ).sub( 0.08 );
 		const snow = smoothstep( snowLine.sub( 120.0 ), snowLine.add( 220.0 ), h ).mul( smoothstep( 0.46, 0.54, snowField ) ).mul( smoothstep( 0.0, 0.06, sAmt ) ).toVar();
 		const gl = polar( PAINE_GRANDE.glacier.az, PAINE_GRANDE.glacier.d );
 		const gd = length( xz.sub( vec2( gl[ 0 ], gl[ 1 ] ) ) ).div( float( PAINE_GRANDE.glacier.size ).mul( mix( 0.25, 1.35, sAmt ) ) );
