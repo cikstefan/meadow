@@ -40,7 +40,7 @@ const BARK = ( () => {
 } )();
 
 const range = ( r, a, b ) => a + ( b - a ) * r();
-const LOD_DIST = [ 22, 60, 300 ]; // m: hero (3D leaves + flowers) / detailed / mid / far
+const LOD_DIST = [ 15, 55, 260 ]; // m: hero (3D leaves + flowers) / detailed / mid / far
 const RADIUS = 1050; // scatter radius around the origin
 
 // scatter every species once (deterministic). Per instance: x, y, z, height, yaw, bloom, seed, width jitter

@@ -29,7 +29,7 @@ import { CUERNOS, PAINE_GRANDE, LAKE, polar } from './layout.js';
 import { cloudShadowAt } from './index.js';
 import { BIOME } from '../index.js';
 
-const R0 = 40, R1 = 16000, NR = 520, NA = 1440;
+const R0 = 40, R1 = 16000, NR = 440, NA = 1152;
 const HM_SIZE = 512, HM_EXT = 9500; // shadow heightmap: texels, half extent (m)
 
 const texURL = ( n ) => new URL( `../../assets/plains/${ n }.webp`, import.meta.url ).href;

@@ -19,7 +19,7 @@ import { landHeightJS, ghostDensityJS, trailDistJS, lakeDistJS } from './terrain
 import { cloudShadowAt } from './index.js';
 import { rng, growTree, Builder, decimate, breakLimbs } from './grow.js';
 
-const LOD_DIST = [ 70, 450 ];
+const LOD_DIST = [ 45, 400 ];
 const RADIUS = 1300;
 
 const V3 = THREE.Vector3;
@@ -164,7 +164,7 @@ const VARIANTS = [
 	{ grow: ( s ) => growSnag( s + 2, false ), share: 0.2, scale: [ 0.6, 1.4 ], upright: true }, // short, branchy
 	{ grow: ( s ) => growPole( s + 3 ), share: 0.14, scale: [ 0.6, 1.3 ], upright: true }, // narrow, few stubs
 	{ grow: ( s ) => growLog( s + 4 ), share: 0.16, scale: [ 0.8, 1.3 ], upright: false, near: 600 },
-	{ grow: ( s ) => growTangle( s + 5 ), share: 0.2, scale: [ 0.6, 1.9 ], upright: false, near: 450 }, // wide dead shrubs
+	{ grow: ( s ) => growTangle( s + 5 ), share: 0.2, scale: [ 0.6, 1.9 ], upright: false, near: 260 }, // wide dead shrubs
 	{ grow: ( s ) => growFallen( s + 6 ), share: 0.3, scale: [ 0.7, 1.4 ], upright: false, near: 300 }, // fallen branches
 ];
 

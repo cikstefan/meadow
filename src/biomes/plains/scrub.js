@@ -184,8 +184,8 @@ export class Scrub {
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
 		this.lastTilePos = new THREE.Vector3( 1e9, 0, 0 );
 		const mat = this.material();
-		const LODS = [ { detail: 2, cards: 120, cap: 6000 }, { detail: 1, cards: 30, cap: 26000 }, { detail: 0, cards: 0, cap: 70000 } ];
-		this.meshes = [ ...LODS, { flowers: 26, cap: 1500 } ].map( ( L, l ) => {
+		const LODS = [ { detail: 2, cards: 120, cap: 6000 }, { detail: 1, cards: 18, cap: 26000 }, { detail: 0, cards: 0, cap: 70000 } ];
+		this.meshes = [ ...LODS, { flowers: 14, cap: 600 } ].map( ( L, l ) => {
 
 			const g = L.flowers ? flowerGeometry( 777, L.flowers ) : moundGeometry( 4242 + l, L.detail, L.cards );
 			const a = new THREE.InstancedBufferAttribute( new Float32Array( L.cap * 4 ), 4 );
@@ -335,7 +335,7 @@ export class Scrub {
 			const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z, r2 = dx * dx + dz * dz;
 			if ( r2 > R2 ) continue;
 			const l = r2 < L0 ? 0 : r2 < L1 ? 1 : 2;
-			if ( d[ i + 6 ] > 3.5 && r2 < 625 && n[ 3 ] * 4 < A[ 3 ].length ) {
+			if ( d[ i + 6 ] > 3.5 && r2 < 225 && n[ 3 ] * 4 < A[ 3 ].length ) {
 
 				const k = ( n[ 3 ] ++ ) * 4;
 				A[ 3 ][ k ] = d[ i ]; A[ 3 ][ k + 1 ] = d[ i + 1 ]; A[ 3 ][ k + 2 ] = d[ i + 2 ]; A[ 3 ][ k + 3 ] = d[ i + 3 ];

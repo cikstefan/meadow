@@ -206,7 +206,7 @@ function plantLODs3( sp, seed ) {
 
 		const keep = sp.keep[ lod ], grow = 1 / Math.sqrt( keep );
 		// close up: real leaves (folded quads) + only the flower racemes as cards
-		const real = lod === 0 && pl.single;
+		const real = false; // real leaves live in the hero LOD only
 		if ( real ) for ( const l of pl.single ) {
 
 			const p = l.p.clone().multiplyScalar( 1 / H );
