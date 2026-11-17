@@ -106,7 +106,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const detailK = smoothstep( 60.0, 15.0, dist );
 
 	// distant / default appearance (cheap)
-	const gravel = mix( vec3( 0.24, 0.225, 0.2 ), vec3( 0.36, 0.34, 0.3 ), n1 ).toVar();
+	const gravel = mix( vec3( 0.3, 0.29, 0.27 ), vec3( 0.42, 0.41, 0.38 ), n1 ).toVar();
 	const schist = mix( vec3( 0.12, 0.12, 0.11 ), vec3( 0.24, 0.23, 0.21 ), n1 ).toVar();
 	const litterK = float( 1.0 ).sub( toCanopy ).mul( detailK );
 	const litter = vec3( 0 ).toVar();
@@ -115,7 +115,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 		// scanned trail: packed dust and pebbles, cavities darkened by the scan's relief
 		const tr = untiled( T.trail, xz, 1.7 );
 		const tl = dot( tr.rgb, vec3( 0.3, 0.55, 0.15 ) );
-		const trailCol = mix( vec3( tl ).mul( vec3( 1.0, 0.97, 0.92 ) ), tr.rgb, 0.4 ).mul( 0.44 ).mul( mix( 0.78, 1.05, smoothstep( 0.2, 0.7, tr.a ) ) );
+		const trailCol = mix( vec3( tl ).mul( vec3( 1.0, 0.98, 0.95 ) ), tr.rgb, 0.25 ).mul( 0.66 ).mul( mix( 0.78, 1.05, smoothstep( 0.2, 0.7, tr.a ) ) );
 		gravel.assign( mix( gravel, trailCol, detailK ) );
 		// broken schist and stones on the bare patches (greyer than the scan)
 		const rk = untiled( T.rocks, xz, 2.6 );
