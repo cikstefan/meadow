@@ -73,8 +73,10 @@ function scatter() {
 		const outcrop = Math.max( 0, vnoiseJS( x / 60 + 5, z / 60 + 2 ) - 0.62 ) * 1.6;
 		const p = nearTrail + outcrop * 0.5 + gravelPatchJS( x, z ) * 0.25 + 0.006;
 		if ( roll > p ) continue;
-		const s = ( 0.25 + Math.pow( sz, 3 ) * 1.4 ) * ( outcrop > 0.1 ? 1.4 : 1 );
-		out.push( x, landHeightJS( x, z ) - s * 0.28, z, s, yaw, tint, 0, 0 );
+		// a few big glacial erratics (rust-brown, photo 3) among the smaller stones
+		const erratic = roll < 0.0035 + outcrop * 0.004;
+		const s = erratic ? 1.6 + sz * 1.8 : ( 0.25 + Math.pow( sz, 3 ) * 1.4 ) * ( outcrop > 0.1 ? 1.4 : 1 );
+		out.push( x, landHeightJS( x, z ) - s * 0.28, z, s, yaw, erratic ? 0.95 : tint * 0.85, 0, 0 );
 
 	}
 
@@ -138,7 +140,9 @@ export class Rocks {
 			const a = tri( T.cliff, 0.45 ), b = tri( T.rock, 0.6 );
 			const lum = ( c ) => dot( c, vec3( 0.3, 0.55, 0.15 ) );
 			// grey schist / pale granite, per boulder
-			const grey = mix( vec3( lum( a.rgb ) ).mul( vec3( 0.95, 0.93, 0.9 ) ).mul( 0.55 ), vec3( lum( b.rgb ) ).mul( vec3( 1.0, 0.97, 0.92 ) ).mul( 0.62 ), vI.x );
+			const grey0 = mix( vec3( lum( a.rgb ) ).mul( vec3( 0.95, 0.93, 0.9 ) ).mul( 0.55 ), vec3( lum( b.rgb ) ).mul( vec3( 1.0, 0.97, 0.92 ) ).mul( 0.62 ), vI.x.div( 0.85 ).min( 1.0 ) );
+			// erratics: weathered rust-brown granite
+			const grey = mix( grey0, vec3( lum( a.rgb ) ).mul( vec3( 0.62, 0.42, 0.28 ) ), smoothstep( 0.88, 0.92, vI.x ) );
 			const alb = grey.mul( mix( 0.75, 1.1, a.a ) ).toVar();
 			// yellow-green and orange lichen on the tops, a damp dark band at the ground
 			const lich = smoothstep( 0.55, 0.75, vnoise( P.xz.mul( 3.0 ).add( P.y ) ) ).mul( smoothstep( 0.3, 0.9, N.y ) );
