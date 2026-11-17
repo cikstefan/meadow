@@ -204,7 +204,7 @@ export class Grass {
 			// (smooth fields at three scales; the clump hash only nudges it)
 			// (smooth, large drifts; the clump hash only nudges it)
 			const tf = G.tussock ? vnoise( xz.div( 38.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.62 ).add( vnoise( xz.div( 12.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( cH.mul( 0.08 ) ) : cH;
-			const tus = smoothstep( 0.3, 0.75, tf ).mul( G.tussock || 0 );
+			const tus = smoothstep( 0.46, 0.8, tf ).mul( G.tussock || 0 );
 			// colour regions: greener swales and golden, wind-cured slopes (+ the tussocks' own straw)
 			const region = G.tussock ? vnoise( xz.div( 55.0 ).add( vec2( 17.0, 5.0 ) ) ) : float( 0.5 );
 			const dry = G.tussock ? clamp( dry0.mul( 0.35 ).add( tus.mul( 0.22 ) ).add( region.sub( 0.5 ).mul( 0.7 ) ).sub( 0.05 ), 0.0, 1.0 ) : dry0;

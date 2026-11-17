@@ -137,7 +137,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	// distant canopy: the same tussock drifts and colour regions as the blades
 	// (grass.js), so where the blades end the ground carries on seamlessly
 	const tf = vnoise( xz.div( 38.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.62 ).add( vnoise( xz.div( 12.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( 0.04 );
-	const tus = smoothstep( 0.3, 0.75, tf );
+	const tus = smoothstep( 0.46, 0.8, tf );
 	const region = vnoise( xz.div( 55.0 ).add( vec2( 17.0, 5.0 ) ) );
 	const dryE = clamp( fieldDry( xz ).mul( 0.35 ).add( tus.mul( 0.22 ) ).add( region.sub( 0.5 ).mul( 0.7 ) ).sub( 0.05 ), 0.0, 1.0 );
 	const canopyM = mix( vec3( 0.12, 0.16, 0.045 ), vec3( 0.33, 0.27, 0.12 ), dryE ).mul( mix( 0.8, 1.05, tus ) );
