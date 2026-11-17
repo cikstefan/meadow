@@ -150,7 +150,8 @@ function tileInstances( tx, tz ) {
 		const f = scrubFieldsJS( x, z );
 		if ( roll > f.cover ) continue;
 		const td = trailDistJS( x, z );
-		if ( td < 1.1 + vnoiseJS( x / 9, z / 9 ) * 1.4 || lakeDistJS( x, z ) < 4 ) continue;
+		// a grassy verge along the trail, then the scrub (bushes crowd in only here and there)
+		if ( td < 1.9 + vnoiseJS( x / 9, z / 9 ) * 2.2 || lakeDistJS( x, z ) < 4 ) continue;
 		const mh = mountainHeightJS( x, z );
 		if ( mh > 220 || ( mh > 80 && roll > f.cover * ( 1 - ( mh - 80 ) / 140 ) ) ) continue;
 		const gravel = gravelPatchJS( x, z );
@@ -276,7 +277,7 @@ export class Scrub {
 			const isNotro = sp.greaterThan( 3.5 );
 			const redDots = smoothstep( 0.7, 0.8, vnoise( P.xz.mul( 22.0 ).add( P.y.mul( 17.0 ) ) ) ).mul( smoothstep( 0.2, 0.7, vK.y ) ).mul( select( isNotro, float( 1.0 ), float( 0.0 ) ) ).mul( mix( 0.4, 1.0, vI.y ) );
 			const bodyCol = mix( body, vec3( 0.32, 0.03, 0.015 ), redDots.mul( 0.5 ) );
-			const tubeCol = select( vK.x.greaterThan( 3.5 ), vec3( 0.55, 0.42, 0.12 ), mix( vec3( 0.45, 0.02, 0.012 ), vec3( 0.78, 0.08, 0.03 ), vK.z ) );
+			const tubeCol = select( vK.x.greaterThan( 3.5 ), vec3( 0.55, 0.42, 0.12 ), mix( vec3( 0.5, 0.05, 0.012 ), vec3( 0.85, 0.16, 0.03 ), vK.z ) );
 			const albedo = select( isTube, tubeCol, select( isCard, smp.rgb.mul( tint ), bodyCol ) ).toVar();
 			const ao = select( isCard, mix( 0.55, 1.0, smoothstep( - 0.1, 0.7, vK.y ) ), mix( 0.3, 0.85, smoothstep( - 0.1, 0.8, vK.y ) ) );
 			const N = normalize( vN ).mul( select( isCard, faceDirection.mul( 0.3 ).add( 0.7 ), float( 1.0 ) ) );

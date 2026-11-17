@@ -232,7 +232,7 @@ export class Shrubs {
 				.add( vec3( 0.04, 0.05, 0.035 ).mul( smoothstep( 0.6, 0.8, vnoise( uv().mul( vec2( 4.0, 7.0 ) ).add( vT.w.mul( 9.0 ) ) ) ) ) );
 			// 3D flowers: waxy scarlet tubes (deeper at the throat), pale yellow styles
 			const isStyle = vC.x.greaterThan( 200.5 );
-			const tubeCol = select( isStyle, vec3( 0.55, 0.42, 0.12 ), mix( vec3( 0.42, 0.015, 0.01 ), vec3( 0.75, 0.07, 0.025 ), vT.w ) );
+			const tubeCol = select( isStyle, vec3( 0.55, 0.42, 0.12 ), mix( vec3( 0.5, 0.05, 0.012 ), vec3( 0.85, 0.16, 0.03 ), vT.w ) );
 			const albedo = select( isTubeF, tubeCol, select( isWood, barkCol, sample.rgb.mul( vT.xyz ) ) ).toVar();
 			const ao = vC.y.mul( mix( 0.6, 1.0, vC.z ) );
 			const N = select( isWood, normalize( vN ), normalize( vN ).mul( faceDirection.mul( 0.3 ).add( 0.7 ) ) );

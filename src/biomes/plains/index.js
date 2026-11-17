@@ -148,7 +148,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const mound = smoothstep( float( 1.0 ).sub( sf.cover ).sub( 0.06 ), float( 1.0 ).sub( sf.cover ).add( 0.06 ), blob ).mul( grassMask( xz ) );
 	const notroK = smoothstep( 0.5, 0.75, sf.notro ), silverK = smoothstep( 0.6, 0.8, sf.silver ), greenK = smoothstep( 0.55, 0.8, sf.green );
 	const scrubCol = mix( mix( mix( vec3( 0.035, 0.05, 0.02 ), vec3( 0.07, 0.11, 0.03 ), greenK ), vec3( 0.13, 0.14, 0.11 ), silverK ),
-		mix( vec3( 0.04, 0.055, 0.02 ), vec3( 0.45, 0.06, 0.025 ), smoothstep( 0.45, 0.7, vnoise( xz.mul( 2.7 ) ) ) ), notroK );
+		mix( vec3( 0.04, 0.055, 0.02 ), vec3( 0.52, 0.11, 0.03 ), smoothstep( 0.45, 0.7, vnoise( xz.mul( 2.7 ) ) ) ), notroK );
 	const canopyS = mix( canopyM, scrubCol, mound.mul( 0.9 ) );
 	const a0 = mix( albedo, canopyS, toCanopy.mul( 0.85 ) );
 	const a = mix( a0, litter, litterK.mul( 0.85 ) ).toVar();

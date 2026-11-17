@@ -109,7 +109,7 @@ function notroRaceme( g, r, cx, cy, n, scale ) {
 		const ex = sx + Math.cos( a ) * L, ey = sy + Math.sin( a ) * L;
 		const mx = ( sx + ex ) / 2 + Math.cos( a + Math.PI / 2 ) * L * 0.25 * bend, my = ( sy + ey ) / 2 + Math.sin( a + Math.PI / 2 ) * L * 0.25 * bend;
 		const w = ( 5 + r() * 2.5 ) * scale;
-		const hue = 2 + r() * 10, li = 36 + r() * 10;
+		const hue = 6 + r() * 11, li = 40 + r() * 10; // scarlet-orange, as in the photos
 		// tube: dark side, body, highlight
 		for ( const [ lw, l, off ] of [ [ w, li * 0.62, 0 ], [ w * 0.72, li, - 0.6 ], [ w * 0.28, li + 20, - 1.6 ] ] ) {
 

@@ -255,7 +255,9 @@ function backdropMaterial( hmTex ) {
 		// Paine Grande: scrub climbs high on the lower flanks; rock breaks through on the
 		// steep spurs and takes over above ~500 m
 		const rockiness = max( smoothstep( 200.0, 430.0, h.add( vnoise( xz.div( 160.0 ) ).sub( 0.5 ).mul( 260.0 ) ) ), smoothstep( 0.3, 0.48, slope ).mul( smoothstep( 40.0, 150.0, h ) ) );
-		const pg = mix( mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.8 ) ), darkRock, rockiness ), scree, talus.mul( 0.45 ) );
+		// grey-brown talus and scattered scrub above the green foot, then rock
+		const flank = mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.8 ) ), scree.mul( vec3( 1.05, 1.0, 0.92 ) ), smoothstep( 110.0, 300.0, h.add( vnoise( xz.div( 120.0 ) ).sub( 0.5 ).mul( 180.0 ) ) ).mul( 0.7 ) );
+		const pg = mix( mix( flank, darkRock, rockiness ), scree, talus.mul( 0.45 ) );
 		// Cuernos: scrub and talus base, then the pale granite walls wherever it is steep
 		const cuBase = mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.85 ) ), scree, talus.mul( 0.6 ).add( smoothstep( 0.3, 0.5, slope ).mul( 0.4 ) ) );
 		const cuBody = mix( cuBase, granite, smoothstep( 300.0, 480.0, h ).mul( smoothstep( 0.3, 0.55, slope ).mul( 0.7 ).add( 0.3 ) ) );
