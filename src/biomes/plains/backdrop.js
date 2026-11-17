@@ -244,14 +244,21 @@ function backdropMaterial( hmTex ) {
 			.mul( mix( 0.75, 1.0, vnoise( vec2( xz.x.add( xz.y ).div( 6.0 ), h.div( 160.0 ) ) ) ) );
 		const capLine = float( CUERNOS.capBase ).add( vnoise( xz.div( 260.0 ) ).sub( 0.5 ).mul( 240.0 ) ).add( sin( xz.x.div( 70.0 ) ).mul( 25.0 ) );
 		const capCol = mix( vec3( 0.03, 0.028, 0.026 ), vec3( 0.07, 0.06, 0.05 ), rn ).mul( rockL.clamp( 0.4, 2.0 ) );
-		const forest = mix( vec3( 0.03, 0.045, 0.02 ), vec3( 0.07, 0.08, 0.035 ), c1 );
+		// lower flanks: lenga / ñirre scrub and grassy benches, mottled (the scrub mosaic
+		// seen from kilometres away), grey ghost-forest snags here and there
+		const mott = vnoise( xz.div( 38.0 ).add( vec2( 3, 7 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 11.0 ) ).mul( 0.4 ) );
+		const forest = mix( mix( vec3( 0.035, 0.05, 0.02 ), vec3( 0.09, 0.11, 0.04 ), mott ), vec3( 0.16, 0.15, 0.09 ), smoothstep( 0.7, 0.85, vnoise( xz.div( 90.0 ).add( vec2( 1, 9 ) ) ) ).mul( 0.5 ) );
 		// talus and scree fans at the foot of the walls: lighter, broken
 		const scree = mix( vec3( 0.1, 0.095, 0.085 ), vec3( 0.2, 0.19, 0.17 ), rn ).mul( rockL.clamp( 0.6, 1.6 ) );
 		const talus = smoothstep( 0.35, 0.18, slope ).mul( smoothstep( 150.0, 300.0, h ) ).mul( smoothstep( 900.0, 600.0, h ) );
 
-		const pgLow = smoothstep( 120.0, 380.0, h );
-		const pg = mix( mix( mix( canopy, forest, 0.6 ), darkRock, pgLow.mul( smoothstep( 0.12, 0.3, slope ).mul( 0.6 ).add( 0.4 ) ) ), scree, talus.mul( 0.5 ) );
-		const cuBody = mix( mix( mix( forest, darkRock, 0.5 ), scree, talus.mul( 0.6 ) ), granite, smoothstep( 280.0, 520.0, h ).mul( smoothstep( 0.15, 0.4, slope ).mul( 0.5 ).add( 0.5 ) ) );
+		// Paine Grande: scrub climbs high on the lower flanks; rock breaks through on the
+		// steep spurs and takes over above ~500 m
+		const rockiness = max( smoothstep( 380.0, 650.0, h.add( vnoise( xz.div( 160.0 ) ).sub( 0.5 ).mul( 260.0 ) ) ), smoothstep( 0.4, 0.62, slope ).mul( smoothstep( 80.0, 220.0, h ) ) );
+		const pg = mix( mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.8 ) ), darkRock, rockiness ), scree, talus.mul( 0.45 ) );
+		// Cuernos: scrub and talus base, then the pale granite walls wherever it is steep
+		const cuBase = mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.85 ) ), scree, talus.mul( 0.6 ).add( smoothstep( 0.3, 0.5, slope ).mul( 0.4 ) ) );
+		const cuBody = mix( cuBase, granite, smoothstep( 300.0, 480.0, h ).mul( smoothstep( 0.3, 0.55, slope ).mul( 0.7 ).add( 0.3 ) ) );
 		const cu = mix( cuBody, capCol, smoothstep( capLine.sub( 20.0 ), capLine.add( 20.0 ), h ) );
 		const vh = mix( mix( forest, darkRock, 0.5 ), granite.mul( 1.08 ), smoothstep( 300.0, 700.0, h ) );
 		const hl = mix( canopy, mix( forest, darkRock, 0.4 ), smoothstep( 120.0, 500.0, h ).mul( 0.7 ) );

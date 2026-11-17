@@ -178,8 +178,8 @@ function tile( g, i, I ) {
 		case TILE.notroFl2: {
 
 			for ( let k = 0; k < 3; k ++ ) leafSpray( g, r, I.ovs, 4, { ...notro, leaves: 6, reach: [ 0.45, 0.7 ] } );
-			const nr = i === TILE.notroFl ? 4 : 7;
-			for ( let c = 0; c < nr; c ++ ) notroRaceme( g, r, T * range( r, 0.2, 0.8 ), T * range( r, 0.15, 0.65 ), 12 + ( r() * 9 | 0 ), i === TILE.notroFl ? 1.25 : 1.05 );
+			const nr = i === TILE.notroFl ? 7 : 12;
+			for ( let c = 0; c < nr; c ++ ) notroRaceme( g, r, T * range( r, 0.15, 0.85 ), T * range( r, 0.12, 0.7 ), 10 + ( r() * 7 | 0 ), i === TILE.notroFl ? 0.8 : 0.62 );
 			break;
 
 		}

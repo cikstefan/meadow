@@ -51,7 +51,7 @@ export const PAINE_GRANDE = {
 	],
 	width: 1050, // horizontal distance from crest to the foot of the slope
 	steep: 1.25, // profile exponent (>1 = concave, cliffy upper walls)
-	jag: 0.33, // relative amplitude of the ridged (jagged) detail
+	jag: 0.16, // relative amplitude of the ridged (jagged) detail
 	glacier: { az: - 52, d: 1900, size: 520 }, // Glaciar Francés hanging below the summit
 };
 
@@ -70,7 +70,7 @@ export const CUERNOS = {
 	width: 1150,
 	steep: 1.35, // talus and scrub base below the walls
 	jag: 0.42,
-	capBase: 1020, // height (above the plains) where the dark cap starts
+	capBase: 820, // height (above the plains) where the dark cap starts
 	// the towers themselves: [azimuth, distance, top height, radius, horn height]
 	towers: [
 		// (as seen from the plains: two slender spires, then the great granite wall

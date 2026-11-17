@@ -266,9 +266,10 @@ function massif( m, x, z, seed ) {
 	// uplift: steep massif profile; ridged multifractal relief (sharp aretes,
 	// several summits of different heights), strongest high up
 	const prof = Math.pow( 1 - u, m.steep );
-	const rg = ridged( wx / 900 + seed, wz / 900 + seed * 0.7, 6 );
-	const peaks = 0.62 + 0.55 * rg;
-	return Math.max( 0, h * prof * peaks + ( rg - 0.5 ) * m.jag * h * 0.35 * Math.pow( 1 - u, 0.5 ) );
+	const rg = ridged( wx / 1100 + seed, wz / 1100 + seed * 0.7, 6 );
+	// broad massive faces; the ridged relief mostly sharpens the upper ridges
+	const peaks = 0.8 + 0.3 * rg * ( 0.4 + 0.6 * prof );
+	return Math.max( 0, h * prof * peaks + ( rg - 0.5 ) * m.jag * h * 0.22 * Math.pow( 1 - u, 1.2 ) );
 
 }
 
@@ -290,7 +291,7 @@ function towersJS( x, z ) {
 		const ang = Math.atan2( dz, dx );
 		// irregular footprint (buttresses, chimneys)
 		// irregular footprint: buttresses and chimneys run straight down the walls
-		const rr = t.r * ( 0.8 + 0.25 * vnoiseJS( Math.cos( ang ) * 2.2 + t.x * 0.001, Math.sin( ang ) * 2.2 + 5 ) + 0.07 * Math.sin( ang * 5 ) + 0.05 * Math.sin( ang * 13 + t.z * 0.01 ) + 0.035 * Math.sin( ang * 29 ) );
+		const rr = t.r * ( 0.8 + 0.25 * vnoiseJS( Math.cos( ang ) * 2.2 + t.x * 0.001, Math.sin( ang ) * 2.2 + 5 ) + 0.035 * Math.sin( ang * 5 ) + 0.018 * Math.sin( ang * 13 + t.z * 0.01 ) + 0.008 * Math.sin( ang * 29 ) );
 		const d = Math.hypot( dx, dz ) / rr;
 		if ( d > 2.2 ) continue;
 		// walls: near-vertical between d 1.0 and 1.25, talus below
@@ -302,8 +303,8 @@ function towersJS( x, z ) {
 		// not one cone), its own fractured profile
 		const capR = Math.max( 0, 1 - d / 0.95 );
 		const teeth = ridged( x / 110 + t.x * 0.01, z / 110, 4 );
-		const horn = t.horn * Math.pow( capR, 0.55 ) * ( 0.35 + 0.75 * teeth ) * ( 0.8 + 0.3 * vnoiseJS( dx / 90, dz / 90 ) );
-		const crag = ( ridged( x / 140, z / 140, 3 ) - 0.5 ) * 70 * wall;
+		const horn = t.horn * 1.35 * Math.pow( capR, 0.8 ) * ( 0.45 + 0.65 * teeth ) * ( 0.8 + 0.3 * vnoiseJS( dx / 90, dz / 90 ) );
+		const crag = ( ridged( x / 220, z / 220, 3 ) - 0.5 ) * 22 * wall;
 		m = Math.max( m, top + horn + crag );
 
 	}
@@ -317,8 +318,12 @@ function mountainJS( x, z ) {
 
 	const r = Math.hypot( x, z );
 	const k = ss( MOUNTAIN_FREE_RADIUS, MOUNTAIN_FREE_RADIUS + 300, r );
+	mountainJS.id = 0; mountainJS.hard = 0;
 	if ( k <= 0 ) return 0;
-	const v = [ massif( PAINE_GRANDE, x, z, 3.1 ), Math.max( massif( CUERNOS, x, z, 7.7 ), towersJS( x, z ) ), massif( VALLEY_HEAD, x, z, 11.3 ), massif( FAR_HILLS, x, z, 19.9 ) ];
+	const tw = towersJS( x, z ), cuM = massif( CUERNOS, x, z, 7.7 );
+	const v = [ massif( PAINE_GRANDE, x, z, 3.1 ), Math.max( cuM, tw ), massif( VALLEY_HEAD, x, z, 11.3 ), massif( FAR_HILLS, x, z, 19.9 ) ];
+	// granite walls resist erosion: tell the relief builder where they stand
+	mountainJS.hard = tw > cuM ? Math.min( 1, ( tw - cuM ) / 150 ) : 0;
 	let m = 0, id = 0;
 	for ( let i = 0; i < 4; i ++ ) if ( v[ i ] > m ) {
 

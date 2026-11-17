@@ -74,10 +74,11 @@ export function buildWater() {
 
 		const sun = cloudShadowAt( xz, float( LAKE.level ) ).mul( smoothstep( - 0.04, 0.06, L.y ) );
 		// milky turquoise body (glacial flour scatters light back up)
-		const bodyA = mix( vec3( 0.03, 0.34, 0.36 ), vec3( 0.02, 0.22, 0.25 ), gust.mul( 0.6 ) );
+		// glacial lake: muted steel-blue (grey-turquoise from the rock flour), darker under gusts
+		const bodyA = mix( vec3( 0.06, 0.16, 0.2 ), vec3( 0.04, 0.11, 0.15 ), gust.mul( 0.6 ) );
 		const body = bodyA.mul( U.skyAmb.mul( 1.6 ).add( U.sunColor.mul( max( L.y, 0.0 ).mul( 0.55 ).add( 0.1 ) ).mul( sun ) ) );
 		const glint = pow( clamp( dot( R, L ), 0.0, 1.0 ), 380.0 ).mul( 6.0 ).add( pow( clamp( dot( R, L ), 0.0, 1.0 ), 40.0 ).mul( 0.25 ) );
-		const col = mix( body, sky, fres.mul( 0.3 ) ).add( U.sunColor.mul( glint ).mul( sun ) ).toVar();
+		const col = mix( body, sky, fres.mul( 0.55 ) ).add( U.sunColor.mul( glint ).mul( sun ) ).toVar();
 
 		// whitecaps under strong gusts
 		const foamN = vnoise( vec2( q.x.sub( sc.mul( 1.25 ) ).div( 3.0 ), q.y.div( 2.2 ) ).add( vec2( 9, 9 ) ) );

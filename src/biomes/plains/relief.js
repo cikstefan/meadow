@@ -121,17 +121,22 @@ export function buildRelief( m ) {
 	const t0 = performance.now();
 	const N = RELIEF_N;
 	const h = new Float32Array( N * N );
+	const hard = new Float32Array( N * N );
 	ID = new Uint8Array( N * N );
 	for ( let j = 0; j < N; j ++ ) for ( let i = 0; i < N; i ++ ) {
 
 		const x = ( ( i + 0.5 ) / N * 2 - 1 ) * RELIEF_EXT, z = ( ( j + 0.5 ) / N * 2 - 1 ) * RELIEF_EXT;
 		h[ j * N + i ] = m( x, z ) / CELL; // erosion works in cell units
 		ID[ j * N + i ] = m.id || 0; // which massif won (set by m)
+		hard[ j * N + i ] = m.hard || 0;
 
 	}
 
 	const t1 = performance.now();
+	const orig = new Float32Array( h );
 	erode( h, N, 220000, rng( 90210 ) );
+	// hard rock (the granite walls) keeps its shape: blend the uneroded height back
+	for ( let k = 0; k < N * N; k ++ ) if ( hard[ k ] > 0 ) h[ k ] += ( orig[ k ] - h[ k ] ) * hard[ k ] * 0.85;
 	// thermal smoothing of single-cell spikes left by the droplets (one gentle pass)
 	const o = new Float32Array( h );
 	for ( let j = 1; j < N - 1; j ++ ) for ( let i = 1; i < N - 1; i ++ ) {

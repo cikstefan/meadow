@@ -110,6 +110,27 @@ function growTangle( seed ) {
 
 }
 
+// a fallen, bleached branch: a few twisted limbs lying in the grass (photos: everywhere)
+function growFallen( seed ) {
+
+	const r = rng( seed );
+	const trunks = [];
+	const n = 1 + ( r() * 3 | 0 );
+	for ( let i = 0; i < n; i ++ ) {
+
+		const a = r() * Math.PI * 2;
+		trunks.push( { p: new V3( range( r, - 0.4, 0.4 ), 0.05, range( r, - 0.4, 0.4 ) ), d: new V3( Math.cos( a ), range( r, 0.02, 0.12 ), Math.sin( a ) ), len: range( r, 0.9, 2.2 ), r: range( r, 0.025, 0.05 ) } );
+
+	}
+
+	const br = growTree( r, {
+		trunks, floor: 0.03,
+		lv: [ { segs: 6, bend: 0.5, swirl: 0.9, curveV: 0.4, taper: 0.7, trop: [ 0, - 0.2, 0 ] }, { dens: 3.5, range: [ 0.2, 1 ], down: [ 0.8, 0.4 ], len: [ 0.25, 0.5 ], segs: 3, bend: 0.6, swirl: 0.8, trop: [ 0, 0.1, 0 ] } ],
+	} );
+	return breakLimbs( br, r, [ 0.5, 0.5 ], [ 0.4, 0.9 ] );
+
+}
+
 function woodGeometry( branches, detail, seed ) {
 
 	const B = new Builder();
@@ -144,7 +165,10 @@ const VARIANTS = [
 	{ grow: ( s ) => growPole( s + 3 ), share: 0.14, scale: [ 0.6, 1.3 ], upright: true }, // narrow, few stubs
 	{ grow: ( s ) => growLog( s + 4 ), share: 0.16, scale: [ 0.8, 1.3 ], upright: false, near: 600 },
 	{ grow: ( s ) => growTangle( s + 5 ), share: 0.2, scale: [ 0.6, 1.9 ], upright: false, near: 450 }, // wide dead shrubs
+	{ grow: ( s ) => growFallen( s + 6 ), share: 0.3, scale: [ 0.7, 1.4 ], upright: false, near: 300 }, // fallen branches
 ];
+
+const SHARE_SUM = VARIANTS.reduce( ( a, v ) => a + v.share, 0 );
 
 function scatter( density = 1 ) {
 
@@ -163,7 +187,7 @@ function scatter( density = 1 ) {
 		if ( roll > ( dens * 0.85 + 0.035 ) * density * ( 0.35 + 0.65 * Math.min( 1, Math.max( 0, ( d0 - 250 ) / 600 ) ) ) ) continue;
 		if ( trailDistJS( x, z ) < 2.5 || lakeDistJS( x, z ) < 12 ) continue;
 		let k = 0, acc = VARIANTS[ 0 ].share;
-		while ( pick > acc && k < VARIANTS.length - 1 ) {
+		while ( pick * SHARE_SUM > acc && k < VARIANTS.length - 1 ) {
 
 			k ++; acc += VARIANTS[ k ].share;
 
