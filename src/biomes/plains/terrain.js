@@ -24,12 +24,16 @@ const ss = ( a, b, x ) => {
 // ---------------------------------------------------------------- rolling plains
 
 // knolls, swales and gullies: 4 octaves of value noise
-const OCT = [ [ 300, 26, 13.1, 7.7 ], [ 85, 7.5, 3.3, 91.2 ], [ 21, 1.3, 57.0, 21.0 ], [ 5.5, 0.22, 11.0, 3.0 ] ];
+const OCT = [ [ 300, 24, 13.1, 7.7 ], [ 85, 5.0, 3.3, 91.2 ], [ 21, 1.4, 57.0, 21.0 ], [ 5.5, 0.25, 11.0, 3.0 ] ];
+// moraine knolls: wavelength (m), height (m), offsets
+const KNOLLS = [ [ 130, 13, 31.7, 5.3 ], [ 52, 5.5, 8.9, 44.1 ] ];
 
 const rolling = ( xz ) => {
 
 	let h = float( 0 );
 	for ( const [ l, a, ox, oz ] of OCT ) h = h.add( vnoise( xz.div( l ).add( vec2( ox, oz ) ) ).sub( 0.5 ).mul( a ) );
+	// glacial moraine: rounded knolls and kettle hollows
+	for ( const [ l, a, ox, oz ] of KNOLLS ) h = h.add( smoothstep( 0.32, 0.86, vnoise( xz.div( l ).add( vec2( ox, oz ) ) ) ).mul( a ) );
 	return h;
 
 };
@@ -38,6 +42,7 @@ const rollingJS = ( x, z ) => {
 
 	let h = 0;
 	for ( const [ l, a, ox, oz ] of OCT ) h += ( vnoiseJS( x / l + ox, z / l + oz ) - 0.5 ) * a;
+	for ( const [ l, a, ox, oz ] of KNOLLS ) h += ss( 0.32, 0.86, vnoiseJS( x / l + ox, z / l + oz ) ) * a;
 	return h;
 
 };

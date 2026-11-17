@@ -159,7 +159,8 @@ function scatter( density = 1 ) {
 		const roll = r(), pick = r();
 		if ( d0 > RADIUS ) continue;
 		const dens = ghostDensityJS( x, z );
-		if ( roll > ( dens * 0.85 + 0.035 ) * density ) continue;
+		// standing snags gather on the slopes; the open plain keeps mostly fallen wood
+		if ( roll > ( dens * 0.85 + 0.035 ) * density * ( 0.35 + 0.65 * Math.min( 1, Math.max( 0, ( d0 - 250 ) / 600 ) ) ) ) continue;
 		if ( trailDistJS( x, z ) < 2.5 || lakeDistJS( x, z ) < 12 ) continue;
 		let k = 0, acc = VARIANTS[ 0 ].share;
 		while ( pick > acc && k < VARIANTS.length - 1 ) {

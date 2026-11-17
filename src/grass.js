@@ -207,7 +207,7 @@ export class Grass {
 			const tus = smoothstep( 0.3, 0.75, tf ).mul( G.tussock || 0 );
 			// colour regions: greener swales and golden, wind-cured slopes (+ the tussocks' own straw)
 			const region = G.tussock ? vnoise( xz.div( 55.0 ).add( vec2( 17.0, 5.0 ) ) ) : float( 0.5 );
-			const dry = G.tussock ? clamp( dry0.mul( 0.35 ).add( tus.mul( 0.38 ) ).add( region.sub( 0.5 ).mul( 0.8 ) ).sub( 0.08 ), 0.0, 1.0 ) : dry0;
+			const dry = G.tussock ? clamp( dry0.mul( 0.35 ).add( tus.mul( 0.22 ) ).add( region.sub( 0.5 ).mul( 0.7 ) ).sub( 0.05 ), 0.0, 1.0 ) : dry0;
 			const h = mix( G.hMin, G.hMax, tall )
 				.mul( mix( 1.0, mix( 0.38, 1.3, tus ), G.tussock || 0 ) )
 				// height varies smoothly across the plain (a gentle swell, not per clump)

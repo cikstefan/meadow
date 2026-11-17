@@ -58,27 +58,29 @@ export const PAINE_GRANDE = {
 // Los Cuernos del Paine: light granite towers with a dark sediment cap, across the lake
 export const CUERNOS = {
 	crest: [
-		[ ...polar( 40, 4700 ), 520 ],
-		[ ...polar( 50, 4150 ), 820 ],
-		[ ...polar( 58, 3950 ), 900 ],
-		[ ...polar( 66, 3900 ), 820 ],
-		[ ...polar( 75, 3920 ), 920 ],
-		[ ...polar( 86, 4050 ), 860 ],
-		[ ...polar( 98, 4350 ), 760 ],
-		[ ...polar( 112, 4900 ), 560 ],
+		[ ...polar( 40, 4700 ), 480 ],
+		[ ...polar( 50, 4150 ), 640 ],
+		[ ...polar( 58, 3950 ), 700 ],
+		[ ...polar( 66, 3900 ), 680 ],
+		[ ...polar( 75, 3920 ), 700 ],
+		[ ...polar( 86, 4050 ), 640 ],
+		[ ...polar( 98, 4350 ), 560 ],
+		[ ...polar( 112, 4900 ), 420 ],
 	],
-	width: 950,
-	steep: 1.7, // sheer granite walls
+	width: 1150,
+	steep: 1.35, // talus and scrub base below the walls
 	jag: 0.42,
-	capBase: 1180, // height (above the plains) where the dark cap starts
+	capBase: 1020, // height (above the plains) where the dark cap starts
 	// the towers themselves: [azimuth, distance, top height, radius, horn height]
 	towers: [
-		[ 54.5, 3980, 1330, 300, 330 ], // Cuerno Principal
-		[ 62, 3900, 1210, 230, 260 ], // Cuerno Central
-		[ 70.5, 3900, 1360, 320, 300 ], // Cuerno Este
-		[ 46, 4300, 1050, 290, 180 ],
-		[ 80, 4020, 1080, 260, 170 ],
-		[ 90, 4150, 980, 300, 120 ],
+		// (as seen from the plains: two slender spires, then the great granite wall
+		// block under its dark cap with Cuerno Principal's horn, a lower eastern horn)
+		[ 47.5, 4150, 1120, 95, 110 ], // Cuerno Norte spires
+		[ 49.3, 4080, 1040, 105, 90 ],
+		[ 57, 3960, 1180, 420, 300 ], // Cuerno Principal
+		[ 64, 3930, 1100, 640, 210 ], // the wall block
+		[ 74, 3960, 1060, 520, 250 ], // Cuerno Este
+		[ 86, 4150, 900, 480, 140 ],
 	],
 };
 

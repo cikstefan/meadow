@@ -12,6 +12,7 @@ import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floo
 import { vnoise, vnoiseJS, hash2i, hash2i2 } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import { makeVolumetricClouds } from '../../tsl/clouds3d.js';
+import { scrubFieldsTSL } from './scrubfields.js';
 import {
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS, mountainHeight,
 } from './terrain.js';
@@ -138,9 +139,18 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const tf = vnoise( xz.div( 38.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.62 ).add( vnoise( xz.div( 12.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( 0.04 );
 	const tus = smoothstep( 0.3, 0.75, tf );
 	const region = vnoise( xz.div( 55.0 ).add( vec2( 17.0, 5.0 ) ) );
-	const dryE = clamp( fieldDry( xz ).mul( 0.35 ).add( tus.mul( 0.38 ) ).add( region.sub( 0.5 ).mul( 0.8 ) ).sub( 0.08 ), 0.0, 1.0 );
+	const dryE = clamp( fieldDry( xz ).mul( 0.35 ).add( tus.mul( 0.22 ) ).add( region.sub( 0.5 ).mul( 0.7 ) ).sub( 0.05 ), 0.0, 1.0 );
 	const canopyM = mix( vec3( 0.12, 0.16, 0.045 ), vec3( 0.33, 0.27, 0.12 ), dryE ).mul( mix( 0.8, 1.05, tus ) );
-	const a0 = mix( albedo, canopyM, toCanopy.mul( 0.85 ) );
+	// the scrub mosaic beyond the instanced mounds (same density fields as scrub.js):
+	// dark olive and bright green mounds, silver cushions, notro drifts in scarlet
+	const sf = scrubFieldsTSL( xz );
+	const blob = vnoise( xz.mul( 0.62 ).add( vec2( 3.3, 1.1 ) ) ).mul( 0.7 ).add( vnoise( xz.mul( 1.9 ) ).mul( 0.3 ) );
+	const mound = smoothstep( float( 1.0 ).sub( sf.cover ).sub( 0.06 ), float( 1.0 ).sub( sf.cover ).add( 0.06 ), blob ).mul( grassMask( xz ) );
+	const notroK = smoothstep( 0.5, 0.75, sf.notro ), silverK = smoothstep( 0.6, 0.8, sf.silver ), greenK = smoothstep( 0.55, 0.8, sf.green );
+	const scrubCol = mix( mix( mix( vec3( 0.035, 0.05, 0.02 ), vec3( 0.07, 0.11, 0.03 ), greenK ), vec3( 0.13, 0.14, 0.11 ), silverK ),
+		mix( vec3( 0.04, 0.055, 0.02 ), vec3( 0.45, 0.06, 0.025 ), smoothstep( 0.45, 0.7, vnoise( xz.mul( 2.7 ) ) ) ), notroK );
+	const canopyS = mix( canopyM, scrubCol, mound.mul( 0.9 ) );
+	const a0 = mix( albedo, canopyS, toCanopy.mul( 0.85 ) );
 	const a = mix( a0, litter, litterK.mul( 0.85 ) ).toVar();
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
 	a.assign( mix( a, soil, verge.mul( 0.4 ).mul( float( 1.0 ).sub( toCanopy ) ) ) );
@@ -173,7 +183,7 @@ export const PLAINS = {
 	sky: { storm: 1, volumetric: 1 },
 
 	defaults: {
-		hour: 16.45, clouds: 0.58, wind: 2.0, windAngle: PREVAILING_WIND, grassHeight: 2.5, dryPatches: 0.48, mist: 0,
+		hour: 15.1, clouds: 0.62, wind: 2.0, windAngle: PREVAILING_WIND, grassHeight: 2.5, dryPatches: 0.22, mist: 0,
 		particles: 0.3, spirits: false, spiritAmount: 0, shafts: true, glow: 3,
 	},
 
