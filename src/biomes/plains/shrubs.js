@@ -19,7 +19,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec2, vec3, vec4, mix, smoothstep, clamp, max, pow, sin, cos, dot, normalize, length, attribute, varying,
-	cameraPosition, faceDirection, texture, uv, select
+	cameraPosition, faceDirection, texture, uv, select, exp
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, shadeFoliage } from '../../tsl/world.js';
@@ -40,7 +40,7 @@ const BARK = ( () => {
 } )();
 
 const range = ( r, a, b ) => a + ( b - a ) * r();
-const LOD_DIST = [ 60, 300 ]; // m: detailed / mid / far
+const LOD_DIST = [ 22, 60, 300 ]; // m: hero (3D leaves + flowers) / detailed / mid / far
 const RADIUS = 1050; // scatter radius around the origin
 
 // scatter every species once (deterministic). Per instance: x, y, z, height, yaw, bloom, seed, width jitter
@@ -185,12 +185,14 @@ export class Shrubs {
 			const disp = W.mul( wAmt.mul( sway ).mul( hk ).mul( h ).mul( 0.075 ).mul( stiff ) )
 				.add( rot( normalize( n0 ) ).mul( flutter.mul( wAmt ).mul( 0.025 ).mul( h.min( 1.5 ) ) ) )
 				.add( vec3( 0, - 1, 0 ).mul( wAmt.mul( hk ).mul( h ).mul( 0.015 ) ) );
-			const world = base.add( local ).add( disp );
+			// 3D flower tubes (hero LOD) only on bushes in bloom: others collapse them away
+			const isTube = C.x.greaterThanEqual( 199.5 );
+			const world = select( isTube.and( C.y.greaterThan( B.y ) ), base, base.add( local ).add( disp ) );
 
 			vN.assign( normalize( rot( n0 ) ) );
 			vW.assign( world );
 			// flower cards: bloom per bush decides flower or leaf tile
-			const isFl = C.x.greaterThanEqual( 100.0 );
+			const isFl = C.x.greaterThanEqual( 100.0 ).and( C.x.lessThan( 199.5 ) );
 			const fk = C.x.sub( 100.0 );
 			const flTile = fk.div( 16.0 ).floor();
 			const lfTile = fk.sub( flTile.mul( 16.0 ) );
@@ -210,9 +212,10 @@ export class Shrubs {
 
 		} );
 		const sample = texture( tex, tileUV() );
+		const isTubeF = vC.x.greaterThanEqual( 199.5 );
 		const dist = length( vW.sub( cameraPosition ) );
 		// keep coverage at small mip levels (averaged alpha would fall below the cutoff)
-		mat.opacityNode = select( isWood, float( 1.0 ), sample.a.mul( float( 1.0 ).add( smoothstep( 6.0, 160.0, dist ).mul( 2.0 ) ) ) );
+		mat.opacityNode = select( isWood.or( isTubeF ), float( 1.0 ), sample.a.mul( float( 1.0 ).add( smoothstep( 6.0, 160.0, dist ).mul( 2.0 ) ) ) );
 
 		const isNotroFl = vC.x.equal( float( TILE.notroFl ) ).or( vC.x.equal( float( TILE.notroFl2 ) ) );
 		mat.colorNode = Fn( () => {
@@ -226,16 +229,19 @@ export class Shrubs {
 			const barkCol = barkTint.mul( bl.clamp( 0.4, 1.6 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.2, 0.7, bk.a ) ) )
 				// grey-green crustose lichen patches on the notro stems
 				.add( vec3( 0.04, 0.05, 0.035 ).mul( smoothstep( 0.6, 0.8, vnoise( uv().mul( vec2( 4.0, 7.0 ) ).add( vT.w.mul( 9.0 ) ) ) ) ) );
-			const albedo = select( isWood, barkCol, sample.rgb.mul( vT.xyz ) ).toVar();
+			// 3D flowers: waxy scarlet tubes (deeper at the throat), pale yellow styles
+			const isStyle = vC.x.greaterThan( 200.5 );
+			const tubeCol = select( isStyle, vec3( 0.55, 0.42, 0.12 ), mix( vec3( 0.42, 0.015, 0.01 ), vec3( 0.75, 0.07, 0.025 ), vT.w ) );
+			const albedo = select( isTubeF, tubeCol, select( isWood, barkCol, sample.rgb.mul( vT.xyz ) ) ).toVar();
 			const ao = vC.y.mul( mix( 0.6, 1.0, vC.z ) );
 			const N = select( isWood, normalize( vN ), normalize( vN ).mul( faceDirection.mul( 0.3 ).add( 0.7 ) ) );
-			const transmit = select( isWood, float( 0.0 ), select( isNotroFl, float( 0.75 ), float( 0.45 ) ) );
+			const transmit = select( isWood, float( 0.0 ), select( isNotroFl.or( isTubeF ), float( 0.75 ), float( 0.5 ) ) );
 			const spec = select( isWood, float( 0.05 ), float( 0.16 ) ); // glossy leathery leaves
 			// night: bioluminescent firebush. The flowers glow from within (hot core,
 			// softer petals), breathing slowly; waves of light roll across the plain
 			// from bush to bush; the leaves around them catch a faint warm halo.
-			const red = smoothstep( 0.08, 0.3, sample.r.sub( sample.g.mul( 1.4 ) ) ).mul( select( isNotroFl, float( 1.0 ), float( 0.0 ) ) );
-			const core = smoothstep( 0.45, 0.75, sample.r ).mul( red );
+			const red = select( isTubeF, float( 1.0 ), smoothstep( 0.08, 0.3, sample.r.sub( sample.g.mul( 1.4 ) ) ).mul( select( isNotroFl, float( 1.0 ), float( 0.0 ) ) ) );
+			const core = select( isTubeF, float( 0.8 ), smoothstep( 0.45, 0.75, sample.r ).mul( red ) );
 			const wave = sin( vW.x.mul( 0.045 ).add( vW.z.mul( 0.03 ) ).sub( U.time.mul( 0.55 ) ) ).mul( 0.5 ).add( 0.5 );
 			const breathe = sin( U.time.mul( 0.7 ).add( vT.w.mul( 40.0 ) ) ).mul( 0.5 ).add( 0.5 );
 			const pulse = mix( 0.45, 1.0, wave.mul( 0.6 ).add( breathe.mul( 0.4 ) ) );
@@ -243,8 +249,11 @@ export class Shrubs {
 			const rim = float( 1.0 ).sub( dot( normalize( vN ), V ).abs() ).pow( 2.0 );
 			const glowCol = mix( vec3( 1.0, 0.12, 0.18 ), vec3( 1.0, 0.45, 0.25 ), core );
 			const halo = select( isWood, float( 0.0 ), float( 1.0 ) ).mul( vC.z ).mul( 0.04 ).mul( sp.glow ); // leaves in the crown
-			const emit = glowCol.mul( red.mul( mix( 0.8, 1.6, core ) ).mul( rim.mul( 0.5 ).add( 0.75 ) ).add( halo ) )
-				.mul( U.night.mul( U.glow ).mul( pulse ).mul( sp.glow * 0.22 ) );
+			// softer overall, hot cores (bloom gives them a halo), fading with distance
+			// so the far plain is a scatter of faint embers, not a field of lamps
+			const far = exp( dist.div( - 160.0 ) ).mul( 0.85 ).add( 0.15 );
+			const emit = glowCol.mul( red.mul( 0.35 ).add( core.mul( 1.4 ) ).mul( rim.mul( 0.4 ).add( 0.8 ) ).add( halo ) )
+				.mul( U.night.mul( U.glow ).mul( pulse ).mul( far ).mul( sp.glow * 0.11 ) );
 			return shadeFoliage( albedo, N, vW, ao, vC.w, transmit, spec, float( 0.35 ), emit );
 
 		} )();
@@ -268,17 +277,17 @@ export class Shrubs {
 		const cp = camera.position;
 		if ( cp.distanceToSquared( this.lastPos ) < 9 ) return;
 		this.lastPos.copy( cp );
-		const L0 = LOD_DIST[ 0 ] ** 2, L1 = LOD_DIST[ 1 ] ** 2;
+		const L0 = LOD_DIST[ 0 ] ** 2, L1 = LOD_DIST[ 1 ] ** 2, L2 = LOD_DIST[ 2 ] ** 2;
 		this.data.forEach( ( d, si ) => {
 
 			const V = SPECIES[ si ].variants;
 			const ms = this.meshes[ si ];
-			const n = ms.map( () => [ 0, 0, 0 ] );
+			const n = ms.map( () => [ 0, 0, 0, 0 ] );
 			for ( let i = 0; i < d.length; i += 8 ) {
 
 				const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z;
 				const r2 = dx * dx + dz * dz;
-				const l = r2 < L0 ? 0 : r2 < L1 ? 1 : 2;
+				const l = r2 < L0 ? 0 : r2 < L1 ? 1 : r2 < L2 ? 2 : 3;
 				const v = variantOf( d[ i + 6 ], V );
 				const m = ms[ v ][ l ];
 				const a = m.geometry.attributes.iA.array, b = m.geometry.attributes.iB.array;

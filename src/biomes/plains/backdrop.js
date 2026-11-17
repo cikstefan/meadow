@@ -24,7 +24,7 @@ import {
 } from 'three/tsl';
 import { vnoise } from '../../tsl/noise.js';
 import { U, applyFog, windField, gustSheen } from '../../tsl/world.js';
-import { landHeightJS, massifIdJS, lakeDistJS } from './terrain.js';
+import { landHeightJS, massifIdJS, lakeDistJS, mountainHeightJS, mountainHeight } from './terrain.js';
 import { CUERNOS, PAINE_GRANDE, LAKE, polar } from './layout.js';
 import { cloudShadowAt } from './index.js';
 import { BIOME } from '../index.js';
@@ -71,12 +71,12 @@ export function buildBackdrop() {
 	for ( let i = 2; i <= NR - 2; i ++ ) for ( let j = 0; j < NA; j ++ ) {
 
 		const k = i * NA + j;
-		const h = ( ii, jj ) => pos[ ( ii * NA + ( ( jj + NA ) % NA ) ) * 3 + 1 ];
-		const r = Math.hypot( pos[ k * 3 ], pos[ k * 3 + 2 ] );
-		if ( r < 900 ) continue;
-		const lap = ( h( i - 2, j ) + h( i + 2, j ) + h( i, j - 2 ) + h( i, j + 2 ) ) * 0.25 - h( i, j );
-		const e = r * 0.025; // ~ 2 grid steps
-		curv[ k ] = Math.max( - 1, Math.min( 1, - lap / e * 2.2 ) );
+		const x = pos[ k * 3 ], z = pos[ k * 3 + 2 ];
+		if ( Math.hypot( x, z ) < 900 ) continue;
+		// isotropic Laplacian of the eroded heightmap (metres, ~2 cells)
+		const e = 52, h0 = mountainHeightJS( x, z );
+		const lap = ( mountainHeightJS( x + e, z ) + mountainHeightJS( x - e, z ) + mountainHeightJS( x, z + e ) + mountainHeightJS( x, z - e ) ) * 0.25 - h0;
+		curv[ k ] = Math.max( - 1, Math.min( 1, - lap / 9 ) );
 
 	}
 
@@ -161,7 +161,7 @@ function backdropMaterial( hmTex ) {
 	const c3 = ( a ) => vec3( ...a );
 	const T = {
 		rockC: loadTex( 'dark_rock_c', true ), rockN: loadTex( 'dark_rock_n' ),
-		cliffC: loadTex( 'cliff_side_c', true ), cliffN: loadTex( 'cliff_side_n' ),
+		cliffC: loadTex( 'granite_face_c', true ), cliffN: loadTex( 'granite_face_n' ),
 		snowC: loadTex( 'snow_02_c', true ), snowN: loadTex( 'snow_02_n' ),
 	};
 
@@ -193,7 +193,13 @@ function backdropMaterial( hmTex ) {
 
 		const P = vW;
 		const xz = P.xz;
-		const Ng = normalize( vN );
+		// per-pixel normal from the eroded heightmap: crisp gullies at any mesh density
+		const eh = 18.0;
+		const hxp = mountainHeight( xz.add( vec2( eh, 0 ) ) ), hxm = mountainHeight( xz.sub( vec2( eh, 0 ) ) );
+		const hzp = mountainHeight( xz.add( vec2( 0, eh ) ) ), hzm = mountainHeight( xz.sub( vec2( 0, eh ) ) );
+		const nRel = normalize( vec3( hxm.sub( hxp ), eh * 2, hzm.sub( hzp ) ) );
+		const onMtn = smoothstep( 8.0, 40.0, hxp.add( hxm ).mul( 0.5 ) );
+		const Ng = normalize( mix( normalize( vN ), nRel, onMtn ) );
 		const id = vI.x;
 		const h = P.y;
 		const slope = float( 1.0 ).sub( Ng.y ); // 0 flat .. 1 vertical
@@ -224,10 +230,10 @@ function backdropMaterial( hmTex ) {
 		const rockH = mix( rockMacro.a, rockMacro.a.mul( 0.5 ).add( rockDet.a.mul( 0.5 ) ), dk );
 		const cliffH = mix( cliffMacro.a, cliffMacro.a.mul( 0.5 ).add( cliffDet.a.mul( 0.5 ) ), dk );
 		const rockL = mix( lum( rockMacro.rgb ), lum( rockMacro.rgb ).mul( 0.5 ).add( lum( rockDet.rgb ).mul( 0.5 ) ), dk ).div( 0.11 );
-		const cliffL = mix( lum( cliffMacro.rgb ), lum( cliffMacro.rgb ).mul( 0.5 ).add( lum( cliffDet.rgb ).mul( 0.5 ) ), dk ).div( 0.35 );
+		const cliffL = mix( lum( cliffMacro.rgb ), lum( cliffMacro.rgb ).mul( 0.5 ).add( lum( cliffDet.rgb ).mul( 0.5 ) ), dk ).div( 0.5 );
 
 		// --- rock palettes
-		const strata = sin( h.mul( 0.11 ).add( vnoise( xz.div( 90.0 ) ).mul( 6.0 ) ) ).mul( 0.5 ).add( 0.5 );
+		const strata = vnoise( xz.div( 380.0 ).add( vec2( h.div( 260.0 ), 0.0 ) ) ); // broad tonal variation (no bands)
 		const rn = vnoise( xz.div( 25.0 ).add( vec2( 41, 3 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 7.0 ).add( vec2( 2, 9 ) ) ).mul( 0.4 ) );
 		// Paine Grande: near-black sedimentary rock, faintly banded, rust-stained
 		const darkRock = mix( vec3( 0.032, 0.03, 0.028 ), vec3( 0.075, 0.066, 0.056 ), rn.mul( 0.5 ).add( strata.mul( 0.5 ) ) )
@@ -271,14 +277,16 @@ function backdropMaterial( hmTex ) {
 
 		// --- snow and ice, controlled by U.snow (0 = bare rock .. 1 = deep winter)
 		const sAmt = U.snow;
-		const snowLine = mix( float( 2100.0 ), float( 380.0 ), sAmt ).add( vnoise( xz.div( 240.0 ) ).sub( 0.5 ).mul( 320.0 ) );
+		const snowLine = mix( float( 2100.0 ), float( 380.0 ), sAmt ).add( vnoise( xz.div( 260.0 ) ).sub( 0.5 ).mul( 360.0 ) ).add( vnoise( xz.div( 70.0 ).add( vec2( 9, 2 ) ) ).sub( 0.5 ).mul( 160.0 ) );
+		// the westerlies strip the windward faces and load the lee slopes
+		const lee = dot( Ng.xz, vec2( Math.cos( 0.1 ), Math.sin( 0.1 ) ) ).mul( 0.5 ).add( 0.5 );
 		const holdSlope = mix( float( 0.18 ), float( 0.72 ), sAmt ); // how steep snow still sticks
 		const flatEnough = smoothstep( holdSlope, holdSlope.sub( 0.2 ), slope );
 		const snowN = vnoise( xz.div( 34.0 ).add( vec2( 5, 5 ) ) ).mul( 0.45 ).add( vnoise( xz.div( 130.0 ) ).mul( 0.55 ) );
 		// snow settles on ledges and in hollows first: the scan relief breaks its edges
 		const relH = select( useCliff, cliffH, rockH );
-		const snowField = snowN.mul( 0.5 ).add( flatEnough.mul( 0.55 ) ).add( float( 0.5 ).sub( relH ).mul( 0.35 ) );
-		const snow = smoothstep( snowLine, snowLine.add( 90.0 ), h ).mul( smoothstep( 0.47, 0.53, snowField ) ).mul( smoothstep( 0.0, 0.06, sAmt ) ).toVar();
+		const snowField = snowN.mul( 0.45 ).add( flatEnough.mul( 0.6 ) ).add( float( 0.5 ).sub( relH ).mul( 0.35 ) ).add( lee.sub( 0.5 ).mul( 0.3 ) );
+		const snow = smoothstep( snowLine.sub( 120.0 ), snowLine.add( 220.0 ), h ).mul( smoothstep( 0.46, 0.54, snowField ) ).mul( smoothstep( 0.0, 0.06, sAmt ) ).toVar();
 		const gl = polar( PAINE_GRANDE.glacier.az, PAINE_GRANDE.glacier.d );
 		const gd = length( xz.sub( vec2( gl[ 0 ], gl[ 1 ] ) ) ).div( float( PAINE_GRANDE.glacier.size ).mul( mix( 0.25, 1.35, sAmt ) ) );
 		const glacier = smoothstep( 1.0, 0.55, gd.add( vnoise( xz.div( 70.0 ) ).sub( 0.5 ).mul( 0.6 ) ) ).mul( smoothstep( mix( 900.0, 380.0, sAmt ), mix( 1100.0, 600.0, sAmt ), h ) )
@@ -293,7 +301,8 @@ function backdropMaterial( hmTex ) {
 		const iceCol = mix( vec3( 0.42, 0.6, 0.72 ), vec3( 0.78, 0.84, 0.88 ), ogive.mul( 0.6 ).add( vnoise( xz.div( 9.0 ) ).mul( 0.4 ) ) )
 			.mul( float( 1.0 ).sub( crev.mul( 0.65 ) ) );
 		const snowTex = tri( T.snowC, P, w, 1.0 / 30.0 );
-		const snowCol = vec3( 0.86, 0.87, 0.9 ).mul( mix( 1.0, lum( snowTex.rgb ).div( 0.65 ).clamp( 0.85, 1.08 ), dk ) );
+		// wind-packed snow: bright, faintly blue in its own shade, sastrugi ripples from the scan
+		const snowCol = vec3( 0.9, 0.91, 0.94 ).mul( mix( 1.0, lum( snowTex.rgb ).div( 0.65 ).clamp( 0.88, 1.06 ), dk ) );
 		// the Cuernos' dark caps are too steep to hold snow; their granite holds only a little
 		snow.assign( select( isCu, snow.mul( 0.5 ).mul( smoothstep( capLine.add( 30.0 ), capLine.sub( 40.0 ), h ) ), snow ) );
 		// snow lies in the couloirs and gully floors well below the general snow line
@@ -339,7 +348,9 @@ function backdropMaterial( hmTex ) {
 		// snow glitters a little; wet dark rock has a faint sheen; glacier ice is glossy
 		const spec = pow( clamp( dot( N, Hh ), 0.0, 1.0 ), mix( 18.0, 60.0, glacier ) ).mul( snowAmt.mul( 0.22 ).add( glacier.mul( 0.25 ) ).add( rockK.mul( 0.03 ) ) );
 		const sheen = mix( float( 1.0 ), gustSheen( windField( xz ) ), smoothstep( 40.0, 10.0, h ).mul( 0.6 ) );
-		const col = albedo.mul( sheen ).mul( U.sunColor.mul( diff ).mul( sunVis ).add( amb ) ).add( U.sunColor.mul( spec ).mul( sunVis ) );
+		const col = albedo.mul( sheen ).mul( U.sunColor.mul( diff ).mul( sunVis ).add( amb ) ).add( U.sunColor.mul( spec ).mul( sunVis ) ).toVar();
+		// snow in shade glows faintly blue (skylight scattered through the snowpack)
+		col.addAssign( U.skyAmb.mul( vec3( 0.55, 0.8, 1.35 ) ).mul( snowAmt.mul( float( 1.0 ).sub( diff.mul( sunVis ) ) ).mul( 0.3 ) ) );
 		// aerial perspective: distant rock goes cool blue-grey before the fog proper
 		const air = float( 1.0 ).sub( exp( dist.div( - 16000.0 ) ) ).mul( 0.25 );
 		const airCol = mix( U.horizon, U.skyAmb.mul( 2.5 ), 0.5 );

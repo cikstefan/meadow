@@ -25,8 +25,8 @@ const QUALITY = {
 	// blades/area = dense near field, mid/midArea, far/farArea out to the hills
 	low: { blades: 576, area: 56, mid: 512, midArea: 150, far: 384, farArea: 360, flowers: 224, dpr: 1, lod: 0.8 },
 	medium: { blades: 896, area: 76, mid: 704, midArea: 190, far: 512, farArea: 400, flowers: 304, dpr: 1.25, lod: 1 },
-	high: { blades: 1280, area: 96, mid: 896, midArea: 240, far: 640, farArea: 440, flowers: 384, dpr: 1.5, lod: 1.15 },
-	ultra: { blades: 1664, area: 120, mid: 1152, midArea: 300, far: 768, farArea: 500, flowers: 480, dpr: 2, lod: 1.4 },
+	high: { blades: 1280, area: 96, mid: 896, midArea: 240, far: 768, farArea: 620, flowers: 384, dpr: 1.5, lod: 1.15 },
+	ultra: { blades: 1664, area: 120, mid: 1152, midArea: 300, far: 960, farArea: 760, flowers: 480, dpr: 2, lod: 1.4 },
 };
 
 const params = new URLSearchParams( location.search );

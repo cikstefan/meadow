@@ -317,6 +317,76 @@ export class Builder {
 
 	}
 
+	// a real leaf surface (after jose's leafGeometry): nu=2 columns across, nv rows
+	// along; width follows an elliptic profile with a drip tip, the blade cups
+	// (u^2) and arches back (v^2); uv maps the scanned leaf tile. 4*nv triangles.
+	leafCurved( o, d, n, len, wid, kind, seed, ao, hFrac, nv = 4, cup = 0.3, arch = 0.22 ) {
+
+		const ax = new THREE.Vector3().crossVectors( n, d ).normalize();
+		const nn = new THREE.Vector3().crossVectors( d, ax ).normalize();
+		const base = this.vertexCount;
+		for ( let j = 0; j <= nv; j ++ ) {
+
+			const v = j / nv;
+			const wf = Math.pow( Math.sin( Math.PI * Math.min( 1, v * 0.96 + 0.04 ) ), 0.6 ) * ( 1 - 0.3 * v );
+			for ( let i = 0; i <= 2; i ++ ) {
+
+				const u = i - 1; // -1, 0, 1
+				// geometry spans the tile's leaf (scanned outline fills ~42% of the tile width)
+				const x = u * wid * 0.5 * Math.max( 0.35, wf );
+				const z = cup * wid * u * u * 0.5 - arch * v * v * len;
+				const p = o.clone().addScaledVector( d, v * len ).addScaledVector( ax, x ).addScaledVector( nn, z );
+				this.pos.push( p.x, p.y, p.z );
+				this.uv.push( 0.5 + u * 0.5 * Math.max( 0.35, wf ), 1 - v );
+				const nl = nn.clone().addScaledVector( ax, - u * cup * 0.8 ).addScaledVector( d, arch * v * 1.2 ).normalize();
+				this.nrm.push( nl.x, nl.y, nl.z );
+				this.cardA.push( kind, seed, ao, hFrac );
+
+			}
+
+		}
+
+		for ( let j = 0; j < nv; j ++ ) for ( let i = 0; i < 2; i ++ ) {
+
+			const a = base + j * 3 + i, b = a + 1, c = a + 3, e = c + 1;
+			this.idx.push( a, b, e, a, e, c );
+
+		}
+
+	}
+
+	// Embothrium inflorescence: ~14 curved scarlet tubes radiating from a short
+	// raceme, each flaring at the mouth (the four recurved lobes) with the style
+	// sticking out. kind marks flower tissue; card.y carries the cluster seed (bloom).
+	flowerCluster( c, up, r, scale, kind, seed, ao, hFrac, n = 14 ) {
+
+		const side0 = new THREE.Vector3( 1, 0, 0 ).cross( up ).lengthSq() > 1e-3 ? new THREE.Vector3( 1, 0, 0 ).cross( up ).normalize() : new THREE.Vector3( 0, 0, 1 );
+		for ( let k = 0; k < n; k ++ ) {
+
+			const phi = k * 2.399 + r() * 0.4, tilt = 0.5 + r() * 0.9;
+			const out = side0.clone().applyAxisAngle( up, phi );
+			const dir = up.clone().multiplyScalar( Math.cos( tilt ) ).addScaledVector( out, Math.sin( tilt ) ).normalize();
+			const p0 = c.clone().addScaledVector( up, ( r() - 0.3 ) * 0.03 * scale ).addScaledVector( out, 0.008 * scale );
+			const L = ( 0.032 + r() * 0.014 ) * scale;
+			const bend = out.clone().multiplyScalar( - 0.35 ).add( up.clone().multiplyScalar( 0.2 ) );
+			const pts = [], rads = [];
+			for ( let i = 0; i <= 4; i ++ ) {
+
+				const f = i / 4;
+				pts.push( p0.clone().addScaledVector( dir, f * L ).addScaledVector( bend, f * f * L * 0.6 ) );
+				rads.push( ( 0.0024 + f * 0.0012 + ( i === 4 ? 0.0028 : 0 ) ) * scale );
+
+			}
+
+			this.tube( pts, rads, 4, { kind, seed, ao, height: 1 } );
+			// the style, protruding past the lobes
+			const tip = pts[ 4 ], td = tip.clone().sub( pts[ 3 ] ).normalize();
+			this.tube( [ tip, tip.clone().addScaledVector( td, 0.016 * scale ) ], [ 0.0006 * scale, 0.0005 * scale ], 3, { kind: kind + 1, seed, ao, height: 1 } );
+
+		}
+
+	}
+
 	geometry( instanced = true ) {
 
 		const g = instanced ? new THREE.InstancedBufferGeometry() : new THREE.BufferGeometry();

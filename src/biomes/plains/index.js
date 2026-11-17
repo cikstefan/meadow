@@ -19,10 +19,10 @@ import { TRAIL, FORWARD_AZ, WALK_RADIUS, PREVAILING_WIND } from './layout.js';
 
 // Weather map shared by the volumetric clouds and their shadows on the ground:
 // the raw field c (high = clear sky) at a point of the cloud layer.
-const CLOUD_BASE = 1500, CLOUD_TOP = 2700, CLOUD_MID = 1950;
-const weather = ( p ) => vnoise( p.div( 2600.0 ) ).mul( 0.55 )
-	.add( vnoise( p.div( 900.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.32 ) )
-	.add( vnoise( p.div( 300.0 ).add( vec2( 11.0, 2.0 ) ) ).mul( 0.13 ) );
+const CLOUD_BASE = 1500, CLOUD_TOP = 3300, CLOUD_MID = 2000;
+const weather = ( p ) => vnoise( p.div( 4800.0 ) ).mul( 0.55 )
+	.add( vnoise( p.div( 1500.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.32 ) )
+	.add( vnoise( p.div( 480.0 ).add( vec2( 11.0, 2.0 ) ) ).mul( 0.13 ) );
 const cloudAmount = () => smoothstep( 0.0, 0.2, U.clouds );
 
 // 0..1 cloudiness of the layer above xz (1 = solid cloud)
@@ -34,7 +34,7 @@ export const cloudCoverageAt = ( xz ) => {
 };
 
 // the volumetric cloud deck (raymarched by the sky)
-export const CLOUDS = makeVolumetricClouds( ( xz ) => cloudCoverageAt( xz ), { base: CLOUD_BASE, top: CLOUD_TOP, steps: 44, lightSteps: 4 } );
+export const CLOUDS = makeVolumetricClouds( ( xz ) => cloudCoverageAt( xz ), { base: CLOUD_BASE, top: CLOUD_TOP, steps: 56, lightSteps: 5 } );
 
 // Dappled light: the real shadow of the cloud deck. Follow the sun ray up into
 // the layer and sample the same 3D cloud density at two heights (Beer's law),
@@ -42,7 +42,9 @@ export const CLOUDS = makeVolumetricClouds( ( xz ) => cloudCoverageAt( xz ), { b
 export const cloudShadowAt = ( xz, y ) => {
 
 	const s = U.trueSunDir;
-	const sy = max( s.y, 0.06 );
+	// the sun's projection is damped: in the sped-up day a grazing sun would sweep the
+	// shadows across the plain far faster than the clouds themselves move
+	const sy = max( s.y, 0.3 );
 	const toward = vec2( s.x, s.z ).div( sy );
 	const h1 = max( float( CLOUD_BASE + 300 ).sub( y ), 0.0 ), h2 = max( float( CLOUD_BASE + 750 ).sub( y ), 0.0 );
 	const p1 = xz.add( toward.mul( h1.min( 9000.0 ) ) ), p2 = xz.add( toward.mul( h2.min( 9000.0 ) ) );
@@ -61,9 +63,9 @@ const cloudShadow = Fn( ( [ xz ] ) => cloudShadowAt( xz, float( 0 ) ) );
 export function cloudFieldJS( x, z, y, offset ) {
 
 	const s = U.trueSunDir.value;
-	const H = Math.min( 9000, Math.max( CLOUD_MID - y, 0 ) / Math.max( s.y, 0.06 ) );
+	const H = Math.min( 9000, Math.max( CLOUD_MID - y, 0 ) / Math.max( s.y, 0.3 ) );
 	const px = x + s.x * H - offset.x, pz = z + s.z * H - offset.y;
-	return vnoiseJS( px / 2600, pz / 2600 ) * 0.55 + vnoiseJS( px / 900 + 3, pz / 900 + 8 ) * 0.32 + vnoiseJS( px / 300 + 11, pz / 300 + 2 ) * 0.13;
+	return vnoiseJS( px / 4800, pz / 4800 ) * 0.55 + vnoiseJS( px / 1500 + 3, pz / 1500 + 8 ) * 0.32 + vnoiseJS( px / 480 + 11, pz / 480 + 2 ) * 0.13;
 
 }
 
@@ -124,11 +126,22 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 		schist.assign( mix( schist, rockCol, detailK ) );
 		// dead grass litter and soil between the blades
 		const lt = untiled( T.litter, xz, 3.4 );
-		litter.assign( lt.rgb.mul( vec3( 0.42, 0.42, 0.36 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.1, 0.6, lt.a ) ) ) );
+		// the turf between the tussocks: short green-gold growth (scan luminance graded
+		// into the grass palette, never bare mud)
+		const ll = dot( lt.rgb, vec3( 0.3, 0.55, 0.15 ) );
+		litter.assign( mix( vec3( 0.05, 0.075, 0.02 ), vec3( 0.2, 0.19, 0.08 ), smoothstep( 0.2, 0.75, ll ) ).mul( mix( 0.6, 1.1, smoothstep( 0.1, 0.6, lt.a ) ) ) );
 
 	} );
 
-	const a = mix( albedo, litter, litterK.mul( 0.85 ) ).toVar();
+	// distant canopy: the same tussock drifts and colour regions as the blades
+	// (grass.js), so where the blades end the ground carries on seamlessly
+	const tf = vnoise( xz.div( 38.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.62 ).add( vnoise( xz.div( 12.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( 0.04 );
+	const tus = smoothstep( 0.3, 0.75, tf );
+	const region = vnoise( xz.div( 55.0 ).add( vec2( 17.0, 5.0 ) ) );
+	const dryE = clamp( fieldDry( xz ).mul( 0.55 ).add( tus.mul( 0.5 ) ).add( region.sub( 0.5 ).mul( 0.6 ) ), 0.0, 1.0 );
+	const canopyM = mix( vec3( 0.12, 0.16, 0.045 ), vec3( 0.33, 0.27, 0.12 ), dryE ).mul( mix( 0.8, 1.05, tus ) );
+	const a0 = mix( albedo, canopyM, toCanopy.mul( 0.85 ) );
+	const a = mix( a0, litter, litterK.mul( 0.85 ) ).toVar();
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
 	a.assign( mix( a, soil, verge.mul( 0.4 ).mul( float( 1.0 ).sub( toCanopy ) ) ) );
 	a.assign( mix( a, gravel, trail ) );
@@ -146,7 +159,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, cloudTimeScale: 0.25,
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, cloudTimeScale: 0.03, // clouds (and their shadows) drift ~8x slower than before
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,
@@ -171,24 +184,25 @@ export const PLAINS = {
 	// coirón (golden tussock grass) mixed with fresh spring green
 	grass: {
 		hMin: 0.06, hMax: 0.46, wMin: 0.006, wMax: 0.016, flutter: 0.16, tussock: 1, multi: 3, flutterHz: [ 4.5, 9.0 ],
-		lushBase: [ 0.035, 0.05, 0.014 ], lushTipA: [ 0.15, 0.25, 0.05 ], lushTipB: [ 0.22, 0.3, 0.07 ], lushTipC: [ 0.11, 0.23, 0.055 ],
-		dryBase: [ 0.13, 0.1, 0.045 ], dryTipA: [ 0.5, 0.38, 0.18 ], dryTipB: [ 0.66, 0.53, 0.3 ], dead: 0.8,
+		lushBase: [ 0.022, 0.034, 0.008 ], lushTipA: [ 0.13, 0.22, 0.04 ], lushTipB: [ 0.2, 0.27, 0.05 ], lushTipC: [ 0.09, 0.19, 0.04 ],
+		dryBase: [ 0.07, 0.06, 0.025 ], dryTipA: [ 0.4, 0.31, 0.12 ], dryTipB: [ 0.52, 0.41, 0.19 ], dead: 0.86,
 	},
 
 	ground: {
 		soilA: [ 0.06, 0.055, 0.03 ], soilB: [ 0.11, 0.1, 0.06 ], thatch: [ 0.085, 0.11, 0.035 ],
-		lushA: [ 0.13, 0.17, 0.05 ], lushB: [ 0.21, 0.23, 0.08 ], straw: [ 0.44, 0.35, 0.17 ],
+		lushA: [ 0.11, 0.15, 0.04 ], lushB: [ 0.19, 0.21, 0.07 ], straw: [ 0.36, 0.29, 0.13 ],
 	},
 
 	// spring flowers, low to the ground (5 slots):
 	// capachito (Calceolaria uniflora), violet, white star, yellow senecio, pink oxalis
 	flowers: {
-		minH: [ 0.06, 0.05, 0.1, 0.17, 0.05 ], size: [ 1.1, 0.55, 0.62, 0.7, 0.72 ],
-		petals: [ 2, 5, 8, 10, 5 ], length: [ 0.75, 0.7, 0.9, 0.85, 0.7 ], width: [ 0.95, 0.45, 0.2, 0.2, 0.5 ],
-		cup: [ 1.1, 0.2, - 0.05, 0.05, 0.45 ], inner: [ 0.05, 0.15, 0.25, 0.3, 0.1 ],
-		centreR: [ 0.14, 0.18, 0.26, 0.3, 0.16 ], dome: [ 0.06, 0.05, 0.12, 0.16, 0.05 ],
-		petalCol: [ [ 0.86, 0.46, 0.015 ], [ 0.33, 0.17, 0.6 ], [ 0.82, 0.8, 0.74 ], [ 0.82, 0.6, 0.02 ], [ 0.66, 0.24, 0.45 ] ],
-		centreCol: [ [ 0.45, 0.07, 0.02 ], [ 0.75, 0.66, 0.3 ], [ 0.75, 0.55, 0.08 ], [ 0.6, 0.4, 0.02 ], [ 0.62, 0.55, 0.2 ] ],
+		// + Anemone multifida (cream), Sisyrinchium (yellow stars), Perezia (lilac-blue daisy)
+		minH: [ 0.06, 0.05, 0.1, 0.17, 0.05, 0.12, 0.08, 0.1 ], size: [ 1.1, 0.55, 0.62, 0.7, 0.72, 0.78, 0.5, 0.66 ],
+		petals: [ 2, 5, 8, 10, 5, 6, 6, 13 ], length: [ 0.75, 0.7, 0.9, 0.85, 0.7, 0.8, 0.75, 0.9 ], width: [ 0.95, 0.45, 0.2, 0.2, 0.5, 0.48, 0.32, 0.16 ],
+		cup: [ 1.1, 0.2, - 0.05, 0.05, 0.45, 0.35, 0.1, 0.0 ], inner: [ 0.05, 0.15, 0.25, 0.3, 0.1, 0.12, 0.1, 0.28 ],
+		centreR: [ 0.14, 0.18, 0.26, 0.3, 0.16, 0.24, 0.14, 0.3 ], dome: [ 0.06, 0.05, 0.12, 0.16, 0.05, 0.14, 0.05, 0.12 ],
+		petalCol: [ [ 0.86, 0.46, 0.015 ], [ 0.33, 0.17, 0.6 ], [ 0.82, 0.8, 0.74 ], [ 0.82, 0.6, 0.02 ], [ 0.66, 0.24, 0.45 ], [ 0.86, 0.82, 0.6 ], [ 0.85, 0.68, 0.04 ], [ 0.44, 0.4, 0.74 ] ],
+		centreCol: [ [ 0.45, 0.07, 0.02 ], [ 0.75, 0.66, 0.3 ], [ 0.75, 0.55, 0.08 ], [ 0.6, 0.4, 0.02 ], [ 0.62, 0.55, 0.2 ], [ 0.7, 0.62, 0.12 ], [ 0.38, 0.22, 0.03 ], [ 0.85, 0.8, 0.66 ] ],
 		glossy: 3, blotch: 0, daisy: 2, frilly: - 1, notched: - 1,
 		density: 0.5, grassFollow: 0,
 	},

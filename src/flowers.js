@@ -19,7 +19,7 @@ const S = BIOME.flowers; // species table (5 slots)
 // slot k is of a given role (petal detail / gloss); k < 0 disables it
 const isT = ( type, k ) => k < 0 ? float( 0 ) : float( 1 ).sub( smoothstep( 0.4, 0.6, abs( type.sub( k ) ) ) );
 
-const TYPES = 5;
+const TYPES = S.minH.length; // species slots in the biome's table
 const RENDER_ORDER = 5; // 0 daisy, 1 buttercup, 2 poppy, 3 cornflower, 4 campion
 
 // per-type value table -> nested select

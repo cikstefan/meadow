@@ -173,7 +173,7 @@ const SIDES = [ [ 6, 4, 3, 3 ], [ 4, 3 ], [ 3 ] ]; // tube sides per LOD and bra
 const RINGS = [ 99, 4, 3 ];
 
 // one plant variant -> geometries for the 3 LODs (unit height, base at the origin)
-export function plantLODs( sp, seed ) {
+function plantLODs3( sp, seed ) {
 
 	const r = rng( seed );
 	const pl = sp.grow( r );
@@ -278,3 +278,95 @@ function smooth( a, b, x ) {
 
 }
 
+
+// the close-up "hero" LOD for notro (after jose's Ficus benjamina): every
+// shoot clothed in real cupped, arched leaves every few centimetres, and real
+// 3D flower clusters at the shoot tips. Only the nearest bushes draw this.
+function heroNotro( sp, seed ) {
+
+	const r = rng( seed );
+	const pl = sp.grow( r );
+	let H = 0.01;
+	for ( const b of pl.branches ) for ( const p of b.pts ) H = Math.max( H, p.y );
+	for ( const l of pl.leaves ) H = Math.max( H, l.p.y + l.s * 0.6 );
+	const cen = new V3();
+	for ( const l of pl.leaves ) cen.add( l.p );
+	cen.multiplyScalar( 1 / Math.max( 1, pl.leaves.length ) );
+	let rMax = 0.01;
+	for ( const l of pl.leaves ) rMax = Math.max( rMax, l.p.distanceTo( cen ) );
+	const k = 1 / H;
+	const B = new Builder();
+	const lr = rng( seed * 7 + 3 );
+	for ( const b of pl.branches ) {
+
+		const sides = [ 7, 5, 4, 3 ][ Math.min( b.level, 3 ) ];
+		B.tube( b.pts.map( ( p ) => p.clone().multiplyScalar( k ) ), b.rads.map( ( v ) => v * k ), sides, { kind: - 1 - pl.bark, seed: lr(), ao: Math.min( 1, 0.45 + b.level * 0.2 ), height: 1 } );
+
+	}
+
+	const up = new V3( 0, 1, 0 );
+	let nLeaves = 0;
+	for ( const b of pl.branches ) {
+
+		if ( b.level < 1 ) continue;
+		const start = b.level === 1 ? 0.55 : 0.08;
+		let node = ( lr() * 4 ) | 0;
+		for ( let d = b.len * start; d < b.len * 0.99; d += range( lr, 0.032, 0.045 ) ) {
+
+			const f = d / b.len, q = branchAt( b, f );
+			const side = new V3().crossVectors( q.T, up );
+			if ( side.lengthSq() < 1e-4 ) side.set( 1, 0, 0 );
+			side.normalize().applyAxisAngle( q.T, node * 2.39996 );
+			node ++;
+			const a = 0.75 + range( lr, - 0.15, 0.15 );
+			const dir = q.T.clone().multiplyScalar( Math.cos( a ) ).addScaledVector( side, Math.sin( a ) ).addScaledVector( up, - 0.3 * range( lr, 0.5, 1.2 ) ).normalize();
+			const n = up.clone().multiplyScalar( 0.7 ).addScaledVector( side, 0.35 ).add( new V3( range( lr, - 0.25, 0.25 ), 0, range( lr, - 0.25, 0.25 ) ) ).normalize();
+			const out = q.p.clone().sub( cen ).multiplyScalar( 1 / rMax );
+			const shell = Math.min( 1, out.length() );
+			const ao = 0.28 + 0.72 * smooth( 0.1, 1.0, shell );
+			const len = range( lr, 0.085, 0.125 ) * ( 1 - 0.3 * f * ( b.level === 3 ? 1 : 0 ) );
+			const p = q.p.clone().addScaledVector( side, q.r ).multiplyScalar( k );
+			B.leafCurved( p, dir, n, len * k, len * 0.42 * k, lr() < 0.55 ? TILE.leaf : TILE.leaf2, lr(), ao, p.y, 4, 0.32, 0.25 );
+			// leaf normals half-way to the canopy normal (glossy sparkle + soft volume)
+			const radial = out.lengthSq() > 1e-6 ? out.clone().normalize() : up.clone();
+			const nn = radial.clone().add( new V3( 0, 0.4, 0 ) ).normalize();
+			const at = B.nrm.length - 27;
+			for ( let v = 0; v < 9; v ++ ) {
+
+				const lx = B.nrm[ at + v * 3 ], ly = B.nrm[ at + v * 3 + 1 ], lz = B.nrm[ at + v * 3 + 2 ];
+				const m = new V3( lx, ly, lz ).lerp( nn, 0.4 ).normalize();
+				B.nrm[ at + v * 3 ] = m.x; B.nrm[ at + v * 3 + 1 ] = m.y; B.nrm[ at + v * 3 + 2 ] = m.z;
+
+			}
+
+			nLeaves ++;
+
+		}
+
+		// flower clusters at the outer shoot tips
+		if ( b.level >= 2 && b.kids.length === 0 ) {
+
+			const q = branchAt( b, 1 );
+			const out = q.p.clone().sub( cen ).multiplyScalar( 1 / rMax );
+			if ( out.length() > 0.35 && q.p.y > 0.3 * H ) {
+
+				const dirUp = q.T.clone().lerp( up, 0.5 ).normalize();
+				B.flowerCluster( q.p.clone().multiplyScalar( k ), dirUp, lr, k * 1.25, 200, lr(), 0.9, q.p.y * k, 12 + ( lr() * 6 | 0 ) );
+
+			}
+
+		}
+
+	}
+
+	return B.geometry( true );
+
+}
+
+export function plantLODs( sp, seed ) {
+
+	const lods = plantLODs3( sp, seed );
+	const hero = sp.name === 'notro' ? heroNotro( sp, seed ) : plantLODs3( sp, seed )[ 0 ];
+	return [ hero, ...lods ];
+
+}
