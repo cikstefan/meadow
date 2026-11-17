@@ -218,8 +218,11 @@ export function advanceWind( dt ) {
 	const d = U.windDir.value, sp = U.windSpeed.value;
 	U.windOffset.value.addScaledVector( d, sp * dt );
 	U.windPhase.value += sp * dt;
-	U.cloudOffset.value.addScaledVector( d, U.cloudSpeed.value * dt );
-	U.skyOffset.value.addScaledVector( d, 0.0035 * dt );
+	// clouds drift (and churn) on their own, slower clock (a biome can slow them down)
+	const cs = BIOME.cloudTimeScale ?? 1;
+	U.cloudOffset.value.addScaledVector( d, U.cloudSpeed.value * dt * cs );
+	U.skyOffset.value.addScaledVector( d, 0.0035 * dt * cs );
+	U.cloudTime.value += dt * cs;
 	const k = U.windStrength.value * dt;
 	U.driftOffset.value.x += d.x * k;
 	U.driftOffset.value.z += d.y * k;

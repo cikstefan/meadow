@@ -30,6 +30,15 @@ import { rng } from './grow.js';
 import { SPECIES, plantLODs } from './plants.js';
 import { PREVAILING_WIND } from './layout.js';
 
+const BARK = ( () => {
+
+	const t = new THREE.TextureLoader().load( new URL( '../../assets/plains/bark_willow_02_c.webp', import.meta.url ).href );
+	t.wrapS = t.wrapT = THREE.RepeatWrapping;
+	t.colorSpace = THREE.SRGBColorSpace;
+	return t;
+
+} )();
+
 const range = ( r, a, b ) => a + ( b - a ) * r();
 const LOD_DIST = [ 60, 300 ]; // m: detailed / mid / far
 const RADIUS = 1050; // scatter radius around the origin
@@ -49,7 +58,8 @@ function scatter( density = 1 ) {
 		if ( d0 > RADIUS ) continue;
 		const dens = shrubDensityJS( x, z );
 		const pick = r(), roll = r();
-		if ( trailDistJS( x, z ) < 1.7 || lakeDistJS( x, z ) < 10 ) continue;
+		// bushes crowd the path in places, keep back from it elsewhere
+		if ( trailDistJS( x, z ) < 0.95 + 1.6 * vnoiseJS( x / 25 + 4, z / 25 ) || lakeDistJS( x, z ) < 10 ) continue;
 		const gravel = gravelPatchJS( x, z );
 		const m = vnoiseJS( x / 120 + 3, z / 120 + 8 );
 		const w = [
@@ -209,17 +219,32 @@ export class Shrubs {
 
 			// bark: notro smooth grey-brown, calafate yellow-brown, mata dark
 			const barkK = vC.x.negate().sub( 1.0 );
-			const barkCol = select( barkK.lessThan( 0.5 ), vec3( 0.085, 0.078, 0.072 ), select( barkK.lessThan( 1.5 ), vec3( 0.14, 0.1, 0.065 ), vec3( 0.07, 0.062, 0.05 ) ) )
-				.mul( vnoise( uv().mul( vec2( 3.0, 9.0 ) ).add( vT.w.mul( 50.0 ) ) ).mul( 0.5 ).add( 0.75 ) );
+			// scanned bark (relief in alpha darkens the fissures), tinted per species
+			const bk = texture( BARK, uv().mul( vec2( 1.0, 2.6 ) ).add( vec2( vT.w.mul( 3.0 ), 0.0 ) ) );
+			const bl = bk.rgb.dot( vec3( 0.3, 0.55, 0.15 ) ).div( 0.47 );
+			const barkTint = select( barkK.lessThan( 0.5 ), vec3( 0.105, 0.09, 0.08 ), select( barkK.lessThan( 1.5 ), vec3( 0.15, 0.105, 0.065 ), vec3( 0.075, 0.065, 0.05 ) ) );
+			const barkCol = barkTint.mul( bl.clamp( 0.4, 1.6 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.2, 0.7, bk.a ) ) )
+				// grey-green crustose lichen patches on the notro stems
+				.add( vec3( 0.04, 0.05, 0.035 ).mul( smoothstep( 0.6, 0.8, vnoise( uv().mul( vec2( 4.0, 7.0 ) ).add( vT.w.mul( 9.0 ) ) ) ) ) );
 			const albedo = select( isWood, barkCol, sample.rgb.mul( vT.xyz ) ).toVar();
 			const ao = vC.y.mul( mix( 0.6, 1.0, vC.z ) );
 			const N = select( isWood, normalize( vN ), normalize( vN ).mul( faceDirection.mul( 0.3 ).add( 0.7 ) ) );
 			const transmit = select( isWood, float( 0.0 ), select( isNotroFl, float( 0.75 ), float( 0.45 ) ) );
 			const spec = select( isWood, float( 0.05 ), float( 0.16 ) ); // glossy leathery leaves
-			// notro flowers glow softly at night (their scarlet, through the bloom)
+			// night: bioluminescent firebush. The flowers glow from within (hot core,
+			// softer petals), breathing slowly; waves of light roll across the plain
+			// from bush to bush; the leaves around them catch a faint warm halo.
 			const red = smoothstep( 0.08, 0.3, sample.r.sub( sample.g.mul( 1.4 ) ) ).mul( select( isNotroFl, float( 1.0 ), float( 0.0 ) ) );
-			const pulse = sin( U.time.mul( 0.9 ).add( vT.w.mul( 40.0 ) ) ).mul( 0.2 ).add( 0.8 );
-			const emit = vec3( 1.0, 0.16, 0.05 ).mul( red.mul( U.night ).mul( U.glow ).mul( pulse ).mul( sp.glow * 0.16 ) );
+			const core = smoothstep( 0.45, 0.75, sample.r ).mul( red );
+			const wave = sin( vW.x.mul( 0.045 ).add( vW.z.mul( 0.03 ) ).sub( U.time.mul( 0.55 ) ) ).mul( 0.5 ).add( 0.5 );
+			const breathe = sin( U.time.mul( 0.7 ).add( vT.w.mul( 40.0 ) ) ).mul( 0.5 ).add( 0.5 );
+			const pulse = mix( 0.45, 1.0, wave.mul( 0.6 ).add( breathe.mul( 0.4 ) ) );
+			const V = normalize( cameraPosition.sub( vW ) );
+			const rim = float( 1.0 ).sub( dot( normalize( vN ), V ).abs() ).pow( 2.0 );
+			const glowCol = mix( vec3( 1.0, 0.12, 0.18 ), vec3( 1.0, 0.45, 0.25 ), core );
+			const halo = select( isWood, float( 0.0 ), float( 1.0 ) ).mul( vC.z ).mul( 0.04 ).mul( sp.glow ); // leaves in the crown
+			const emit = glowCol.mul( red.mul( mix( 0.8, 1.6, core ) ).mul( rim.mul( 0.5 ).add( 0.75 ) ).add( halo ) )
+				.mul( U.night.mul( U.glow ).mul( pulse ).mul( sp.glow * 0.22 ) );
 			return shadeFoliage( albedo, N, vW, ao, vC.w, transmit, spec, float( 0.35 ), emit );
 
 		} )();

@@ -10,11 +10,10 @@ import {
 import { vnoise, hash2i } from './tsl/noise.js';
 import { U, skyColor } from './tsl/world.js';
 import { BIOME } from './biomes/index.js';
-import { makeVolumetricClouds } from './tsl/clouds3d.js';
 
 const SK = BIOME.sky || {};
 // raymarched 3D clouds (biomes that provide a weather map)
-const VOLUME = SK.volumetric && BIOME.cloudCoverage ? makeVolumetricClouds( BIOME.cloudCoverage, { base: 1700, top: 3900, steps: 48, lightSteps: 4 } ) : null;
+const VOLUME = SK.volumetric && BIOME.clouds ? BIOME.clouds.march : null;
 
 // elevation (deg) -> palette. Colours are linear-ish, hand tuned.
 const KEYS = [

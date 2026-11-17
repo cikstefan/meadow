@@ -8,50 +8,62 @@
 // the lake, the shrubs and the ghost forest of fire-killed lenga trees.
 
 import * as THREE from 'three/webgpu';
-import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If, texture } from 'three/tsl';
+import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If, texture, exp } from 'three/tsl';
 import { vnoise, vnoiseJS, hash2i, hash2i2 } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
+import { makeVolumetricClouds } from '../../tsl/clouds3d.js';
 import {
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS,
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS, mountainHeight,
 } from './terrain.js';
 import { TRAIL, FORWARD_AZ, WALK_RADIUS, PREVAILING_WIND } from './layout.js';
 
 // Weather map shared by the volumetric clouds and their shadows on the ground:
 // the raw field c (high = clear sky) at a point of the cloud layer.
-const CLOUD_MID = 2400; // m: middle of the cloud slab (see sky.js)
-const weather = ( p ) => vnoise( p.div( 700.0 ) ).mul( 0.58 )
-	.add( vnoise( p.div( 240.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) )
-	.add( vnoise( p.div( 78.0 ).add( vec2( 11.0, 2.0 ) ) ).mul( 0.12 ) );
+const CLOUD_BASE = 1500, CLOUD_TOP = 2700, CLOUD_MID = 1950;
+const weather = ( p ) => vnoise( p.div( 2600.0 ) ).mul( 0.55 )
+	.add( vnoise( p.div( 900.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.32 ) )
+	.add( vnoise( p.div( 300.0 ).add( vec2( 11.0, 2.0 ) ) ).mul( 0.13 ) );
 const cloudAmount = () => smoothstep( 0.0, 0.2, U.clouds );
 
 // 0..1 cloudiness of the layer above xz (1 = solid cloud)
-export const cloudCoverageAt = ( xz ) => smoothstep( U.cloudCover.add( 0.14 ), U.cloudCover.sub( 0.1 ), weather( xz.sub( U.cloudOffset ) ) ).mul( cloudAmount() );
+export const cloudCoverageAt = ( xz ) => {
 
-// Dappled light: the clouds' shadows, projected along the (low) sun from the
-// cloud layer, so they stretch across the plains and race up the mountain flanks.
+	const w = weather( xz.sub( U.cloudOffset ) ).toVar();
+	return smoothstep( U.cloudCover.add( 0.14 ), U.cloudCover.sub( 0.1 ), w ).mul( cloudAmount() );
+
+};
+
+// the volumetric cloud deck (raymarched by the sky)
+export const CLOUDS = makeVolumetricClouds( ( xz ) => cloudCoverageAt( xz ), { base: CLOUD_BASE, top: CLOUD_TOP, steps: 44, lightSteps: 4 } );
+
+// Dappled light: the real shadow of the cloud deck. Follow the sun ray up into
+// the layer and sample the same 3D cloud density at two heights (Beer's law),
+// so every shadow on the plains belongs to a cloud overhead.
 export const cloudShadowAt = ( xz, y ) => {
 
 	const s = U.trueSunDir;
-	const t = clamp( float( 1.0 ).div( max( s.y, 0.06 ) ), 0.0, 9.0 );
-	const H = max( float( CLOUD_MID ).sub( y ), 0.0 );
-	const p = xz.add( vec2( s.x, s.z ).mul( H.mul( t ) ) ).sub( U.cloudOffset );
-	const c = weather( p );
-	// soft-edged: cloud shadows have a penumbra of tens of metres
-	const lit = max( smoothstep( U.cloudCover.sub( 0.07 ), U.cloudCover.add( 0.07 ), c ), float( 1.0 ).sub( cloudAmount() ) );
-	return mix( float( 0.12 ), float( 1.0 ), lit );
+	const sy = max( s.y, 0.06 );
+	const toward = vec2( s.x, s.z ).div( sy );
+	const h1 = max( float( CLOUD_BASE + 300 ).sub( y ), 0.0 ), h2 = max( float( CLOUD_BASE + 750 ).sub( y ), 0.0 );
+	const p1 = xz.add( toward.mul( h1.min( 9000.0 ) ) ), p2 = xz.add( toward.mul( h2.min( 9000.0 ) ) );
+	const d1 = CLOUDS.density( vec3( p1.x, float( CLOUD_BASE + 300 ), p1.y ), true ).toVar();
+	const d2 = CLOUDS.density( vec3( p2.x, float( CLOUD_BASE + 750 ), p2.y ), true ).toVar();
+	const d = d1.add( d2 );
+	// optical depth through ~1 km of cloud, softened (light scattered into the shadow)
+	const T = exp( d.mul( - 0.5 * 600 * 0.011 ).div( sy ).max( - 30.0 ) );
+	return mix( float( 0.14 ), float( 1.0 ), smoothstep( 0.0, 1.0, T ) );
 
 };
 
 const cloudShadow = Fn( ( [ xz ] ) => cloudShadowAt( xz, float( 0 ) ) );
 
-// CPU mirror of the cloud-shadow noise (0..1 'lit' value before thresholding)
+// CPU mirror of the weather map (0..1, high = clear), sampled where the sun ray meets the deck
 export function cloudFieldJS( x, z, y, offset ) {
 
 	const s = U.trueSunDir.value;
-	const t = Math.min( 9, 1 / Math.max( s.y, 0.06 ) );
-	const H = Math.max( CLOUD_MID - y, 0 ) * t;
+	const H = Math.min( 9000, Math.max( CLOUD_MID - y, 0 ) / Math.max( s.y, 0.06 ) );
 	const px = x + s.x * H - offset.x, pz = z + s.z * H - offset.y;
-	return vnoiseJS( px / 700, pz / 700 ) * 0.58 + vnoiseJS( px / 240 + 3, pz / 240 + 8 ) * 0.3 + vnoiseJS( px / 78 + 11, pz / 78 + 2 ) * 0.12;
+	return vnoiseJS( px / 2600, pz / 2600 ) * 0.55 + vnoiseJS( px / 900 + 3, pz / 900 + 8 ) * 0.32 + vnoiseJS( px / 300 + 11, pz / 300 + 2 ) * 0.13;
 
 }
 
@@ -66,7 +78,7 @@ const groundTex = ( n ) => {
 
 };
 let GT = null; // created on first use (the meadow never loads these)
-const scans = () => GT || ( GT = { trail: groundTex( 'rocky_trail_c' ), rocks: groundTex( 'dry_ground_rocks_c' ), litter: groundTex( 'withered_grass_c' ) } );
+const scans = () => GT || ( GT = { trail: groundTex( 'rocky_trail_c' ), rocks: groundTex( 'dry_ground_rocks_c' ), litter: groundTex( 'aerial_grass_c' ) } );
 
 // two rotated, differently scaled samples: no visible tiling
 const untiled = ( tex, xz, scale ) => {
@@ -84,7 +96,9 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 
 	const T = scans();
 	const d = trailDist( xz );
-	const trail = float( 1.0 ).sub( smoothstep( TRAIL.halfWidth * 0.75, TRAIL.halfWidth + 0.25, d ) );
+	// ragged, grass-invaded edges; the path fades into the verge, no hard band
+	const rag = vnoise( xz.mul( 1.7 ) ).sub( 0.5 ).mul( 0.35 ).add( vnoise( xz.mul( 6.0 ).add( vec2( 3, 9 ) ) ).sub( 0.5 ).mul( 0.15 ) );
+	const trail = float( 1.0 ).sub( smoothstep( TRAIL.halfWidth * 0.55, TRAIL.halfWidth + 0.35, d.add( rag ) ) );
 	const verge = float( 1.0 ).sub( smoothstep( TRAIL.halfWidth, TRAIL.halfWidth + TRAIL.verge + 0.4, d ) );
 	const n1 = vnoise( xz.mul( 9.0 ) );
 	const n3 = vnoise( xz.mul( 2.1 ).add( vec2( 9.0, 4.0 ) ) );
@@ -101,7 +115,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 		// scanned trail: packed dust and pebbles, cavities darkened by the scan's relief
 		const tr = untiled( T.trail, xz, 1.7 );
 		const tl = dot( tr.rgb, vec3( 0.3, 0.55, 0.15 ) );
-		const trailCol = mix( vec3( tl ).mul( vec3( 1.0, 0.97, 0.92 ) ), tr.rgb, 0.35 ).mul( 0.52 ).mul( mix( 0.7, 1.08, smoothstep( 0.2, 0.7, tr.a ) ) );
+		const trailCol = mix( vec3( tl ).mul( vec3( 1.0, 0.97, 0.92 ) ), tr.rgb, 0.4 ).mul( 0.44 ).mul( mix( 0.78, 1.05, smoothstep( 0.2, 0.7, tr.a ) ) );
 		gravel.assign( mix( gravel, trailCol, detailK ) );
 		// broken schist and stones on the bare patches (greyer than the scan)
 		const rk = untiled( T.rocks, xz, 2.6 );
@@ -109,16 +123,20 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 		const rockCol = mix( vec3( rl ), rk.rgb, 0.45 ).mul( 0.42 ).mul( mix( 0.65, 1.1, smoothstep( 0.15, 0.6, rk.a ) ) );
 		schist.assign( mix( schist, rockCol, detailK ) );
 		// dead grass litter and soil between the blades
-		const lt = untiled( T.litter, xz, 1.4 );
-		litter.assign( lt.rgb.mul( vec3( 0.12, 0.14, 0.065 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.1, 0.6, lt.a ) ) ) );
+		const lt = untiled( T.litter, xz, 3.4 );
+		litter.assign( lt.rgb.mul( vec3( 0.42, 0.42, 0.36 ) ).mul( mix( 0.6, 1.1, smoothstep( 0.1, 0.6, lt.a ) ) ) );
 
 	} );
 
-	const a = mix( albedo, litter.add( albedo.mul( 0.35 ) ), litterK.mul( 0.75 ) ).toVar();
+	const a = mix( albedo, litter, litterK.mul( 0.85 ) ).toVar();
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
 	a.assign( mix( a, soil, verge.mul( 0.4 ).mul( float( 1.0 ).sub( toCanopy ) ) ) );
 	a.assign( mix( a, gravel, trail ) );
 	a.assign( mix( a, schist, gp.mul( 0.85 ) ) );
+	// up on the mountains: scree, then bare rock
+	const mh = mountainHeight( xz );
+	const scree = schist.mul( mix( 0.8, 1.15, n3 ) );
+	a.assign( mix( a, scree, smoothstep( 90.0, 260.0, mh ) ) );
 	return a;
 
 } );
@@ -128,7 +146,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, cloudCoverage: cloudCoverageAt,
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, cloudTimeScale: 0.25,
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,
@@ -146,7 +164,6 @@ export const PLAINS = {
 
 	// you start on the trail looking up the French Valley
 	spawn: { pos: trailPointJS( 0 ), az: FORWARD_AZ + 6, eye: 1.62 },
-	walkRadius: WALK_RADIUS,
 
 	// a clear Patagonian atmosphere: long views, a far camera plane
 	atmosphere: { fogDensity: 0.000085, terrainFar: 1e6, far: 32000, skyRadius: 26000 },

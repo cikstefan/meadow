@@ -29,7 +29,7 @@ import { CUERNOS, PAINE_GRANDE, LAKE, polar } from './layout.js';
 import { cloudShadowAt } from './index.js';
 import { BIOME } from '../index.js';
 
-const R0 = 470, R1 = 16000, NR = 420, NA = 1440;
+const R0 = 40, R1 = 16000, NR = 520, NA = 1440;
 const HM_SIZE = 512, HM_EXT = 9500; // shadow heightmap: texels, half extent (m)
 
 const texURL = ( n ) => new URL( `../../assets/plains/${ n }.webp`, import.meta.url ).href;
@@ -266,17 +266,8 @@ function backdropMaterial( hmTex ) {
 		const nR = normalize( mix( select( useCliff, nCliff, nRock ), select( useCliff, nCliffD, nRockD ), dk.mul( 0.5 ) ) );
 		const N = normalize( mix( Ng, nR, rockK.mul( smoothstep( 22000.0, 4000.0, dist ) ) ) ).toVar();
 
-		// fall-line striations: the ribbed gullies that score Paine Grande's flanks,
-		// following the steepest descent, with a wandering spacing of ~15-40 m
-		const down = normalize( Ng.xz.add( vec2( 1e-4, 0 ) ) );
-		const acrossV = vec2( down.y.negate(), down.x );
-		const ac = dot( xz, acrossV ).add( vnoise( xz.div( 320.0 ) ).mul( 90.0 ) );
-		const alongH = h.div( 520.0 );
-		const rib = ( a ) => vnoise( vec2( a.div( 26.0 ), alongH ) ).mul( 0.65 ).add( vnoise( vec2( a.div( 9.0 ), alongH.mul( 2.3 ) ).add( vec2( 7, 3 ) ) ).mul( 0.35 ) );
-		const r0 = rib( ac ), r1 = rib( ac.add( 2.0 ) );
-		const ribK = smoothstep( 0.18, 0.5, slope ).mul( rockK ).mul( smoothstep( 14000.0, 2500.0, dist ) );
-		N.assign( normalize( N.add( vec3( acrossV.x, 0.0, acrossV.y ).mul( r1.sub( r0 ).div( 2.0 ).mul( - 22.0 ).mul( ribK ) ) ) ) );
-		const groove = smoothstep( 0.42, 0.25, r0 ); // bottom of a gully
+		// snow collects in the eroded gullies (concave relief from the mesh)
+		const groove = smoothstep( - 0.05, - 0.45, vK );
 
 		// --- snow and ice, controlled by U.snow (0 = bare rock .. 1 = deep winter)
 		const sAmt = U.snow;
@@ -319,7 +310,6 @@ function backdropMaterial( hmTex ) {
 		const relief = clamp( vK, - 1.0, 1.0 );
 		const reliefAO = mix( 0.55, 1.15, smoothstep( - 0.8, 0.6, relief ) ).mul( mix( 0.7, 1.05, relH.mul( rockK ).add( float( 1.0 ).sub( rockK ).mul( 0.6 ) ) ) );
 		albedo.mulAssign( select( id.greaterThan( 0.5 ), reliefAO, float( 1.0 ) ) );
-		albedo.mulAssign( mix( float( 1.0 ), mix( 0.72, 1.08, r0 ), ribK.mul( float( 1.0 ).sub( snowAmt ) ) ) );
 
 		// --- cast shadows: march the heightmap toward the light
 		const L = U.sunDir;

@@ -294,6 +294,29 @@ export class Builder {
 
 	}
 
+	// a single leaf folded along its midrib (two halves lifted by `fold`), base at o, along d
+	leaf( o, d, n, len, w, kind, seed, ao, hFrac, fold = 0.35 ) {
+
+		const ax = new THREE.Vector3().crossVectors( n, d ).normalize();
+		const nn = new THREE.Vector3().crossVectors( d, ax ).normalize();
+		const base = this.vertexCount;
+		const lift = nn.clone().multiplyScalar( w * 0.5 * fold );
+		const tip = o.clone().addScaledVector( d, len ).addScaledVector( nn, - len * 0.12 ); // the tip droops a little
+		const V = [
+			[ o.clone().addScaledVector( ax, - w / 2 ).add( lift ), 0, 1 ], [ o, 0.5, 1 ], [ o.clone().addScaledVector( ax, w / 2 ).add( lift ), 1, 1 ],
+			[ tip.clone().addScaledVector( ax, - w / 2 ).add( lift ), 0, 0 ], [ tip, 0.5, 0 ], [ tip.clone().addScaledVector( ax, w / 2 ).add( lift ), 1, 0 ],
+		];
+		for ( const [ p, u, v ] of V ) {
+
+			this.pos.push( p.x, p.y, p.z ); this.uv.push( u, v ); this.nrm.push( nn.x, nn.y, nn.z );
+			this.cardA.push( kind, seed, ao, hFrac );
+
+		}
+
+		this.idx.push( base, base + 1, base + 4, base, base + 4, base + 3, base + 1, base + 2, base + 5, base + 1, base + 5, base + 4 );
+
+	}
+
 	geometry( instanced = true ) {
 
 		const g = instanced ? new THREE.InstancedBufferGeometry() : new THREE.BufferGeometry();

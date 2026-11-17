@@ -6,6 +6,7 @@ import { Shrubs } from './shrubs.js';
 import { DeadTrees } from './deadtrees.js';
 import { buildSummitClouds } from './summitclouds.js';
 import { Carpet } from './carpet.js';
+import { Rocks } from './rocks.js';
 import { cloudFieldJS } from './index.js';
 import { U } from '../../tsl/uniforms.js';
 import { polar, FORWARD_AZ } from './layout.js';
@@ -25,6 +26,8 @@ export async function createPlainsExtras( { scene } ) {
 	caps.mesh.visible = false; // the volumetric layer replaces the billboard summit clouds
 	const carpet = new Carpet();
 	scene.add( carpet.mesh );
+	const rocks = new Rocks();
+	scene.add( rocks.group );
 	// first impression (once the sky has set the sun): start the drifting clouds so that the sun breaks through
 	// on the plain ahead while the surroundings stay dappled
 	const placeClouds = () => {
@@ -50,7 +53,7 @@ export async function createPlainsExtras( { scene } ) {
 
 
 	let first = true;
-	const systems = [ shrubs, trees, caps, carpet ];
+	const systems = [ shrubs, trees, caps, carpet, rocks ];
 	return {
 		backdrop, water, shrubs, trees, caps, carpet, systems,
 		update( renderer, camera, dt ) {

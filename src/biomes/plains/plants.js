@@ -48,7 +48,28 @@ function growNotro( r ) {
 
 	}
 
-	return { branches, leaves, bark: 0 };
+	// individual leaves for the close-up LOD: spiralling along the outer shoots,
+	// angled out from the twig and drooping a little (leathery, glossy)
+	const single = [];
+	for ( const b of branches ) {
+
+		if ( b.level < 2 ) continue;
+		for ( let d = b.len * 0.15; d < b.len; d += range( r, 0.05, 0.075 ) ) {
+
+			const q = branchAt( b, d / b.len );
+			const phi = single.length * 2.4;
+			const side = new V3().crossVectors( q.T, new V3( 0, 1, 0 ) );
+			if ( side.lengthSq() < 1e-4 ) side.set( 1, 0, 0 );
+			side.normalize().applyAxisAngle( q.T, phi );
+			const dir = q.T.clone().multiplyScalar( 0.55 ).addScaledVector( side, 0.8 ).add( new V3( 0, - 0.25 * r(), 0 ) ).normalize();
+			const n = new V3( 0, 1, 0 ).addScaledVector( side, 0.3 ).add( new V3( r() - 0.5, 0, r() - 0.5 ).multiplyScalar( 0.6 ) ).normalize();
+			single.push( { p: q.p.clone().addScaledVector( side, q.r ), d: dir, n, s: range( r, 0.09, 0.14 ), seed: r() } );
+
+		}
+
+	}
+
+	return { branches, leaves, single, bark: 0 };
 
 }
 
@@ -184,6 +205,27 @@ export function plantLODs( sp, seed ) {
 		}
 
 		const keep = sp.keep[ lod ], grow = 1 / Math.sqrt( keep );
+		// close up: real leaves (folded quads) + only the flower racemes as cards
+		const real = lod === 0 && pl.single;
+		if ( real ) for ( const l of pl.single ) {
+
+			const p = l.p.clone().multiplyScalar( 1 / H );
+			const out = l.p.clone().sub( cen ).multiplyScalar( 1 / rMax );
+			const shell = Math.min( 1, out.length() );
+			const ao = 0.3 + 0.7 * smooth( 0.15, 1.0, shell );
+			const radial = out.lengthSq() > 1e-6 ? out.clone().normalize() : new V3( 0, 1, 0 );
+			B.leaf( p, l.d, l.n, l.s / H, l.s * 0.42 / H, l.seed < 0.5 ? TILE.leaf : TILE.leaf2, l.seed, ao, p.y, 0.45 );
+			// leaf normal half-way to the canopy normal: glossy sparkle + soft volume
+			const nn = l.n.clone().lerp( radial.clone().add( new V3( 0, 0.4, 0 ) ).normalize(), 0.45 ).normalize();
+			const at = B.nrm.length - 18;
+			for ( let v = 0; v < 6; v ++ ) {
+
+				B.nrm[ at + v * 3 ] = nn.x; B.nrm[ at + v * 3 + 1 ] = nn.y; B.nrm[ at + v * 3 + 2 ] = nn.z;
+
+			}
+
+		}
+
 		for ( const l of pl.leaves ) {
 
 			if ( lr() > keep ) continue;
@@ -197,6 +239,7 @@ export function plantLODs( sp, seed ) {
 			const roll = new V3( lr() - 0.5, lr() - 0.5, lr() - 0.5 ).multiplyScalar( 1.4 );
 			const n = radial.clone().add( roll ).normalize();
 			const flower = sp.flower.length && p.y > 0.35 && shell > 0.5 && lr() < 0.7;
+			if ( real && ! flower ) continue; // leaves are real geometry at this LOD
 			const tiles = flower ? sp.flower : sp.leaf;
 			const tile = tiles[ ( lr() * tiles.length ) | 0 ];
 			// flower cards carry their tile + 100 so the bush's bloom can switch them to leaves

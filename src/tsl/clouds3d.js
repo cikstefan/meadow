@@ -109,31 +109,36 @@ const remap = ( v, a, b ) => clamp( v.sub( a ).div( max( b.sub( a ), 1e-4 ) ), 0
  */
 export function makeVolumetricClouds( coverage, o = {} ) {
 
-	const VOL = makeVolume();
-	const BASE = o.base ?? 1500, TOP = o.top ?? 3800, STEPS = o.steps ?? 40, LSTEPS = o.lightSteps ?? 4;
-	const SIGMA = 0.013; // extinction per metre at density 1
+	let VOL = null; // built on first use (only biomes with volumetric skies pay for it)
+	const vol = () => VOL || ( VOL = makeVolume() );
+	const BASE = o.base ?? 1500, TOP = o.top ?? 2700, STEPS = o.steps ?? 40, LSTEPS = o.lightSteps ?? 4;
+	const SIGMA = 0.011; // extinction per metre at density 1
 
+	// cloud density at a world point. Stratocumulus deck: wide flat-based cells
+	// (weather map), domed tops, shapes that rise and churn slowly (the noise
+	// drifts upward through the layer), wispy eroded undersides.
 	const density = ( p, cheap ) => {
 
 		const hf = clamp( p.y.sub( BASE ).div( TOP - BASE ), 0.0, 1.0 );
-		const cov = coverage( p.xz );
-		// cumulus profile: flat-ish bases, rounded tops that rise with coverage (towers in the storm)
-		const top = mix( 0.35, 1.0, cov );
-		const grad = smoothstep( 0.0, 0.08, hf ).mul( smoothstep( top, top.mul( 0.55 ), hf ) );
-		const wind = vec3( U.skyOffset.x, 0.0, U.skyOffset.y ).mul( 900.0 );
-		const q = p.add( wind ).add( vec3( 0.0, 0.0, 0.0 ) );
-		const shape = texture3D( VOL, q.div( 3400.0 ) ).r;
-		const base = remap( shape.mul( grad ), float( 1.0 ).sub( cov ), float( 1.0 ) ).mul( cov ).toVar();
+		const cov = coverage( p.xz ).toVar();
+		// drift with the weather map (same offset as the ground shadows) + slow convective churn
+		const q = p.sub( vec3( U.cloudOffset.x, 0.0, U.cloudOffset.y ) ).add( vec3( 0.0, U.cloudTime.mul( - 1.2 ), 0.0 ) );
+		// anisotropic sampling: wide cells, strong variation through the layer height
+		const shape = texture3D( vol(), q.mul( vec3( 1 / 2800, 1 / 1100, 1 / 2800 ) ) ).level( 0 ).r.toVar();
+		// flat bases, domed tops whose height follows the local shape + coverage
+		const topH = mix( 0.45, 1.0, shape.mul( 0.6 ).add( cov.mul( 0.4 ) ) );
+		const grad = smoothstep( 0.0, 0.1, hf ).mul( smoothstep( topH, topH.mul( 0.6 ), hf ) );
+		const base = remap( shape.mul( 0.55 ).add( cov.mul( 0.55 ) ).mul( grad ), float( 0.62 ), float( 1.0 ) ).toVar();
 		if ( ! cheap ) {
 
-			// erode the edges with fine billows (stronger near the base: wispy undersides)
-			const det = texture3D( VOL, q.div( 1500.0 ).add( vec3( 0.0, U.time.mul( 0.002 ), 0.0 ) ) ).b;
-			const er = mix( det, float( 1.0 ).sub( det ), smoothstep( 0.1, 0.6, hf ) ).mul( 0.42 );
+			// billowy erosion on top, wispy and torn near the base
+			const det = texture3D( vol(), q.mul( vec3( 1 / 650, 1 / 420, 1 / 650 ) ).add( vec3( 0.0, U.cloudTime.mul( 0.0004 ), 0.0 ) ) ).level( 0 ).g;
+			const er = mix( float( 1.0 ).sub( det ), det, smoothstep( 0.15, 0.55, hf ) ).mul( 0.35 );
 			base.assign( remap( base, er, float( 1.0 ) ) );
 
 		}
 
-		return base;
+		return base.mul( 1.6 );
 
 	};
 
@@ -144,17 +149,17 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 
 	};
 
-	return Fn( ( [ dir ] ) => {
+	const march = Fn( ( [ dir ] ) => {
 
 		const result = vec4( 0, 0, 0, 1 ).toVar();
 		If( dir.y.greaterThan( 0.012 ), () => {
 
 			const ro = cameraPosition;
 			const t0 = float( BASE ).sub( ro.y ).div( dir.y );
-			const t1 = min( float( TOP ).sub( ro.y ).div( dir.y ), t0.add( 9000.0 ) );
+			const t1 = min( float( TOP ).sub( ro.y ).div( dir.y ), t0.add( 7000.0 ) );
 			const dt = t1.sub( t0 ).div( STEPS );
 			// interleaved gradient noise: decorrelates the step positions per pixel
-			const ign = fract( fract( fract( dot( screenCoordinate.xy, vec2( 0.06711056, 0.00583715 ) ) ).mul( 52.9829189 ) ).add( fract( U.time.mul( 60.0 ) ).floor().add( U.time.mul( 37.0 ).floor().mul( 0.618034 ) ) ) );
+			const ign = fract( fract( dot( screenCoordinate.xy, vec2( 0.06711056, 0.00583715 ) ) ).mul( 52.9829189 ).add( U.time.mul( 60.0 ).floor().mul( 0.618034 ) ) );
 			const L = U.sunDir;
 			const mu = dot( dir, L );
 			const phase = mix( hg( mu, - 0.25 ), hg( mu, 0.65 ), 0.55 ).mul( 4.0 * Math.PI ).add( 0.15 );
@@ -175,8 +180,8 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 					const od = float( 0 ).toVar();
 					for ( let k = 0; k < LSTEPS; k ++ ) {
 
-						const ls = ( k + 0.5 ) * 160.0 * ( 1 + k * 0.6 );
-						od.addAssign( density( p.add( L.mul( ls ) ), true ).mul( 160.0 * ( 1 + k * 0.6 ) ) );
+						const ls = ( k + 0.5 ) * 90.0 * ( 1 + k * 0.7 );
+						od.addAssign( density( p.add( L.mul( ls ) ), true ).mul( 90.0 * ( 1 + k * 0.7 ) ) );
 
 					}
 
@@ -209,5 +214,8 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 		return result;
 
 	} );
+
+
+	return { march, density, BASE, TOP, SIGMA };
 
 }

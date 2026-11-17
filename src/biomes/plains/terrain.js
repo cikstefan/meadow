@@ -4,12 +4,14 @@
 // bit-exact value noise, so every system agrees on where the ground is.
 //
 //   height = rolling plains + trail bed + lake basin       (GPU and CPU)
-//          + mountain massifs beyond MOUNTAIN_FREE_RADIUS   (CPU only: backdrop)
+//          + eroded mountain relief (relief.js heightmap: CPU array + GPU texture),
+//            so you can walk anywhere, onto the slopes and up the valleys
 
 import { Fn, float, vec2, vec3, mix, smoothstep, clamp, max, min, abs, sqrt, sin, cos, dot, length, select } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import { TRAIL, LAKE, PAINE_GRANDE, CUERNOS, VALLEY_HEAD, FAR_HILLS, MOUNTAIN_FREE_RADIUS } from './layout.js';
+import { buildRelief, reliefJS, relief, reliefIdJS } from './relief.js';
 
 const D2R = Math.PI / 180;
 const ss = ( a, b, x ) => {
@@ -59,7 +61,10 @@ export const trailDist = Fn( ( [ xz ] ) => {
 
 	}
 
-	return abs( l.sub( c ) ).div( sqrt( dc.mul( dc ).add( 1.0 ) ) );
+	// the path pinches and widens along its length (worn wider where it's
+	// muddy or braided), so distances are measured in units of the local width
+	const wk = vnoise( vec2( a.div( 9.0 ), 3.3 ) ).mul( 1.1 ).add( vnoise( vec2( a.div( 3.1 ), 7.7 ) ).mul( 0.25 ) ).add( 0.6 );
+	return abs( l.sub( c ) ).div( sqrt( dc.mul( dc ).add( 1.0 ) ) ).div( wk );
 
 } );
 
@@ -75,7 +80,8 @@ export function trailDistJS( x, z ) {
 
 	}
 
-	return Math.abs( l - c ) / Math.sqrt( dc * dc + 1 );
+	const wk = vnoiseJS( a / 9, 3.3 ) * 1.1 + vnoiseJS( a / 3.1, 7.7 ) * 0.25 + 0.6;
+	return Math.abs( l - c ) / Math.sqrt( dc * dc + 1 ) / wk;
 
 }
 
@@ -153,17 +159,42 @@ const basinJS = ( h, s ) => {
 
 // ---------------------------------------------------------------- terrain (GPU + CPU)
 
+// the plains alone (no mountains)
+function baseHeightJS( x, z ) {
+
+	const h = rollingJS( x, z ) + bedJS( trailDistJS( x, z ) );
+	return basinJS( h, lakeSDFJS( x, z ) );
+
+}
+
+const ensureRelief = () => buildRelief( mountainJS );
+
 export const terrainHeight = Fn( ( [ xz ] ) => {
 
+	ensureRelief();
 	const h = rolling( xz ).add( bed( trailDist( xz ) ) );
-	return basin( h, lakeSDF( xz ) );
+	return basin( h, lakeSDF( xz ) ).add( relief( xz ) );
 
 } );
 
 export function terrainHeightJS( x, z ) {
 
-	const h = rollingJS( x, z ) + bedJS( trailDistJS( x, z ) );
-	return basinJS( h, lakeSDFJS( x, z ) );
+	ensureRelief();
+	return baseHeightJS( x, z ) + reliefJS( x, z );
+
+}
+
+// mountain height above the plains (eroded), for materials and masks
+export const mountainHeight = ( xz ) => {
+
+	ensureRelief();
+	return relief( xz );
+
+};
+export function mountainHeightJS( x, z ) {
+
+	ensureRelief();
+	return reliefJS( x, z );
 
 }
 
@@ -221,22 +252,18 @@ function crestDist( m, x, z ) {
 
 function massif( m, x, z, seed ) {
 
-	const { d, h, s } = crestDist( m, x, z );
-	// jagged crest line: the width wanders, so spurs and couloirs form
-	const wob = 0.75 + 0.5 * vnoiseJS( x / 900 + seed, z / 900 - seed );
+	// domain warp: crest lines and spurs wander instead of running ruler-straight
+	const wx = x + ( vnoiseJS( x / 1400 + seed, z / 1400 ) - 0.5 ) * 700, wz = z + ( vnoiseJS( x / 1400 - 3, z / 1400 + seed ) - 0.5 ) * 700;
+	const { d, h } = crestDist( m, wx, wz );
+	const wob = 0.8 + 0.4 * vnoiseJS( wx / 1100 + seed, wz / 1100 - seed );
 	const u = d / ( m.width * wob );
 	if ( u >= 1 ) return 0;
+	// uplift: steep massif profile; ridged multifractal relief (sharp aretes,
+	// several summits of different heights), strongest high up
 	const prof = Math.pow( 1 - u, m.steep );
-	const r = ridged( x / 520 + seed, z / 520 + seed * 0.7, 5 );
-	const jag = ( r - 0.45 ) * m.jag * h * Math.pow( 1 - u, 0.6 );
-	// erosion: couloirs and spurs running straight down the fall line (noise
-	// stretched across the crest), deepest on the mid slopes, plus finer rills
-	const wv = vnoiseJS( d / 380 + seed, s / 380 ) * 2.2;
-	const coul = 1 - Math.abs( vnoiseJS( s / 85 + wv + seed * 3, d / 900 ) * 2 - 1 );
-	const rill = 1 - Math.abs( vnoiseJS( s / 26 + wv * 2 + seed, d / 300 + 7 ) * 2 - 1 );
-	const mid = Math.sin( Math.PI * Math.min( 1, u * 1.15 ) );
-	const carve = ( coul * coul * 0.075 + rill * rill * 0.022 ) * h * mid;
-	return Math.max( 0, h * prof + jag * ( 0.35 + 0.65 * prof ) - carve + 0.04 * h * mid );
+	const rg = ridged( wx / 900 + seed, wz / 900 + seed * 0.7, 6 );
+	const peaks = 0.62 + 0.55 * rg;
+	return Math.max( 0, h * prof * peaks + ( rg - 0.5 ) * m.jag * h * 0.35 * Math.pow( 1 - u, 0.5 ) );
 
 }
 
@@ -266,7 +293,11 @@ function towersJS( x, z ) {
 		const talus = ( 1 - ss( 1.0, 2.2, d ) ) * 0.38;
 		const top = t.h * Math.max( wall, talus * ( 1 - wall ) + wall );
 		// the horn: a pointed cap on the summit plateau
-		const horn = t.horn * Math.pow( Math.max( 0, 1 - d / 0.75 ), 1.6 ) * ( 0.85 + 0.3 * vnoiseJS( dx / 60, dz / 60 ) );
+		// the dark cap: a broad, jagged crown of sedimentary rock (several teeth,
+		// not one cone), its own fractured profile
+		const capR = Math.max( 0, 1 - d / 0.95 );
+		const teeth = ridged( x / 110 + t.x * 0.01, z / 110, 4 );
+		const horn = t.horn * Math.pow( capR, 0.55 ) * ( 0.35 + 0.75 * teeth ) * ( 0.8 + 0.3 * vnoiseJS( dx / 90, dz / 90 ) );
 		const crag = ( ridged( x / 140, z / 140, 3 ) - 0.5 ) * 70 * wall;
 		m = Math.max( m, top + horn + crag );
 
@@ -276,38 +307,37 @@ function towersJS( x, z ) {
 
 }
 
-// the far landscape: base terrain + every massif (smooth union)
-export function landHeightJS( x, z ) {
+// analytic mountains (before erosion), metres above the plains
+function mountainJS( x, z ) {
 
-	const base = terrainHeightJS( x, z );
 	const r = Math.hypot( x, z );
 	const k = ss( MOUNTAIN_FREE_RADIUS, MOUNTAIN_FREE_RADIUS + 300, r );
-	if ( k <= 0 ) return base;
-	let m = 0;
-	m = Math.max( m, massif( PAINE_GRANDE, x, z, 3.1 ) );
-	m = Math.max( m, massif( CUERNOS, x, z, 7.7 ), towersJS( x, z ) );
-	m = Math.max( m, massif( VALLEY_HEAD, x, z, 11.3 ) );
-	m = Math.max( m, massif( FAR_HILLS, x, z, 19.9 ) );
-	// broad foothill rise toward Paine Grande and the valley head
-	return base + m * k;
+	if ( k <= 0 ) return 0;
+	const v = [ massif( PAINE_GRANDE, x, z, 3.1 ), Math.max( massif( CUERNOS, x, z, 7.7 ), towersJS( x, z ) ), massif( VALLEY_HEAD, x, z, 11.3 ), massif( FAR_HILLS, x, z, 19.9 ) ];
+	let m = 0, id = 0;
+	for ( let i = 0; i < 4; i ++ ) if ( v[ i ] > m ) {
+
+		m = v[ i ]; id = v[ i ] > 20 ? i + 1 : 0;
+
+	}
+
+	mountainJS.id = id;
+	return m * k;
+
+}
+
+// the whole landscape (plains + eroded mountains)
+export function landHeightJS( x, z ) {
+
+	return terrainHeightJS( x, z );
 
 }
 
 // which massif dominates at a point (for materials): 0 none, 1 Paine Grande, 2 Cuernos, 3 valley head, 4 hills
 export function massifIdJS( x, z ) {
 
-	const v = [ massif( PAINE_GRANDE, x, z, 3.1 ), Math.max( massif( CUERNOS, x, z, 7.7 ), towersJS( x, z ) ), massif( VALLEY_HEAD, x, z, 11.3 ), massif( FAR_HILLS, x, z, 19.9 ) ];
-	let id = 0, best = 20;
-	v.forEach( ( h, i ) => {
-
-		if ( h > best ) {
-
-			best = h; id = i + 1;
-
-		}
-
-	} );
-	return id;
+	ensureRelief();
+	return reliefIdJS( x, z );
 
 }
 
@@ -374,7 +404,9 @@ export const grassMask = Fn( ( [ xz ] ) => {
 	const trail = smoothstep( TRAIL.halfWidth * 0.85, TRAIL.halfWidth + TRAIL.verge, d );
 	const g = float( 1.0 ).sub( gravelPatch( xz ).mul( 0.75 ) );
 	const wet = smoothstep( - 2.0, 3.0, lakeSDF( xz ) );
-	return trail.mul( g ).mul( wet );
+	// grass thins out up the mountain slopes (scree and rock above)
+	const alp = smoothstep( 320.0, 70.0, mountainHeight( xz ) );
+	return trail.mul( g ).mul( wet ).mul( alp );
 
 } );
 

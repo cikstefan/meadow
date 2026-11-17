@@ -51,6 +51,23 @@ function growSnag( seed, tall ) {
 
 }
 
+// a narrow, young-ish snag that lost most of its limbs: a few irregular stubs
+function growPole( seed ) {
+
+	const r = rng( seed );
+	const H = range( r, 2.8, 5.0 ), R = range( r, 0.06, 0.1 );
+	const br = growTree( r, {
+		trunks: [ { p: new V3( 0, - 0.3, 0 ), d: new V3( range( r, - 0.2, 0.2 ), 1, range( r, - 0.2, 0.2 ) ), len: H, r: R } ], floor: - 0.35,
+		lv: [
+			{ segs: 9, bend: 0.25, swirl: 0.3, taper: 0.75, flare: 0.6, curveV: 0.3 },
+			{ dens: 1.4, range: [ 0.25, 0.95 ], down: [ 0.9, 0.5 ], len: [ 0.15, 0.4 ], segs: 4, bend: 0.6, swirl: 0.8, curveV: 0.6, rPow: 1.2 },
+			{ dens: 3, range: [ 0.3, 1 ], down: [ 0.8, 0.4 ], len: [ 0.3, 0.5 ], segs: 3, minLen: 0.06, bend: 0.5, swirl: 0.6 },
+		],
+	} );
+	return breakLimbs( br, r, [ 0.45, 0.6, 0.5 ], [ 0.45, 0.9 ] );
+
+}
+
 function growLog( seed ) {
 
 	const r = rng( seed );
@@ -121,11 +138,12 @@ function woodGeometry( branches, detail, seed ) {
 
 // variant table: grower, share of instances, scale range, placement
 const VARIANTS = [
-	{ grow: ( s ) => growSnag( s, true ), share: 0.26, scale: [ 0.8, 1.3 ], upright: true },
-	{ grow: ( s ) => growSnag( s + 1, true ), share: 0.16, scale: [ 0.75, 1.2 ], upright: true },
-	{ grow: ( s ) => growSnag( s + 2, false ), share: 0.3, scale: [ 0.7, 1.3 ], upright: true },
+	{ grow: ( s ) => growSnag( s, true ), share: 0.2, scale: [ 0.65, 1.5 ], upright: true }, // big old snags
+	{ grow: ( s ) => growSnag( s + 1, true ), share: 0.12, scale: [ 0.6, 1.35 ], upright: true },
+	{ grow: ( s ) => growSnag( s + 2, false ), share: 0.2, scale: [ 0.6, 1.4 ], upright: true }, // short, branchy
+	{ grow: ( s ) => growPole( s + 3 ), share: 0.14, scale: [ 0.6, 1.3 ], upright: true }, // narrow, few stubs
 	{ grow: ( s ) => growLog( s + 4 ), share: 0.16, scale: [ 0.8, 1.3 ], upright: false, near: 600 },
-	{ grow: ( s ) => growTangle( s + 5 ), share: 0.12, scale: [ 0.8, 1.5 ], upright: false, near: 350 },
+	{ grow: ( s ) => growTangle( s + 5 ), share: 0.2, scale: [ 0.6, 1.9 ], upright: false, near: 450 }, // wide dead shrubs
 ];
 
 function scatter( density = 1 ) {

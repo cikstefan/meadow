@@ -201,18 +201,23 @@ export class Grass {
 			// the rest a short green sward between them
 			// which clumps grow into tall tussocks: drifts of them at several scales
 			// (not a per-clump coin toss, which reads as camouflage dots from above)
-			const tf = G.tussock ? vnoise( xz.div( 23.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.45 ).add( vnoise( xz.div( 7.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( cH.mul( 0.35 ) ) : cH;
-			const tus = smoothstep( 0.52, 0.66, tf ).mul( G.tussock || 0 );
+			// (smooth fields at three scales; the clump hash only nudges it)
+			const tf = G.tussock ? vnoise( xz.div( 31.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.5 ).add( vnoise( xz.div( 9.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.32 ) ).add( vnoise( xz.div( 2.6 ).add( vec2( 1.1, 6.6 ) ) ).mul( 0.1 ) ).add( cH.mul( 0.08 ) ) : cH;
+			const tus = smoothstep( 0.36, 0.7, tf ).mul( G.tussock || 0 );
 			const dry = G.tussock ? max( dry0.mul( mix( 0.4, 1.0, tus ) ), tus.mul( 0.9 ) ) : dry0;
 			const h = mix( G.hMin, G.hMax, tall )
-				.mul( mix( 1.0, mix( 0.32, 1.35, tus ), G.tussock || 0 ) )
-				.mul( mix( 0.72, 1.18, cH ) )
+				.mul( mix( 1.0, mix( 0.5, 1.3, tus ), G.tussock || 0 ) )
+				// height varies smoothly across the plain (a gentle swell, not per clump)
+				.mul( G.tussock ? mix( 0.72, 1.3, vnoise( xz.div( 14.0 ).add( vec2( 3.7, 9.1 ) ) ) ).mul( mix( 0.94, 1.06, cH ) ) : mix( 0.72, 1.18, cH ) )
 				.mul( mix( 0.7, 1.15, b0 ) )
 				// blades at the clump centre are taller (tussock dome)
 				.mul( mix( 0.78, 1.0, clamp( float( 1.0 ).sub( dC.mul( 1.1 ) ), 0, 1 ) ) )
 				.mul( u.heightScale )
 				// biome mask (e.g. a trail through the plains)
-				.mul( BIOME.grassMask ? BIOME.grassMask( xz ) : float( 1.0 ) );
+				.mul( BIOME.grassMask ? BIOME.grassMask( xz ) : float( 1.0 ) )
+				// tussock grassland: between the tussocks the blades thin out gradually
+				// to the mossy soil (fewer AND shorter), instead of sad lone strands
+				.mul( G.tussock ? select( hash2i( gx.add( 9 ), gz.add( 3 ) ).lessThan( smoothstep( 0.1, 0.55, tus ).mul( 1.15 ) ), smoothstep( 0.0, 0.45, tus ).mul( 0.6 ).add( 0.4 ), float( 0.0 ) ) : float( 1.0 ) );
 
 			const w = mix( G.wMin, G.wMax, cW ).mul( mix( 0.7, 1.3, b1 ) ).mul( mix( 1.0, 0.8, dry ) ).mul( u.widthScale ).mul( u.widthMul )
 				// short sward between tussocks: fine blades, not leaf-like slivers

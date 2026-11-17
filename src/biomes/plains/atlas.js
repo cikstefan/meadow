@@ -16,7 +16,7 @@ import * as THREE from 'three/webgpu';
 import { rng } from './grow.js';
 
 const COLS = 8, ROWS = 2, T = 256;
-export const TILE = { notro: 0, notro2: 1, notroFl: 2, notroFl2: 3, cala: 4, calaFl: 5, negra: 6, barrosa: 7, twigs: 8, notroYoung: 9 };
+export const TILE = { notro: 0, notro2: 1, notroFl: 2, notroFl2: 3, cala: 4, calaFl: 5, negra: 6, barrosa: 7, twigs: 8, notroYoung: 9, leaf: 10, leaf2: 11 };
 
 const SRC = {
 	ovs: new URL( '../../assets/plains/card_ovs.webp', import.meta.url ).href, // 4 elliptic glossy leaves (512 px each)
@@ -165,6 +165,11 @@ function tile( g, i, I ) {
 		case TILE.notro:
 		case TILE.notro2:
 			for ( let k = 0; k < ( i === TILE.notro ? 4 : 5 ); k ++ ) leafSpray( g, r, I.ovs, 4, notro );
+			break;
+		case TILE.leaf:
+		case TILE.leaf2:
+			// one whole scanned leaf, stalk at the bottom centre (individual 3D leaves)
+			scanLeaf( g, I.ovs, i === TILE.leaf ? 0 : 3, 4, T / 2, T, T * 1.0, - Math.PI / 2, 1.0, i === TILE.leaf ? 'brightness(0.5) saturate(1.1) hue-rotate(10deg) contrast(1.15)' : 'brightness(0.6) saturate(1.05) hue-rotate(4deg) contrast(1.1)' );
 			break;
 		case TILE.notroYoung:
 			for ( let k = 0; k < 4; k ++ ) leafSpray( g, r, I.ovs, 4, { ...notro, filter: ( r ) => `brightness(${ 0.8 + r() * 0.2 }) saturate(1.15) hue-rotate(${ - 14 + r() * 10 }deg)` } );
