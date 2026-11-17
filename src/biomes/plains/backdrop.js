@@ -262,8 +262,8 @@ function backdropMaterial( hmTex ) {
 		const cuBase = mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.85 ) ), scree, talus.mul( 0.6 ).add( smoothstep( 0.3, 0.5, slope ).mul( 0.4 ) ) );
 		const cuBody = mix( cuBase, granite, smoothstep( 300.0, 480.0, h ).mul( smoothstep( 0.3, 0.55, slope ).mul( 0.7 ).add( 0.3 ) ) );
 		const cu = mix( cuBody, capCol, smoothstep( capLine.sub( 20.0 ), capLine.add( 20.0 ), h ) );
-		const vh = mix( mix( forest, darkRock, 0.5 ), granite.mul( 1.08 ), smoothstep( 300.0, 700.0, h ) );
-		const hl = mix( canopy, mix( forest, darkRock, 0.4 ), smoothstep( 120.0, 500.0, h ).mul( 0.7 ) );
+		const vh = mix( mix( flank, darkRock, rockiness ), granite.mul( 1.08 ), smoothstep( 300.0, 700.0, h ) );
+		const hl = mix( flank, darkRock, rockiness.mul( 0.85 ) );
 
 		const albedo = canopy.toVar();
 		albedo.assign( select( isPG, pg, albedo ) );
