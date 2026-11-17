@@ -359,7 +359,7 @@ function backdropMaterial( hmTex ) {
 		// snow in shade glows faintly blue (skylight scattered through the snowpack)
 		col.addAssign( U.skyAmb.mul( vec3( 0.55, 0.8, 1.35 ) ).mul( snowAmt.mul( float( 1.0 ).sub( diff.mul( sunVis ) ) ).mul( 0.3 ) ) );
 		// aerial perspective: distant rock goes cool blue-grey before the fog proper
-		const air = float( 1.0 ).sub( exp( dist.div( - 16000.0 ) ) ).mul( 0.25 );
+		const air = float( 1.0 ).sub( exp( dist.div( - 22000.0 ) ) ).mul( 0.14 );
 		const airCol = mix( U.horizon, U.skyAmb.mul( 2.5 ), 0.5 );
 		return applyFog( mix( col, airCol, air ), P );
 

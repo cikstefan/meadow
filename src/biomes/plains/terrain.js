@@ -268,7 +268,7 @@ function massif( m, x, z, seed ) {
 	const prof = Math.pow( 1 - u, m.steep );
 	const rg = ridged( wx / 1100 + seed, wz / 1100 + seed * 0.7, 6 );
 	// broad massive faces; the ridged relief mostly sharpens the upper ridges
-	const peaks = 0.8 + 0.3 * rg * ( 0.4 + 0.6 * prof );
+	const peaks = 0.9 + 0.16 * rg * ( 0.4 + 0.6 * prof );
 	return Math.max( 0, h * prof * peaks + ( rg - 0.5 ) * m.jag * h * 0.22 * Math.pow( 1 - u, 1.2 ) );
 
 }

@@ -49,8 +49,8 @@ export const PAINE_GRANDE = {
 		[ ...polar( 8, 2950 ), 900 ],
 		[ ...polar( 16, 3700 ), 650 ],
 	],
-	width: 1050, // horizontal distance from crest to the foot of the slope
-	steep: 1.25, // profile exponent (>1 = concave, cliffy upper walls)
+	width: 1450, // horizontal distance from crest to the foot of the slope
+	steep: 1.1, // profile exponent (>1 = concave, cliffy upper walls)
 	jag: 0.16, // relative amplitude of the ridged (jagged) detail
 	glacier: { az: - 52, d: 1900, size: 520 }, // Glaciar Francés hanging below the summit
 };

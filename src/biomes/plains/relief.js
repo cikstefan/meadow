@@ -136,7 +136,9 @@ export function buildRelief( m ) {
 	const orig = new Float32Array( h );
 	erode( h, N, 220000, rng( 90210 ) );
 	// hard rock (the granite walls) keeps its shape: blend the uneroded height back
-	for ( let k = 0; k < N * N; k ++ ) if ( hard[ k ] > 0 ) h[ k ] += ( orig[ k ] - h[ k ] ) * hard[ k ] * 0.85;
+	// keep 55% of the carving everywhere (gullies, not knife-edge fins), and hard rock
+	// (the granite walls) keeps its shape almost entirely
+	for ( let k = 0; k < N * N; k ++ ) h[ k ] = orig[ k ] + ( h[ k ] - orig[ k ] ) * 0.55 * ( 1 - hard[ k ] * 0.85 );
 	// thermal smoothing of single-cell spikes left by the droplets (one gentle pass)
 	const o = new Float32Array( h );
 	for ( let j = 1; j < N - 1; j ++ ) for ( let i = 1; i < N - 1; i ++ ) {

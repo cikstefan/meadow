@@ -191,7 +191,7 @@ export const PLAINS = {
 	spawn: { pos: trailPointJS( 0 ), az: FORWARD_AZ + 6, eye: 1.62 },
 
 	// a clear Patagonian atmosphere: long views, a far camera plane
-	atmosphere: { fogDensity: 0.000085, terrainFar: 1e6, far: 32000, skyRadius: 26000 },
+	atmosphere: { fogDensity: 0.000042, terrainFar: 1e6, far: 32000, skyRadius: 26000 },
 
 	// coirón (golden tussock grass) mixed with fresh spring green
 	grass: {

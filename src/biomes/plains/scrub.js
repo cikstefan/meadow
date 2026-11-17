@@ -23,7 +23,7 @@ import { U, shadeFoliage } from '../../tsl/world.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS, gravelPatchJS } from './terrain.js';
 import { cloudShadowAt } from './index.js';
 import { TILE } from './atlas.js';
-import { rng } from './grow.js';
+import { rng, Builder } from './grow.js';
 
 const TILE_M = 32, RADIUS = 240, SPACING = 1.55;
 const LOD_DIST = [ 34, 110 ];
@@ -110,6 +110,33 @@ function moundGeometry( seed, detail, cards ) {
 
 }
 
+// 3D flower clusters on the upper half of a unit dome (notro mounds up close)
+function flowerGeometry( seed, clusters ) {
+
+	const r = rng( seed );
+	const B = new Builder();
+	for ( let c = 0; c < clusters; c ++ ) {
+
+		const th = r() * Math.PI * 2, ph = Math.acos( 1 - r() * 0.95 );
+		const n = new THREE.Vector3( Math.sin( ph ) * Math.cos( th ), Math.cos( ph ), Math.sin( ph ) * Math.sin( th ) );
+		const up = n.clone().add( new THREE.Vector3( 0, 0.8, 0 ) ).normalize();
+		B.flowerCluster( n.clone().multiplyScalar( 0.98 ), up, r, 1.7, 3, r(), 1, n.y, 10 + ( r() * 6 | 0 ) );
+
+	}
+
+	const g = new THREE.InstancedBufferGeometry();
+	g.setAttribute( 'position', new THREE.Float32BufferAttribute( B.pos, 3 ) );
+	g.setAttribute( 'normal', new THREE.Float32BufferAttribute( B.nrm, 3 ) );
+	g.setAttribute( 'uv', new THREE.Float32BufferAttribute( B.uv, 2 ) );
+	// kind 3 = flower tube, 4 = style; y = height on the dome; z = cluster seed (bloom)
+	const kind = [];
+	for ( let i = 0; i < B.cardA.length; i += 4 ) kind.push( B.cardA[ i ] === 3 ? 3 : 4, B.cardA[ i + 3 ], B.cardA[ i + 1 ] );
+	g.setAttribute( 'kind', new THREE.Float32BufferAttribute( kind, 3 ) );
+	g.setIndex( B.idx );
+	return g;
+
+}
+
 // --- placement ---------------------------------------------------------------------
 function tileInstances( tx, tz ) {
 
@@ -158,9 +185,9 @@ export class Scrub {
 		this.lastTilePos = new THREE.Vector3( 1e9, 0, 0 );
 		const mat = this.material();
 		const LODS = [ { detail: 2, cards: 120, cap: 6000 }, { detail: 1, cards: 30, cap: 26000 }, { detail: 0, cards: 0, cap: 70000 } ];
-		this.meshes = LODS.map( ( L, l ) => {
+		this.meshes = [ ...LODS, { flowers: 26, cap: 1500 } ].map( ( L, l ) => {
 
-			const g = moundGeometry( 4242 + l, L.detail, L.cards );
+			const g = L.flowers ? flowerGeometry( 777, L.flowers ) : moundGeometry( 4242 + l, L.detail, L.cards );
 			const a = new THREE.InstancedBufferAttribute( new Float32Array( L.cap * 4 ), 4 );
 			const b = new THREE.InstancedBufferAttribute( new Float32Array( L.cap * 4 ), 4 );
 			a.setUsage( THREE.DynamicDrawUsage ); b.setUsage( THREE.DynamicDrawUsage );
@@ -214,7 +241,9 @@ export class Scrub {
 			const hk = clamp( p.y, 0.0, 1.2 );
 			const flut = sin( U.time.mul( mix( 6.0, 11.0, K.z ) ).add( K.z.mul( 50.0 ) ) ).mul( select( K.x.greaterThan( 0.5 ), float( 0.04 ), float( 0.0 ) ) );
 			const disp = W.mul( U.windStrength.mul( gust ).mul( hk ).mul( B.x ).mul( 0.03 ) ).add( normalize( rot( n ) ).mul( flut.mul( U.windStrength ).mul( B.x ) ) );
-			const w = A.xyz.add( local ).add( disp );
+			// 3D flowers only on notro mounds, only the clusters within the bush's bloom
+			const tubeOff = K.x.greaterThan( 2.5 ).and( B.z.lessThan( 3.5 ).or( K.z.greaterThan( mix( 0.35, 0.8, B.w ) ) ) );
+			const w = select( tubeOff, A.xyz, A.xyz.add( local ).add( disp ) );
 			vW.assign( w );
 			vN.assign( normalize( rot( n ).mul( vec3( 1.0 / 1.0, 1.0, 1.0 ) ) ) );
 			vK.assign( vec4( K.x, K.y, K.z, B.z ) );
@@ -223,7 +252,8 @@ export class Scrub {
 
 		} )();
 
-		const isCard = vK.x.greaterThan( 0.5 );
+		const isTube = vK.x.greaterThan( 2.5 );
+		const isCard = vK.x.greaterThan( 0.5 ).and( isTube.not() );
 		const sp = vK.w;
 		// flower cards: top cards of flowering species, more of them on some bushes
 		const flTile = spfs( sp, SCRUB.map( ( s ) => s.flower ) );
@@ -232,7 +262,7 @@ export class Scrub {
 		const tile = select( useFl, flTile, spfs( sp, SCRUB.map( ( s ) => s.leaf ) ) );
 		const tuv = vec2( tile.mod( cols ).add( uv().x.clamp( 0.004, 0.996 ) ), tile.div( cols ).floor().add( uv().y.clamp( 0.004, 0.996 ) ) ).div( vec2( cols, rows ) );
 		const smp = texture( tex, tuv );
-		mat.opacityNode = select( isCard, smp.a.mul( float( 1.0 ).add( smoothstep( 5.0, 60.0, vI.z ).mul( 1.6 ) ) ), float( 1.0 ) );
+		mat.opacityNode = select( isCard.and( isTube.not() ), smp.a.mul( float( 1.0 ).add( smoothstep( 5.0, 60.0, vI.z ).mul( 1.6 ) ) ), float( 1.0 ) );
 
 		mat.colorNode = Fn( () => {
 
@@ -246,14 +276,15 @@ export class Scrub {
 			const isNotro = sp.greaterThan( 3.5 );
 			const redDots = smoothstep( 0.7, 0.8, vnoise( P.xz.mul( 22.0 ).add( P.y.mul( 17.0 ) ) ) ).mul( smoothstep( 0.2, 0.7, vK.y ) ).mul( select( isNotro, float( 1.0 ), float( 0.0 ) ) ).mul( mix( 0.4, 1.0, vI.y ) );
 			const bodyCol = mix( body, vec3( 0.32, 0.03, 0.015 ), redDots.mul( 0.5 ) );
-			const albedo = select( isCard, smp.rgb.mul( tint ), bodyCol ).toVar();
+			const tubeCol = select( vK.x.greaterThan( 3.5 ), vec3( 0.55, 0.42, 0.12 ), mix( vec3( 0.45, 0.02, 0.012 ), vec3( 0.78, 0.08, 0.03 ), vK.z ) );
+			const albedo = select( isTube, tubeCol, select( isCard, smp.rgb.mul( tint ), bodyCol ) ).toVar();
 			const ao = select( isCard, mix( 0.55, 1.0, smoothstep( - 0.1, 0.7, vK.y ) ), mix( 0.3, 0.85, smoothstep( - 0.1, 0.8, vK.y ) ) );
 			const N = normalize( vN ).mul( select( isCard, faceDirection.mul( 0.3 ).add( 0.7 ), float( 1.0 ) ) );
-			const isRed = select( useFl, float( 1.0 ), redDots );
+			const isRed = select( useFl.or( isTube ), float( 1.0 ), redDots );
 			// night: the notro flowers glow softly, fading with distance
 			const far = exp( vI.z.div( - 160.0 ) ).mul( 0.85 ).add( 0.15 );
 			const wave = sin( P.x.mul( 0.045 ).add( P.z.mul( 0.03 ) ).sub( U.time.mul( 0.55 ) ) ).mul( 0.3 ).add( 0.7 );
-			const glow = smoothstep( 0.1, 0.35, albedo.r.sub( albedo.g.mul( 1.5 ) ) ).mul( isRed ).mul( select( isNotro, float( 1.0 ), float( 0.0 ) ) );
+			const glow = select( isTube, float( 1.0 ), smoothstep( 0.1, 0.35, albedo.r.sub( albedo.g.mul( 1.5 ) ) ) ).mul( isRed ).mul( select( isNotro, float( 1.0 ), float( 0.0 ) ) );
 			const emit = vec3( 1.0, 0.16, 0.12 ).mul( glow.mul( U.night ).mul( U.glow ).mul( far ).mul( wave ).mul( 0.13 ) );
 			return shadeFoliage( albedo, N, P, ao, vI.x, select( isCard, float( 0.5 ), float( 0.25 ) ), float( 0.1 ), float( 0.45 ), emit );
 
@@ -298,12 +329,20 @@ export class Scrub {
 		this.lastPos.copy( cp );
 		const L0 = LOD_DIST[ 0 ] ** 2, L1 = LOD_DIST[ 1 ] ** 2, R2 = RADIUS * RADIUS;
 		const A = this.meshes.map( ( m ) => m.geometry.attributes.iA.array ), B = this.meshes.map( ( m ) => m.geometry.attributes.iB.array );
-		const n = [ 0, 0, 0 ];
+		const n = [ 0, 0, 0, 0 ];
 		for ( const d of this.tiles.values() ) for ( let i = 0; i < d.length; i += 8 ) {
 
 			const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z, r2 = dx * dx + dz * dz;
 			if ( r2 > R2 ) continue;
 			const l = r2 < L0 ? 0 : r2 < L1 ? 1 : 2;
+			if ( d[ i + 6 ] > 3.5 && r2 < 625 && n[ 3 ] * 4 < A[ 3 ].length ) {
+
+				const k = ( n[ 3 ] ++ ) * 4;
+				A[ 3 ][ k ] = d[ i ]; A[ 3 ][ k + 1 ] = d[ i + 1 ]; A[ 3 ][ k + 2 ] = d[ i + 2 ]; A[ 3 ][ k + 3 ] = d[ i + 3 ];
+				B[ 3 ][ k ] = d[ i + 4 ]; B[ 3 ][ k + 1 ] = d[ i + 5 ]; B[ 3 ][ k + 2 ] = d[ i + 6 ]; B[ 3 ][ k + 3 ] = d[ i + 7 ];
+
+			}
+
 			if ( n[ l ] * 4 >= A[ l ].length ) continue;
 			const k = ( n[ l ] ++ ) * 4;
 			A[ l ][ k ] = d[ i ]; A[ l ][ k + 1 ] = d[ i + 1 ]; A[ l ][ k + 2 ] = d[ i + 2 ]; A[ l ][ k + 3 ] = d[ i + 3 ];
