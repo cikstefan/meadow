@@ -12,14 +12,14 @@ export function scrubFieldsJS( x, z ) {
 	const notro = vnoiseJS( x / 70 + 11.3, z / 70 + 2.9 );
 	const silver = vnoiseJS( x / 38 + 5.5, z / 38 + 13.1 );
 	const green = vnoiseJS( x / 52 + 21.7, z / 52 + 4.4 );
-	return { cover: Math.max( 0, Math.min( 1, ( c - 0.3 ) / 0.45 ) ) * 0.72, notro, silver, green };
+	return { cover: Math.max( 0, Math.min( 1, ( c - 0.24 ) / 0.42 ) ) * 0.88, notro, silver, green };
 
 }
 export const scrubFieldsTSL = ( xz ) => {
 
 	const c = vnoise( xz.div( 45 ).add( vec2( 3.1, 7.3 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 13 ).add( vec2( 1.7, 9.2 ) ) ).mul( 0.4 ) );
 	return {
-		cover: clamp( c.sub( 0.3 ).div( 0.45 ), 0.0, 1.0 ).mul( 0.72 ),
+		cover: clamp( c.sub( 0.24 ).div( 0.42 ), 0.0, 1.0 ).mul( 0.88 ),
 		notro: vnoise( xz.div( 70 ).add( vec2( 11.3, 2.9 ) ) ),
 		silver: vnoise( xz.div( 38 ).add( vec2( 5.5, 13.1 ) ) ),
 		green: vnoise( xz.div( 52 ).add( vec2( 21.7, 4.4 ) ) ),
