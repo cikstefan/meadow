@@ -43,7 +43,8 @@ export const U = {
 	cloudCover: uniform( 0.5 ),
 	cloudDark: uniform( 0.45 ),
 	cloudSpeed: uniform( 4.0 ),
-	cloudTime: uniform( 0 ), // seconds on the cloud clock (shape evolution)
+	cloudTime: uniform( 0 ),
+	shadowShift: uniform( new THREE.Vector2() ), // sun.xz / max(sun.y, floor): cloud-shadow projection per metre of height // seconds on the cloud clock (shape evolution)
 
 	dry: uniform( 0 ), // amount of dry straw patches (0 = lush everywhere)
 	night: uniform( 0 ), // 0 day .. 1 full night

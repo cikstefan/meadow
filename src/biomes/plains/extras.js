@@ -8,7 +8,7 @@ import { buildSummitClouds } from './summitclouds.js';
 import { Carpet } from './carpet.js';
 import { Rocks } from './rocks.js';
 import { Scrub } from './scrub.js';
-import { cloudFieldJS } from './index.js';
+import { cloudFieldJS, cloudShadowCompute, csCenter, CS_N, CS_EXT } from './index.js';
 import { U } from '../../tsl/uniforms.js';
 import { polar, FORWARD_AZ } from './layout.js';
 
@@ -35,24 +35,31 @@ export async function createPlainsExtras( { scene } ) {
 	// on the plain ahead while the surroundings stay dappled
 	const placeClouds = () => {
 
-		const ahead = [ polar( FORWARD_AZ, 0 ), polar( FORWARD_AZ, 40 ), polar( FORWARD_AZ, 120 ) ];
+		// sun on the trail just ahead, cloud shadows already drifting across the plain
+		// beyond and around (dappled light from the first frame)
+		const near = polar( FORWARD_AZ, 30 );
+		const ring = [ polar( FORWARD_AZ, 220 ), polar( FORWARD_AZ + 50, 160 ), polar( FORWARD_AZ - 45, 180 ), polar( FORWARD_AZ, 450 ) ];
 		const off = new U.cloudOffset.value.constructor();
-		let best = - 1, bestK = 0;
-		for ( let k = 0; k < 400; k ++ ) {
+		const cover = U.cloudCover.value;
+		let best = - 1e9, bestK = 0;
+		for ( let k = 0; k < 600; k ++ ) {
 
-			off.copy( U.windDir.value ).multiplyScalar( k * 23 );
-			const lit = Math.min( ...ahead.map( ( [ x, z ] ) => cloudFieldJS( x, z, 0, off ) ) );
-			if ( lit > best ) {
+			off.copy( U.windDir.value ).multiplyScalar( k * 19 );
+			const litNear = cloudFieldJS( near[ 0 ], near[ 1 ], 0, off ) - cover;
+			const shaded = ring.filter( ( [ x, z ] ) => cloudFieldJS( x, z, 0, off ) < cover - 0.03 ).length;
+			const score = Math.min( 0.15, litNear ) * 4 + ( shaded >= 1 && shaded <= 3 ? 1 : 0 ) + shaded * 0.1;
+			if ( score > best ) {
 
-				best = lit; bestK = k;
+				best = score; bestK = k;
 
 			}
 
 		}
 
-		U.cloudOffset.value.copy( U.windDir.value ).multiplyScalar( bestK * 23 );
+		U.cloudOffset.value.copy( U.windDir.value ).multiplyScalar( bestK * 19 );
 
 	};
+
 
 
 	let first = true;
@@ -68,6 +75,12 @@ export async function createPlainsExtras( { scene } ) {
 
 			}
 
+			const sd = U.trueSunDir.value, sy = Math.max( sd.y, 0.3 );
+			U.shadowShift.value.set( sd.x / sy, sd.z / sy );
+			// cloud shadow map around the camera (snapped to whole texels: no swimming)
+			const texel = CS_EXT * 2 / CS_N;
+			csCenter.value.set( Math.round( camera.position.x / texel ) * texel, Math.round( camera.position.z / texel ) * texel );
+			renderer.compute( cloudShadowCompute );
 			for ( const s of systems ) s.update( renderer, camera, dt );
 
 		},

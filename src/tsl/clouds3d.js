@@ -82,7 +82,7 @@ function makeVolume() {
 		const pw = Math.min( 1, Math.max( 0, ( pn - ( wf - 1 ) ) / ( 1 - ( wf - 1 ) ) ) );
 		const dw = w2 * 0.5 + w3 * 0.35 + worley( u * 32, v * 32, w * 32, 32 ) * 0.15;
 		const k = ( ( z * S + y ) * S + x ) * 4;
-		data[ k ] = Math.round( Math.min( 1, Math.max( 0, ( pw - 0.25 ) * 1.6 ) ) * 255 );
+		data[ k ] = Math.round( Math.min( 1, Math.max( 0, pw ) ) * 255 ); // full range: coverage decides where clouds are, the shape only sculpts them
 		data[ k + 1 ] = Math.round( dw * 255 );
 		data[ k + 2 ] = Math.round( wf * 255 );
 		data[ k + 3 ] = 255;
@@ -124,16 +124,16 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 		const hf = clamp( p.y.sub( BASE ).div( TOP - BASE ), 0.0, 1.0 );
 		const cov = coverage( p.xz ).toVar();
 		const q = p.sub( vec3( U.cloudOffset.x, 0.0, U.cloudOffset.y ) ).add( vec3( 0.0, U.cloudTime.mul( - 1.0 ), 0.0 ) );
-		const type = texture3D( vol(), vec3( q.x.div( 26000.0 ), 0.37, q.z.div( 26000.0 ) ) ).level( 0 ).b;
+		const type = texture3D( vol(), fract( vec3( q.x.div( 26000.0 ), 0.37, q.z.div( 26000.0 ) ) ) ).level( 0 ).b;
 		const ctype = smoothstep( 0.35, 0.75, type );
 		// height profiles: stratus 0..0.3 of the layer, cumulus 0..~1 (rounded top)
 		const topH = mix( 0.32, 1.0, ctype );
 		const profile = smoothstep( 0.0, 0.07, hf ).mul( smoothstep( topH, topH.mul( mix( 0.55, 0.35, ctype ) ), hf ) );
-		const shape = texture3D( vol(), q.mul( vec3( 1 / 4600, 1 / 1500, 1 / 4600 ) ) ).level( 0 ).r.toVar();
+		const shape = texture3D( vol(), fract( q.mul( vec3( 1 / 4600, 1 / 1500, 1 / 4600 ) ) ) ).level( 0 ).r.toVar();
 		const base = remap( shape.mul( profile ), float( 1.0 ).sub( cov.mul( 0.92 ) ), float( 1.0 ) ).mul( cov ).toVar();
 		if ( ! cheap ) {
 
-			const det = texture3D( vol(), q.mul( vec3( 1 / 420, 1 / 300, 1 / 420 ) ).add( vec3( 0.0, U.cloudTime.mul( 0.0006 ), 0.0 ) ) ).level( 0 ).g;
+			const det = texture3D( vol(), fract( q.mul( vec3( 1 / 420, 1 / 300, 1 / 420 ) ).add( vec3( 0.0, U.cloudTime.mul( 0.0006 ), 0.0 ) ) ) ).level( 0 ).g;
 			// billowy (inverted) on the tops, wispy toward the base
 			const dn = mix( det, float( 1.0 ).sub( det ), smoothstep( 0.1, 0.45, hf ) );
 			base.assign( remap( base, dn.mul( 0.38 ).mul( float( 1.0 ).sub( base ).max( 0.25 ) ), float( 1.0 ) ) );

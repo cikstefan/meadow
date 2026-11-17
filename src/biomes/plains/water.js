@@ -13,7 +13,7 @@ import {
 } from 'three/tsl';
 import { vnoise } from '../../tsl/noise.js';
 import { U, applyFog, skyColor, windField } from '../../tsl/world.js';
-import { cloudShadowAt } from './index.js';
+import { cloudShadowGround } from './index.js';
 import { LAKE } from './layout.js';
 
 export function buildWater() {
@@ -72,7 +72,7 @@ export function buildWater() {
 		const R = reflect( V.negate(), N );
 		const sky = skyColor( normalize( vec3( R.x, max( R.y, 0.02 ), R.z ) ) );
 
-		const sun = cloudShadowAt( xz, float( LAKE.level ) ).mul( smoothstep( - 0.04, 0.06, L.y ) );
+		const sun = cloudShadowGround( xz ).mul( smoothstep( - 0.04, 0.06, L.y ) );
 		// milky turquoise body (glacial flour scatters light back up)
 		// glacial lake: muted steel-blue (grey-turquoise from the rock flour), darker under gusts
 		const bodyA = mix( vec3( 0.06, 0.16, 0.2 ), vec3( 0.04, 0.11, 0.15 ), gust.mul( 0.6 ) );

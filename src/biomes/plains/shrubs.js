@@ -24,7 +24,7 @@ import {
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, shadeFoliage } from '../../tsl/world.js';
 import { landHeightJS, shrubDensityJS, trailDistJS, lakeDistJS, gravelPatchJS } from './terrain.js';
-import { cloudShadowAt } from './index.js';
+import { cloudShadowGround } from './index.js';
 import { buildFoliageAtlas, TILE } from './atlas.js';
 import { rng } from './grow.js';
 import { SPECIES, plantLODs } from './plants.js';
@@ -198,7 +198,7 @@ export class Shrubs {
 			const flTile = fk.div( 16.0 ).floor();
 			const lfTile = fk.sub( flTile.mul( 16.0 ) );
 			const tile = select( isFl, select( C.y.lessThan( B.y ), flTile, lfTile ), C.x );
-			vC.assign( vec4( tile, C.z, C.w, cloudShadowAt( base.xz, base.y ) ) );
+			vC.assign( vec4( tile, C.z, C.w, cloudShadowGround( base.xz ) ) );
 			vT.assign( vec4( mix( vec3( 0.84, 0.88, 0.8 ), vec3( 1.1, 1.06, 1.0 ), B.z ), C.y ) );
 			return world;
 

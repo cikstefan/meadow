@@ -16,7 +16,7 @@ import {
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, applyFog } from '../../tsl/world.js';
 import { landHeightJS, ghostDensityJS, trailDistJS, lakeDistJS } from './terrain.js';
-import { cloudShadowAt } from './index.js';
+import { cloudShadowGround } from './index.js';
 import { rng, growTree, Builder, decimate, breakLimbs } from './grow.js';
 
 const LOD_DIST = [ 45, 400 ];
@@ -329,7 +329,7 @@ function woodMaterial() {
 		vN.assign( normalize( yaw( lean( n ) ) ) );
 		const C = attribute( 'card', 'vec4' );
 		vWood.assign( vec4( attribute( 'uv', 'vec2' ), C.y, C.z ) ); // around, along (m), branch level, ao (0.25 = exposed heartwood)
-		vS.assign( vec2( B.z, cloudShadowAt( A.xz, A.y ) ) );
+		vS.assign( vec2( B.z, cloudShadowGround( A.xz ) ) );
 		return world;
 
 	} )();

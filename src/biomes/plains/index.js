@@ -8,7 +8,7 @@
 // the lake, the shrubs and the ghost forest of fire-killed lenga trees.
 
 import * as THREE from 'three/webgpu';
-import { Fn, float, int, vec2, vec3, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If, texture, exp } from 'three/tsl';
+import { Fn, float, int, uint, uvec2, vec2, vec3, vec4, mix, smoothstep, clamp, max, min, pow, floor, fract, dot, sqrt, If, texture, exp, uniform, instanceIndex, textureStore } from 'three/tsl';
 import { vnoise, vnoiseJS, hash2i, hash2i2 } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import { makeVolumetricClouds } from '../../tsl/clouds3d.js';
@@ -42,23 +42,46 @@ export const CLOUDS = makeVolumetricClouds( ( xz ) => cloudCoverageAt( xz ), { b
 // so every shadow on the plains belongs to a cloud overhead.
 export const cloudShadowAt = ( xz, y ) => {
 
-	const s = U.trueSunDir;
-	// the sun's projection is damped: in the sped-up day a grazing sun would sweep the
-	// shadows across the plain far faster than the clouds themselves move
-	const sy = max( s.y, 0.3 );
-	const toward = vec2( s.x, s.z ).div( sy );
-	const h1 = max( float( CLOUD_BASE + 300 ).sub( y ), 0.0 ), h2 = max( float( CLOUD_BASE + 750 ).sub( y ), 0.0 );
-	const p1 = xz.add( toward.mul( h1.min( 9000.0 ) ) ), p2 = xz.add( toward.mul( h2.min( 9000.0 ) ) );
-	const d1 = CLOUDS.density( vec3( p1.x, float( CLOUD_BASE + 300 ), p1.y ), true ).toVar();
-	const d2 = CLOUDS.density( vec3( p2.x, float( CLOUD_BASE + 750 ), p2.y ), true ).toVar();
-	const d = d1.add( d2 );
-	// optical depth through ~1 km of cloud, softened (light scattered into the shadow)
-	const T = exp( d.mul( - 0.5 * 600 * 0.011 ).div( sy ).max( - 30.0 ) );
+	// the sun's projection (per metre of height) comes from the CPU (U.shadowShift); it is
+	// damped: in the sped-up day a grazing sun would sweep the shadows across the plain
+	// far faster than the clouds themselves move
+	const toward = U.shadowShift;
+	// three samples through the deck (the same density the sky raymarches); optical
+	// depth matches the sky's extinction over the layer, so every cloud you see
+	// overhead casts its shadow, thin ones a soft one
+	let d = float( 0 );
+	for ( const hh of [ 200, 550, 950 ] ) {
+
+		const H = max( float( CLOUD_BASE + hh ).sub( y ), 0.0 );
+		const pp = xz.add( toward.mul( min( H, 9000.0 ) ) );
+		d = d.add( CLOUDS.density( vec3( pp.x, float( CLOUD_BASE + hh ), pp.y ), true ).toVar() );
+
+	}
+
+	const T = exp( max( d.mul( - 0.011 * 1800 / 3 ), - 30.0 ) );
 	return mix( float( 0.14 ), float( 1.0 ), smoothstep( 0.0, 1.0, T ) );
 
 };
 
-const cloudShadow = Fn( ( [ xz ] ) => cloudShadowAt( xz, float( 0 ) ) );
+// Cloud shadow map (as in Unreal's volumetric clouds): the shadow of the deck is
+// computed once per frame into a 256^2 texture centred on the camera (25 m texels
+// over 6.4 km), and everything on the ground reads it instead of raymarching the
+// clouds per blade / per pixel. The far mountains still evaluate it directly.
+export const CS_N = 256, CS_EXT = 3200;
+const csTex = new THREE.StorageTexture( CS_N, CS_N );
+csTex.magFilter = csTex.minFilter = THREE.LinearFilter;
+export const csCenter = uniform( new THREE.Vector2() );
+export const cloudShadowCompute = Fn( () => {
+
+	const i = int( instanceIndex );
+	const ix = i.mod( CS_N ), iy = i.div( CS_N );
+	const xz = csCenter.add( vec2( float( ix ).add( 0.5 ), float( iy ).add( 0.5 ) ).div( CS_N ).mul( 2.0 ).sub( 1.0 ).mul( CS_EXT ) );
+	textureStore( csTex, uvec2( uint( ix ), uint( iy ) ), vec4( cloudShadowAt( xz, float( 0 ) ), 0, 0, 1 ) );
+
+} )().compute( CS_N * CS_N );
+export const cloudShadowGround = ( xz ) => texture( csTex, xz.sub( csCenter ).div( CS_EXT * 2 ).add( 0.5 ) ).level( 0 ).r;
+
+const cloudShadow = Fn( ( [ xz ] ) => cloudShadowGround( xz ) );
 
 // CPU mirror of the weather map (0..1, high = clear), sampled where the sun ray meets the deck
 export function cloudFieldJS( x, z, y, offset ) {
@@ -160,8 +183,8 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	a.assign( mix( a, schist.mul( 1.4 ), gp.mul( 0.85 ) ) );
 	// the lake shore: a band of grey shingle (photo: Lago Pehoé / Skottsberg beaches)
 	const shoreD = lakeDist( xz );
-	const beach = smoothstep( 9.0, 3.0, shoreD.add( vnoise( xz.mul( 0.15 ) ).sub( 0.5 ).mul( 6.0 ) ) );
-	a.assign( mix( a, gravel.mul( mix( 1.4, 1.9, n1 ) ), beach ) );
+	const beach = smoothstep( 6.0, 1.5, shoreD.add( vnoise( xz.mul( 0.12 ) ).sub( 0.5 ).mul( 7.0 ) ) );
+	a.assign( mix( a, gravel.mul( mix( 0.75, 1.15, n1 ) ).mul( vec3( 0.95, 0.97, 1.0 ) ), beach.mul( 0.9 ) ) );
 		// up on the mountains: scree, then bare rock
 	const mh = mountainHeight( xz );
 	const scree = schist.mul( mix( 0.8, 1.15, n3 ) );
@@ -175,7 +198,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, cloudTimeScale: 0.03, // clouds (and their shadows) drift ~8x slower than before
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 0.03, // clouds (and their shadows) drift ~8x slower than before
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,

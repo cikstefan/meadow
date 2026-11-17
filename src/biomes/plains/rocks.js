@@ -12,7 +12,7 @@ import {
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, applyFog } from '../../tsl/world.js';
 import { landHeightJS, trailDistJS, lakeDistJS, gravelPatchJS, mountainHeightJS } from './terrain.js';
-import { cloudShadowAt } from './index.js';
+import { cloudShadowGround } from './index.js';
 import { rng } from './grow.js';
 
 const LOD_DIST = 90, RADIUS = 1100;
@@ -127,7 +127,7 @@ export class Rocks {
 			const rot = ( v ) => vec3( v.x.mul( c ).sub( v.z.mul( s ) ), v.y, v.x.mul( s ).add( v.z.mul( c ) ) );
 			const w = A.xyz.add( rot( p ) );
 			vW.assign( w ); vN.assign( normalize( rot( n ) ) );
-			vI.assign( vec3( B.y, A.y, cloudShadowAt( A.xz, A.y ) ) );
+			vI.assign( vec3( B.y, A.y, cloudShadowGround( A.xz ) ) );
 			return w;
 
 		} )();

@@ -21,7 +21,7 @@ import {
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, shadeFoliage } from '../../tsl/world.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS, gravelPatchJS } from './terrain.js';
-import { cloudShadowAt } from './index.js';
+import { cloudShadowGround } from './index.js';
 import { TILE } from './atlas.js';
 import { rng, Builder } from './grow.js';
 
@@ -248,7 +248,7 @@ export class Scrub {
 			vW.assign( w );
 			vN.assign( normalize( rot( n ).mul( vec3( 1.0 / 1.0, 1.0, 1.0 ) ) ) );
 			vK.assign( vec4( K.x, K.y, K.z, B.z ) );
-			vI.assign( vec4( cloudShadowAt( A.xz, A.y ), B.w, length( A.xyz.sub( cameraPosition ) ), 0 ) );
+			vI.assign( vec4( cloudShadowGround( A.xz ), B.w, length( A.xyz.sub( cameraPosition ) ), 0 ) );
 			return w;
 
 		} )();
