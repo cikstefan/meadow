@@ -14,7 +14,7 @@ import { U } from '../../tsl/uniforms.js';
 import { makeVolumetricClouds } from '../../tsl/clouds3d.js';
 import { scrubFieldsTSL } from './scrubfields.js';
 import {
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS, mountainHeight,
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS, mountainHeight, lakeDist,
 } from './terrain.js';
 import { TRAIL, FORWARD_AZ, WALK_RADIUS, PREVAILING_WIND } from './layout.js';
 
@@ -158,7 +158,11 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	// and bare stone patches get that light back)
 	a.assign( mix( a, gravel.mul( 1.8 ), trail ) );
 	a.assign( mix( a, schist.mul( 1.4 ), gp.mul( 0.85 ) ) );
-	// up on the mountains: scree, then bare rock
+	// the lake shore: a band of grey shingle (photo: Lago Pehoé / Skottsberg beaches)
+	const shoreD = lakeDist( xz );
+	const beach = smoothstep( 9.0, 3.0, shoreD.add( vnoise( xz.mul( 0.15 ) ).sub( 0.5 ).mul( 6.0 ) ) );
+	a.assign( mix( a, gravel.mul( mix( 1.4, 1.9, n1 ) ), beach ) );
+		// up on the mountains: scree, then bare rock
 	const mh = mountainHeight( xz );
 	const scree = schist.mul( mix( 0.8, 1.15, n3 ) );
 	a.assign( mix( a, scree, smoothstep( 90.0, 260.0, mh ) ) );

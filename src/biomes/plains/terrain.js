@@ -288,23 +288,25 @@ function towersJS( x, z ) {
 	for ( const t of TOWERS ) {
 
 		const dx = x - t.x, dz = z - t.z;
-		const ang = Math.atan2( dz, dx );
-		// irregular footprint (buttresses, chimneys)
+		// elongated along the ridge (tangent to the view from the plains)
+		const rl = Math.hypot( t.x, t.z ), ux = - t.z / rl, uz = t.x / rl;
+		const along = dx * ux + dz * uz, across = dx * ( t.x / rl ) + dz * ( t.z / rl );
+		const asp = t.r > 200 ? 1.7 : 1.0;
+		const ang = Math.atan2( across, along / asp );
 		// irregular footprint: buttresses and chimneys run straight down the walls
-		const rr = t.r * ( 0.8 + 0.25 * vnoiseJS( Math.cos( ang ) * 2.2 + t.x * 0.001, Math.sin( ang ) * 2.2 + 5 ) + 0.035 * Math.sin( ang * 5 ) + 0.018 * Math.sin( ang * 13 + t.z * 0.01 ) + 0.008 * Math.sin( ang * 29 ) );
-		const d = Math.hypot( dx, dz ) / rr;
+		const rr = t.r * ( 0.82 + 0.22 * vnoiseJS( Math.cos( ang ) * 2.2 + t.x * 0.001, Math.sin( ang ) * 2.2 + 5 ) + 0.03 * Math.sin( ang * 5 ) + 0.012 * Math.sin( ang * 13 + t.z * 0.01 ) );
+		const d = Math.hypot( along / asp, across ) / rr;
 		if ( d > 2.2 ) continue;
-		// walls: near-vertical between d 1.0 and 1.25, talus below
-		const wall = 1 - ss( 0.85, 1.22, d );
+		// walls: steep, slightly battered (wider at the foot); the top rises toward the summit
+		const wall = 1 - ss( 0.8, 1.25, d );
 		const talus = ( 1 - ss( 1.0, 2.2, d ) ) * 0.38;
-		const top = t.h * Math.max( wall, talus * ( 1 - wall ) + wall );
-		// the horn: a pointed cap on the summit plateau
-		// the dark cap: a broad, jagged crown of sedimentary rock (several teeth,
-		// not one cone), its own fractured profile
-		const capR = Math.max( 0, 1 - d / 0.95 );
-		const teeth = ridged( x / 110 + t.x * 0.01, z / 110, 4 );
-		const horn = t.horn * 1.35 * Math.pow( capR, 0.8 ) * ( 0.45 + 0.65 * teeth ) * ( 0.8 + 0.3 * vnoiseJS( dx / 90, dz / 90 ) );
-		const crag = ( ridged( x / 220, z / 220, 3 ) - 0.5 ) * 22 * wall;
+		const crown = 1 - 0.22 * d * d;
+		const top = t.h * Math.max( wall * crown, talus * ( 1 - wall ) + wall * crown );
+		// the dark cap: a pointed horn of sedimentary rock (a few fractured teeth on it)
+		const capR = Math.max( 0, 1 - d / 0.85 );
+		const teeth = ridged( x / 120 + t.x * 0.01, z / 120, 3 );
+		const horn = t.horn * 1.5 * Math.pow( capR, 1.3 ) * ( 0.75 + 0.35 * teeth ) * ( 0.85 + 0.25 * vnoiseJS( dx / 90, dz / 90 ) );
+		const crag = ( ridged( x / 220, z / 220, 3 ) - 0.5 ) * 18 * wall;
 		m = Math.max( m, top + horn + crag );
 
 	}

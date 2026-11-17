@@ -33,7 +33,7 @@ export const SCRUB = [
 	{ name: 'mata negra', leaf: TILE.negra, flower: - 1, body: [ 0.03, 0.045, 0.018 ], tint: [ 0.95, 1.0, 0.9 ], r: [ 0.45, 1.0 ], h: [ 0.35, 0.8 ] },
 	{ name: 'calafate', leaf: TILE.cala, flower: TILE.calaFl, body: [ 0.045, 0.065, 0.022 ], tint: [ 1.0, 1.05, 0.95 ], r: [ 0.4, 0.9 ], h: [ 0.4, 0.95 ] },
 	{ name: 'mata verde', leaf: TILE.cala, flower: - 1, body: [ 0.06, 0.1, 0.03 ], tint: [ 1.25, 1.45, 0.85 ], r: [ 0.4, 0.95 ], h: [ 0.3, 0.7 ] },
-	{ name: 'silver cushion', leaf: TILE.barrosa, flower: - 1, body: [ 0.11, 0.12, 0.095 ], tint: [ 1.05, 1.12, 1.05 ], r: [ 0.3, 0.6 ], h: [ 0.22, 0.45 ] },
+	{ name: 'silver cushion', leaf: TILE.barrosa, flower: - 1, body: [ 0.16, 0.17, 0.14 ], tint: [ 1.35, 1.45, 1.35 ], r: [ 0.35, 0.75 ], h: [ 0.25, 0.55 ] },
 	{ name: 'notro', leaf: TILE.notro, flower: TILE.notroFl2, body: [ 0.035, 0.05, 0.02 ], tint: [ 1.0, 1.0, 1.0 ], r: [ 0.7, 1.4 ], h: [ 0.8, 1.7 ] },
 ];
 

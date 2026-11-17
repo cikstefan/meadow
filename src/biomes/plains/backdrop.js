@@ -239,7 +239,7 @@ function backdropMaterial( hmTex ) {
 		const darkRock = mix( vec3( 0.032, 0.03, 0.028 ), vec3( 0.075, 0.066, 0.056 ), rn.mul( 0.5 ).add( strata.mul( 0.5 ) ) )
 			.mul( rockL.clamp( 0.35, 2.2 ) ).mul( mix( 0.75, 1.15, rockH ) );
 		// Cuernos granite: pale cream-grey, streaked by meltwater
-		const granite = mix( vec3( 0.21, 0.205, 0.19 ), vec3( 0.36, 0.345, 0.32 ), rn.mul( 0.4 ).add( strata.mul( 0.15 ) ).add( 0.2 ) )
+		const granite = mix( vec3( 0.3, 0.295, 0.28 ), vec3( 0.48, 0.465, 0.44 ), rn.mul( 0.4 ).add( strata.mul( 0.15 ) ).add( 0.2 ) )
 			.mul( cliffL.clamp( 0.45, 1.6 ) ).mul( mix( 0.72, 1.12, cliffH ) )
 			.mul( mix( 0.75, 1.0, vnoise( vec2( xz.x.add( xz.y ).div( 6.0 ), h.div( 160.0 ) ) ) ) );
 		const capLine = float( CUERNOS.capBase ).add( vnoise( xz.div( 260.0 ) ).sub( 0.5 ).mul( 240.0 ) ).add( sin( xz.x.div( 70.0 ) ).mul( 25.0 ) );

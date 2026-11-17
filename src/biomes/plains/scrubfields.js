@@ -34,7 +34,7 @@ export function speciesWeights( f, gravel ) {
 		0.55, // mata negra: the matrix
 		0.35, // calafate
 		0.15 + Math.max( 0, f.green - 0.5 ) * 1.6, // bright green swales
-		0.08 + Math.max( 0, f.silver - 0.55 ) * 2.2 + gravel * 0.6, // silver cushions on dry ground
+		0.16 + Math.max( 0, f.silver - 0.5 ) * 2.4 + gravel * 0.8, // silver cushions on dry ground
 		Math.max( 0, f.notro - 0.56 ) * 2.2, // notro in drifts
 	];
 
