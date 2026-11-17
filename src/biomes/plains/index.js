@@ -138,14 +138,16 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const tf = vnoise( xz.div( 38.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.62 ).add( vnoise( xz.div( 12.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( 0.04 );
 	const tus = smoothstep( 0.3, 0.75, tf );
 	const region = vnoise( xz.div( 55.0 ).add( vec2( 17.0, 5.0 ) ) );
-	const dryE = clamp( fieldDry( xz ).mul( 0.55 ).add( tus.mul( 0.5 ) ).add( region.sub( 0.5 ).mul( 0.6 ) ), 0.0, 1.0 );
+	const dryE = clamp( fieldDry( xz ).mul( 0.35 ).add( tus.mul( 0.38 ) ).add( region.sub( 0.5 ).mul( 0.8 ) ).sub( 0.08 ), 0.0, 1.0 );
 	const canopyM = mix( vec3( 0.12, 0.16, 0.045 ), vec3( 0.33, 0.27, 0.12 ), dryE ).mul( mix( 0.8, 1.05, tus ) );
 	const a0 = mix( albedo, canopyM, toCanopy.mul( 0.85 ) );
 	const a = mix( a0, litter, litterK.mul( 0.85 ) ).toVar();
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
 	a.assign( mix( a, soil, verge.mul( 0.4 ).mul( float( 1.0 ).sub( toCanopy ) ) ) );
-	a.assign( mix( a, gravel, trail ) );
-	a.assign( mix( a, schist, gp.mul( 0.85 ) ) );
+	// (the ground shader darkens everything under the grass canopy: the open trail
+	// and bare stone patches get that light back)
+	a.assign( mix( a, gravel.mul( 1.8 ), trail ) );
+	a.assign( mix( a, schist.mul( 1.4 ), gp.mul( 0.85 ) ) );
 	// up on the mountains: scree, then bare rock
 	const mh = mountainHeight( xz );
 	const scree = schist.mul( mix( 0.8, 1.15, n3 ) );
