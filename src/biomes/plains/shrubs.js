@@ -63,7 +63,7 @@ function scatter( density = 1 ) {
 		const gravel = gravelPatchJS( x, z );
 		const m = vnoiseJS( x / 120 + 3, z / 120 + 8 );
 		const w = [
-			dens * ( 0.35 + 0.65 * m ) * 0.5, // notro thickets
+			dens * ( 0.35 + 0.65 * m ) * 0.18, // tree-form notro (rarer than the notro mounds)
 			( 0.12 + dens * 0.3 ) * ( 1.1 - m * 0.5 ), // calafate everywhere, sparser
 			( 0.1 + dens * 0.35 ) * 0.8, // mata negra
 			( 0.06 + gravel * 0.5 ) * 0.9, // mata barrosa on dry gravel
@@ -253,7 +253,11 @@ export class Shrubs {
 			// softer overall, hot cores (bloom gives them a halo), fading with distance
 			// so the far plain is a scatter of faint embers, not a field of lamps
 			const far = exp( dist.div( - 160.0 ) ).mul( 0.85 ).add( 0.15 );
-			const emit = glowCol.mul( red.mul( 0.35 ).add( core.mul( 1.4 ) ).mul( rim.mul( 0.4 ).add( 0.8 ) ).add( halo ) )
+			// glow takes its colour and detail from the flower itself (no flat silhouettes);
+			// small hot cores cross the bloom threshold and get a soft halo
+			const flowerLight = albedo.mul( vec3( 2.2, 1.2, 1.1 ) ).add( glowCol.mul( 0.04 ) );
+			const hot = core.mul( core ).mul( 3.0 );
+			const emit = flowerLight.mul( red.mul( 0.9 ) ).add( glowCol.mul( hot ) ).mul( rim.mul( 0.4 ).add( 0.8 ) ).add( glowCol.mul( halo ) )
 				.mul( U.night.mul( U.glow ).mul( pulse ).mul( far ).mul( sp.glow * 0.11 ) );
 			return shadeFoliage( albedo, N, vW, ao, vC.w, transmit, spec, float( 0.35 ), emit );
 
