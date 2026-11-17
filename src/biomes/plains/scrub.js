@@ -273,7 +273,10 @@ export class Scrub {
 			const P = vW;
 			const leafN = vnoise( P.xz.mul( 9.0 ).add( P.y.mul( 7.0 ) ) ).mul( 0.6 ).add( vnoise( P.xz.mul( 31.0 ).add( vec2( P.y.mul( 23.0 ), 3.0 ) ) ).mul( 0.4 ) );
 			// (mostly seen through gaps between the leaf cards: deep, shaded foliage)
-			const body = spf( sp, SCRUB.map( ( s ) => s.body ) ).mul( tint ).mul( mix( 0.45, 1.25, leafN ) );
+			// far away (no cards) the dome stands for the whole bush: foliage tone, lit tops
+			const farK = smoothstep( 30.0, 120.0, vI.z );
+			const body = spf( sp, SCRUB.map( ( s ) => s.body ) ).mul( tint ).mul( mix( 0.45, 1.25, leafN ) )
+				.mul( mix( float( 1.0 ), mix( 1.3, 2.3, smoothstep( 0.1, 0.9, vK.y ) ), farK ) );
 			const isNotro = sp.greaterThan( 3.5 );
 			const redDots = smoothstep( 0.7, 0.8, vnoise( P.xz.mul( 22.0 ).add( P.y.mul( 17.0 ) ) ) ).mul( smoothstep( 0.2, 0.7, vK.y ) ).mul( select( isNotro, float( 1.0 ), float( 0.0 ) ) ).mul( mix( 0.4, 1.0, vI.y ) );
 			const bodyCol = mix( body, vec3( 0.32, 0.03, 0.015 ), redDots.mul( 0.5 ) );
