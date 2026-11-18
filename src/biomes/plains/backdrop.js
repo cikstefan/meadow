@@ -310,7 +310,13 @@ function backdropMaterial( hmTex ) {
 		const suv = xz.div( 32000.0 ).add( 0.5 );
 		const sat = texture( SAT, suv ).rgb;
 		const satSnow = smoothstep( 0.85, 0.97, min( sat.r, min( sat.g, sat.b ) ) );
-		const satAlb = mix( sat.mul( 0.24 ), vec3( 0.82, 0.84, 0.88 ), satSnow );
+		// snow / ice: keep texture and relief (scanned snow + broken grey-blue ice, dirty
+		// moraine streaks), never a flat white decal
+		const snowTexS = tri( T.snowC, P, triW( Ng ), 1.0 / 22.0 );
+		const iceVar = vnoise( xz.div( 60.0 ) ).mul( 0.6 ).add( vnoise( xz.div( 17.0 ) ).mul( 0.4 ) );
+		const satIce = mix( vec3( 0.5, 0.56, 0.62 ), vec3( 0.8, 0.82, 0.85 ), smoothstep( 0.3, 0.75, iceVar ) )
+			.mul( lum( snowTexS.rgb ).div( 0.62 ).clamp( 0.82, 1.1 ) );
+		const satAlb = mix( sat.mul( 0.24 ), satIce, satSnow );
 		const rO = length( xz );
 		const satK = smoothstep( 1100.0, 2300.0, rO ).mul( step( abs( xz.x ), 15900.0 ) ).mul( step( abs( xz.y ), 15900.0 ) );
 		// scanned rock grain modulates the satellite colour up close
