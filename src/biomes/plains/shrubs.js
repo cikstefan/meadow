@@ -22,7 +22,7 @@ import {
 	cameraPosition, faceDirection, texture, uv, select, exp, fract
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
-import { U, shadeFoliage } from '../../tsl/world.js';
+import { U, shadeFoliage, windField } from '../../tsl/world.js';
 import { landHeightJS, shrubDensityJS, trailDistJS, lakeDistJS, gravelPatchJS } from './terrain.js';
 import { cloudShadowGround } from './index.js';
 import { buildFoliageAtlas, TILE } from './atlas.js';
@@ -174,18 +174,19 @@ export class Shrubs {
 			const base = A.xyz;
 			const isWood = C.x.lessThan( 0.0 );
 
-			// wind: the whole plant bends from the base with the travelling gusts,
-			// outer sprigs flutter (cards only)
+			// wind, like the grass: the travelling gust field bends the whole tree
+			// downwind from the base; each sprig sways on the same slow, travelling
+			// phase as the grass around it (offset per sprig), no fast per-card flicker
 			const W = vec3( U.windDir.x, 0, U.windDir.y );
-			const gust = vnoise( base.xz.sub( U.windOffset ).div( 13.0 ) ).mul( 0.7 ).add( 0.3 );
-			const wAmt = U.windStrength.mul( gust );
+			const wind = windField( base.xz );
 			const hk = pow( clamp( p.y, 0.0, 1.0 ), 1.7 );
-			const sway = sin( U.time.mul( mix( 1.1, 1.9, B.z ) ).add( B.z.mul( 30.0 ) ).add( dot( base.xz, U.windDir ).mul( 0.2 ) ) ).mul( 0.35 ).add( 0.65 );
-			const flutter = sin( U.time.mul( mix( 6.0, 12.0, C.y ) ).add( C.y.mul( 60.0 ) ) ).mul( select( isWood, float( 0.0 ), float( 0.6 ) ) );
+			const phase = dot( base.xz.add( local.xz ), U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( C.y.mul( 4.0 ) );
+			const sway = sin( phase ).mul( 0.3 ).add( sin( phase.mul( 2.1 ).add( C.y.mul( 9.0 ) ) ).mul( 0.1 ) ).add( 0.65 );
+			const sprig = select( isWood, float( 0.0 ), float( 1.0 ) );
 			const stiff = h.mul( 0.3 ).add( 0.7 ).reciprocal(); // tall trees bend relatively less
-			const disp = W.mul( wAmt.mul( sway ).mul( hk ).mul( h ).mul( 0.075 ).mul( stiff ) )
-				.add( rot( normalize( n0 ) ).mul( flutter.mul( wAmt ).mul( 0.025 ).mul( h.min( 1.5 ) ) ) )
-				.add( vec3( 0, - 1, 0 ).mul( wAmt.mul( hk ).mul( h ).mul( 0.015 ) ) );
+			const disp = W.mul( wind.mul( sway ).mul( hk ).mul( h ).mul( 0.07 ).mul( stiff ) )
+				.add( W.mul( wind.mul( sin( phase.mul( 1.7 ).add( C.y.mul( 21.0 ) ) ) ).mul( sprig ).mul( 0.03 ).mul( h.min( 1.5 ) ) ) )
+				.add( vec3( 0, - 1, 0 ).mul( wind.mul( hk ).mul( h ).mul( 0.012 ) ) );
 			// 3D flower tubes (hero LOD) only on bushes in bloom: others collapse them away
 			const isTube = C.x.greaterThanEqual( 199.5 );
 			const world = select( isTube.and( C.y.greaterThan( B.y ) ), base, base.add( local ).add( disp ) );
@@ -237,7 +238,7 @@ export class Shrubs {
 			const ao = vC.y.mul( mix( 0.6, 1.0, vC.z ) );
 			const N = select( isWood, normalize( vN ), normalize( vN ).mul( faceDirection.mul( 0.3 ).add( 0.7 ) ) );
 			const transmit = select( isWood, float( 0.0 ), select( isNotroFl.or( isTubeF ), float( 0.75 ), float( 0.5 ) ) );
-			const spec = select( isWood, float( 0.05 ), float( 0.16 ) ); // glossy leathery leaves
+			const spec = float( 0.0 ); // (cards share a canopy normal: a highlight would light whole cards up as grey patches)
 			// night: bioluminescent firebush. The flowers glow from within (hot core,
 			// softer petals), breathing slowly; waves of light roll across the plain
 			// from bush to bush; the leaves around them catch a faint warm halo.
@@ -252,7 +253,7 @@ export class Shrubs {
 			const halo = select( isWood, float( 0.0 ), float( 1.0 ) ).mul( vC.z ).mul( 0.04 ).mul( sp.glow ); // leaves in the crown
 			// softer overall, hot cores (bloom gives them a halo), fading with distance
 			// so the far plain is a scatter of faint embers, not a field of lamps
-			const far = exp( dist.div( - 160.0 ) ).mul( 0.85 ).add( 0.15 );
+			const far = smoothstep( 520.0, 300.0, dist ).mul( 0.55 ).add( 0.45 );
 			// glow takes its colour and detail from the flower itself (no flat silhouettes);
 			// small hot cores cross the bloom threshold and get a soft halo
 			const flowerLight = albedo.mul( vec3( 2.2, 1.2, 1.1 ) ).add( glowCol.mul( 0.04 ) );

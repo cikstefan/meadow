@@ -14,6 +14,7 @@ import { U, applyFog } from '../../tsl/world.js';
 import { landHeightJS, trailDistJS, lakeDistJS, gravelPatchJS, mountainHeightJS } from './terrain.js';
 import { cloudShadowGround } from './index.js';
 import { rng } from './grow.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const LOD_DIST = 90, RADIUS = 1100;
 const tex = ( n, srgb ) => {
@@ -26,23 +27,42 @@ const tex = ( n, srgb ) => {
 
 };
 
-// one boulder: an icosphere pushed around by noise, squashed, with flat fracture faces
+// One boulder, after the jose plant generator's granite blocks (Pinus cembra scene):
+// a welded icosphere pulled onto a soft-min of ~12 fracture planes (a bottom, a
+// tilted top, ten sides spiralling round), so the block has flat joint faces with
+// rounded, weathered arrises instead of facets, plus two octaves of 3D noise.
+const n3 = ( x, y, z ) => ( vnoiseJS( x + z * 0.71, y - z * 0.37 ) + vnoiseJS( y + 13.1 + z * 0.53, x - 7.7 ) ) * 0.5;
 function boulder( seed, detail ) {
 
 	const r = rng( seed );
-	const g = new THREE.IcosahedronGeometry( 1, detail );
-	const p = g.attributes.position;
-	const sx = 0.8 + r() * 0.6, sy = 0.45 + r() * 0.35, sz = 0.7 + r() * 0.5;
-	const cuts = [ 0, 1, 2 ].map( () => new THREE.Vector3( r() - 0.5, r() * 0.6 - 0.1, r() - 0.5 ).normalize() );
-	const o = r() * 100;
+	const R = ( a, b ) => a + ( b - a ) * r();
+	const N = [ new THREE.Vector3( 0, - 1, 0 ) ], D = [ 0.5 ], up = R( 0, 6.28 );
+	N.push( new THREE.Vector3( R( - 0.25, 0.25 ), 1, R( - 0.25, 0.25 ) ).normalize() ); D.push( R( 0.55, 0.75 ) );
+	for ( let i = 0; i < 10; i ++ ) {
+
+		const a = up + i * 2.39996 + R( - 0.3, 0.3 ), e = R( - 0.25, 0.75 );
+		N.push( new THREE.Vector3( Math.cos( a ) * Math.cos( e ), Math.sin( e ), Math.sin( a ) * Math.cos( e ) ).normalize() );
+		D.push( R( 0.75, 1.0 ) * ( 1 + 0.25 * Math.abs( Math.cos( a ) ) ) );
+
+	}
+
+	const g0 = new THREE.IcosahedronGeometry( 1, detail );
+	g0.deleteAttribute( 'uv' ); g0.deleteAttribute( 'normal' );
+	const g = mergeVertices( g0 ), p = g.attributes.position, v = new THREE.Vector3(), sd = R( 0, 50 ), k = 9;
 	for ( let i = 0; i < p.count; i ++ ) {
 
-		const v = new THREE.Vector3( p.getX( i ), p.getY( i ), p.getZ( i ) );
-		let k = 1 + 0.22 * ( vnoiseJS( v.x * 1.7 + o, v.z * 1.7 + v.y * 1.3 ) - 0.5 ) + 0.08 * ( vnoiseJS( v.x * 5 + o, v.y * 5 - v.z * 3 ) - 0.5 );
-		// fracture planes: clamp the surface to a few flat faces
-		for ( const c of cuts ) k = Math.min( k, ( 0.72 + r() * 0.0 ) / Math.max( 0.05, v.dot( c ) ) );
-		v.multiplyScalar( k );
-		p.setXYZ( i, v.x * sx, v.y * sy, v.z * sz );
+		v.fromBufferAttribute( p, i );
+		let acc = 0;
+		for ( let j = 0; j < N.length; j ++ ) {
+
+			const c = v.dot( N[ j ] );
+			if ( c > 1e-3 ) acc += Math.exp( - k * D[ j ] / c );
+
+		}
+
+		let rr = acc > 0 ? - Math.log( acc ) / k : 2;
+		rr = Math.min( rr, 1.6 ) * ( 1 + 0.05 * ( n3( v.x * 3 + sd, v.y * 3, v.z * 3 ) - 0.5 ) * 2 + 0.018 * ( n3( v.x * 9, v.y * 9 + sd, v.z * 9 ) - 0.5 ) * 2 );
+		p.setXYZ( i, v.x * rr * 1.15, v.y * rr * 0.85, v.z * rr );
 
 	}
 
@@ -94,7 +114,7 @@ export class Rocks {
 		const T = { rock: tex( 'dry_ground_rocks_c', true ), cliff: tex( 'cliff_side_c', true ), n: tex( 'cliff_side_n' ) };
 		const mat = this.material( T );
 		const V = 4, cnt = this.data.length / 8;
-		this.meshes = [ 0, 1, 2, 3 ].map( ( v ) => [ 3, 1 ].map( ( detail ) => {
+		this.meshes = [ 0, 1, 2, 3 ].map( ( v ) => [ 5, 3 ].map( ( detail ) => {
 
 			const geo = boulder( 500 + v * 17, detail );
 			const cap = Math.ceil( cnt / V * 1.6 ) + 32;

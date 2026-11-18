@@ -298,7 +298,7 @@ export class Scrub {
 			const N = normalize( vN ).mul( select( isCard, faceDirection.mul( 0.3 ).add( 0.7 ), float( 1.0 ) ) );
 			const isRed = select( useFl.or( isTube ), float( 1.0 ), redDots );
 			// night: the notro flowers glow softly, fading with distance
-			const far = exp( vI.z.div( - 160.0 ) ).mul( 0.85 ).add( 0.15 );
+			const far = smoothstep( 520.0, 300.0, vI.z ).mul( 0.55 ).add( 0.45 );
 			const wave = sin( P.x.mul( 0.045 ).add( P.z.mul( 0.03 ) ).sub( U.time.mul( 0.55 ) ) ).mul( 0.3 ).add( 0.7 );
 			const glow = select( isTube, float( 1.0 ), smoothstep( 0.1, 0.35, albedo.r.sub( albedo.g.mul( 1.5 ) ) ) ).mul( isRed ).mul( select( isNotro, float( 1.0 ), float( 0.0 ) ) );
 			const hot = smoothstep( 0.55, 0.8, albedo.r ).mul( glow );
@@ -308,7 +308,7 @@ export class Scrub {
 			const emit = albedo.mul( vec3( 2.2, 1.2, 1.1 ) ).mul( glow ).add( vec3( 1.0, 0.2, 0.12 ).mul( hot.mul( 3.0 ) ) )
 				.mul( U.night.mul( U.glow ).mul( far ).mul( wave ).mul( varyF ).mul( 0.11 ) )
 				.add( vec3( 1.0, 0.75, 0.2 ).mul( yel.mul( U.night ).mul( U.glow ).mul( far ).mul( varyF ).mul( 0.12 ) ) );
-			return shadeFoliage( albedo, N, P, ao, vI.x, select( isCard, float( 0.5 ), float( 0.25 ) ), float( 0.1 ), float( 0.45 ), emit );
+			return shadeFoliage( albedo, N, P, ao, vI.x, select( isCard, float( 0.5 ), float( 0.25 ) ), float( 0.0 ), float( 0.45 ), emit );
 
 		} )();
 

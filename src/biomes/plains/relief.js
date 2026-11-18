@@ -43,6 +43,24 @@ export async function loadDEM() {
 }
 let FLOW = null;
 
+// value noise for the amplification (self-contained)
+function hash2( x, y ) {
+
+	let h = Math.imul( x, 374761393 ) + Math.imul( y, 668265263 ) | 0;
+	h = Math.imul( h ^ ( h >>> 13 ), 1274126177 );
+	return ( ( h ^ ( h >>> 16 ) ) >>> 0 ) / 4294967296;
+
+}
+
+function vnoise2( x, y ) {
+
+	const xi = Math.floor( x ), yi = Math.floor( y ), fx = x - xi, fy = y - yi;
+	const sx = fx * fx * ( 3 - 2 * fx ), sy = fy * fy * ( 3 - 2 * fy );
+	const a = hash2( xi, yi ), b = hash2( xi + 1, yi ), c = hash2( xi, yi + 1 ), d = hash2( xi + 1, yi + 1 );
+	return ( a + ( b - a ) * sx ) * ( 1 - sy ) + ( c + ( d - c ) * sx ) * sy;
+
+}
+
 function rng( seed ) {
 
 	let s = seed >>> 0;
@@ -163,11 +181,56 @@ function buildFromDEM( m ) {
 
 	}
 
-	// flow map from droplets run over a scratch copy (the real terrain is not eroded)
+	// terrain amplification: the 21 m data is smooth below ~60 m, so add ridged
+	// sub-grid relief, scaled by slope (cliffs and steep flanks get the most), then let
+	// hydraulic erosion carve it into gullies, ribs and debris fans
+	const amp = ( x, z ) => {
+
+		let s2 = 0, a = 1, f = 1 / 260, prev = 1, norm = 0;
+		for ( let o = 0; o < 3; o ++ ) {
+
+			const v = vnoise2( x * f + o * 7.3, z * f - o * 3.1 ) * 2 - 1;
+			const n = 1 - Math.abs( v );
+			s2 += n * n * prev * a; norm += a; prev = n;
+			a *= 0.45; f *= 2.3;
+
+		}
+
+		return s2 / norm;
+
+	};
+	for ( let j = 1; j < N - 1; j ++ ) for ( let i = 1; i < N - 1; i ++ ) {
+
+		const k = j * N + i;
+		if ( H[ k ] < 40 ) continue;
+		const gx = ( H[ k + 1 ] - H[ k - 1 ] ) / ( 2 * CELL ), gz = ( H[ k + N ] - H[ k - N ] ) / ( 2 * CELL );
+		const sl = Math.min( 1.5, Math.hypot( gx, gz ) );
+		const x = ( ( i + 0.5 ) / N * 2 - 1 ) * RELIEF_EXT, z = ( ( j + 0.5 ) / N * 2 - 1 ) * RELIEF_EXT;
+		H[ k ] += ( amp( x, z ) - 0.35 ) * ( 10 + 38 * sl ) * Math.min( 1, H[ k ] / 200 );
+
+	}
+
+	// flow map + carving from droplets over the amplified relief
 	const scratch = new Float32Array( N * N );
 	for ( let k = 0; k < N * N; k ++ ) scratch[ k ] = Math.max( 0, H[ k ] ) / CELL;
 	FLOW = new Float32Array( N * N );
-	erode( scratch, N, 160000, rng( 90210 ), FLOW );
+	erode( scratch, N, 260000, rng( 90210 ), FLOW );
+	// apply the carving smoothed over 5x5 cells (droplet paths are noisy pits otherwise)
+	const dlt = new Float32Array( N * N );
+	for ( let k = 0; k < N * N; k ++ ) dlt[ k ] = scratch[ k ] * CELL - Math.max( 0, H[ k ] );
+	for ( let pass = 0; pass < 2; pass ++ ) {
+
+		const t = new Float32Array( dlt );
+		for ( let j = 1; j < N - 1; j ++ ) for ( let i = 1; i < N - 1; i ++ ) {
+
+			const k = j * N + i;
+			dlt[ k ] = t[ k ] * 0.36 + ( t[ k - 1 ] + t[ k + 1 ] + t[ k - N ] + t[ k + N ] ) * 0.12 + ( t[ k - N - 1 ] + t[ k - N + 1 ] + t[ k + N - 1 ] + t[ k + N + 1 ] ) * 0.04;
+
+		}
+
+	}
+
+	for ( let k = 0; k < N * N; k ++ ) if ( H[ k ] > 30 ) H[ k ] += dlt[ k ] * 0.8;
 	const orig = new Float32Array( N * N );
 	for ( let k = 0; k < N * N; k ++ ) orig[ k ] = H[ k ] / CELL; // no sediment change
 	bakeAux( orig, N );
@@ -350,3 +413,10 @@ export const relief = ( xz ) => {
 	return t.r.add( t.g );
 
 };
+
+// (tests / tools: inject elevation without a browser)
+export function setDEM( arr ) {
+
+	DEM = arr;
+
+}

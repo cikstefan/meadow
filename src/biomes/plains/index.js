@@ -59,7 +59,8 @@ export const cloudShadowAt = ( xz, y ) => {
 	}
 
 	const T = exp( max( d.mul( - 0.011 * 1800 / 3 ), - 30.0 ) );
-	return mix( float( 0.14 ), float( 1.0 ), smoothstep( 0.0, 1.0, T ) );
+	// never black: the overcast sky still lights the shade from all around
+	return mix( float( 0.34 ), float( 1.0 ), smoothstep( 0.0, 1.0, T ) );
 
 };
 
@@ -198,7 +199,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, nightExposure: 1.7, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 1.5, // clouds and their shadows drift together at a real wind speed (~6 m/s)
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, nightExposure: 1.7, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 3.5, // clouds and their shadows drift together at a real wind speed aloft (~14 m/s)
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,

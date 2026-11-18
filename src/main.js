@@ -225,7 +225,7 @@ async function start() {
 
 	// ------------------------------------------------------------ post
 	let pipeline = null;
-	const post = { sunUV: uniform( new THREE.Vector2( 0.5, 0.5 ) ), shaftAmt: uniform( 0 ), aspect: uniform( 1 ),
+	const post = { night: uniform( 0 ), cloudy: uniform( 0 ), sunUV: uniform( new THREE.Vector2( 0.5, 0.5 ) ), shaftAmt: uniform( 0 ), aspect: uniform( 1 ),
 		invProj: uniform( new THREE.Matrix4() ), camWorld: uniform( new THREE.Matrix4() ), camPos: uniform( new THREE.Vector3() ) };
 
 	// Giant Squid-style painterly grade: richer colour, cool shadows, warm highlights
@@ -295,6 +295,20 @@ async function start() {
 		}
 
 		if ( settings.painterly ) col = painterly( col );
+
+		// night grade: moonlight is seen in midnight blues (rod vision loses colour),
+		// and under cloud the blacks are lifted (scattered light, more dynamic range)
+		{
+
+			const lum = dot( col, vec3( 0.2126, 0.7152, 0.0722 ) );
+			const blueish = vec3( lum ).mul( vec3( 0.62, 0.78, 1.15 ) );
+			// keep the glowing flowers' own colours (bright pixels are left alone)
+			const keep = smoothstep( 0.15, 0.6, lum );
+			col = mix( col, mix( blueish, col, keep ), post.night.mul( 0.6 ) );
+			const lift = post.night.mul( mix( 0.006, 0.022, post.cloudy ) );
+			col = col.mul( float( 1.0 ).sub( lift.mul( 4.0 ) ) ).add( vec3( 0.5, 0.65, 1.0 ).mul( lift ) );
+
+		}
 
 		// subtle optical vignette
 		const dv = length( uv().sub( 0.5 ).mul( vec3( 1.0, 0.8, 0 ).xy ) );
@@ -690,6 +704,8 @@ async function start() {
 		}
 
 		// camera for the screen-space cloud pass
+		post.night.value = U.night.value;
+		post.cloudy.value = THREE.MathUtils.smoothstep( settings.clouds, 0.3, 0.8 );
 		// at night the glowing flowers bloom: a lower threshold and a stronger, wider halo
 		if ( post.bloom ) {
 

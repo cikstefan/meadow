@@ -321,7 +321,16 @@ function backdropMaterial( hmTex ) {
 			.mul( lum( snowTexS.rgb ).div( 0.62 ).clamp( 0.82, 1.1 ) );
 		// (dark rock that sat in shadow in the image is lifted toward a real rock reflectance)
 		const satRock = pow( sat, vec3( 0.75 ) ).mul( 0.26 ).max( vec3( 0.055, 0.052, 0.048 ) );
-		const satAlb = mix( satRock, satIce, satSnow );
+		// faces that were in shadow in the image carry no colour information (flat grey):
+		// there, Paine Grande's layered rock: grey-brown sediment banded darker / lighter
+		const satL = dot( sat, vec3( 0.3, 0.55, 0.15 ) );
+		const imgShade = smoothstep( 0.32, 0.14, satL ).mul( smoothstep( 0.22, 0.45, slope ) ).mul( float( 1.0 ).sub( satSnow ) );
+		const bandW = h.div( 48.0 ).add( vnoise( xz.div( 420.0 ) ).mul( 3.0 ) ).add( vnoise( xz.div( 90.0 ) ).mul( 0.6 ) );
+		const bandA = vnoise( vec2( bandW, 0.5 ) ), bandB = vnoise( vec2( bandW.mul( 2.7 ), 3.5 ) );
+		const layered = mix( mix( vec3( 0.055, 0.05, 0.045 ), vec3( 0.13, 0.118, 0.1 ), smoothstep( 0.3, 0.6, bandA ) ), vec3( 0.2, 0.185, 0.16 ), smoothstep( 0.72, 0.85, bandB ).mul( 0.6 ) )
+			.mul( mix( 0.85, 1.15, vnoise( xz.div( 35.0 ) ) ) );
+		const satRock2 = mix( satRock, layered, imgShade.mul( 0.85 ) );
+		const satAlb = mix( satRock2, satIce, satSnow );
 		const rO = length( xz );
 		const satK = smoothstep( 650.0, 1300.0, rO ).mul( step( abs( xz.x ), 15900.0 ) ).mul( step( abs( xz.y ), 15900.0 ) );
 		// --- colour map x tiled detail (as terrain tools / the landscapes article do it):

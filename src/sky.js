@@ -257,7 +257,7 @@ export class Sky {
 		U.horizon.value.setRGB( ...grey( p.hor, overcast * 0.6 ) );
 		U.horizonSun.value.setRGB( ...grey( p.hsun, overcast ) );
 		U.sunColor.value.setRGB( ...p.sun.map( ( v ) => v * ( 1 - overcast * 0.6 ) ) );
-		U.skyAmb.value.setRGB( ...p.amb.map( ( v ) => v * ( 1 + overcast * 0.4 ) ) );
+		U.skyAmb.value.setRGB( ...p.amb.map( ( v ) => v * ( 1 + overcast * 1.1 ) ) );
 		// ground bounce: grassy, proportional to sun + sky
 		const g = [ 0.09, 0.12, 0.04 ];
 		U.groundAmb.value.setRGB( ...g.map( ( v, i ) => v * ( p.sun[ i ] * 0.12 + p.amb[ i ] * 0.6 ) ) );
