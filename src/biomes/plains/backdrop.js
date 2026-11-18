@@ -20,7 +20,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec2, vec3, mix, smoothstep, clamp, max, pow, abs, dot, normalize, length, cameraPosition,
-	attribute, varying, positionLocal, sin, fract, select, uniform, texture, min, exp
+	attribute, varying, positionLocal, sin, fract, select, uniform, texture, min, exp, step
 } from 'three/tsl';
 import { vnoise } from '../../tsl/noise.js';
 import { U, applyFog, windField, gustSheen } from '../../tsl/world.js';
@@ -188,6 +188,10 @@ function backdropMaterial( hmTex ) {
 		return normalize( vec3( nx.z, nx.y, nx.x ).mul( w.x ).add( vec3( ny.x, ny.z, ny.y ).mul( w.y ) ).add( nz.mul( w.z ) ) );
 
 	};
+	const SAT = new THREE.TextureLoader().load( new URL( '../../assets/plains/satellite.webp', import.meta.url ).href );
+	SAT.colorSpace = THREE.NoColorSpace; // linear reflectance scale (see below)
+	SAT.anisotropy = 8;
+	SAT.flipY = false;
 	const hmap = ( q ) => texture( hmTex, q.div( HM_EXT * 2 ).add( 0.5 ) ).r;
 
 	mat.colorNode = Fn( () => {
@@ -208,12 +212,12 @@ function backdropMaterial( hmTex ) {
 		const sl0 = float( 1.0 ).sub( Ng0.y );
 		const dnv = normalize( Ng0.xz.add( vec2( 1e-4, 0 ) ) );
 		const acr = dot( xz, vec2( dnv.y.negate(), dnv.x ) );
-		const band = ( hh ) => vnoise( vec2( hh.div( 38.0 ), dot( xz, vec2( 0.004, 0.003 ) ) ) ).mul( 0.6 ).add( vnoise( vec2( hh.div( 13.0 ), acr.div( 60.0 ) ) ).mul( 0.4 ) );
-		const bandD = band( h.add( 2.0 ) ).sub( band( h.sub( 2.0 ) ) ).div( 4.0 ); // d(band)/dh
+		const band = ( hh ) => vnoise( vec2( hh.div( 55.0 ).add( vnoise( xz.div( 150.0 ) ).mul( 2.0 ) ), acr.div( 90.0 ) ) );
+		const bandD = band( h.add( 4.0 ) ).sub( band( h.sub( 4.0 ) ) ).div( 8.0 ); // d(band)/dh
 		const rib = vnoise( vec2( acr.div( 28.0 ), h.div( 300.0 ) ) ).mul( 0.6 ).add( vnoise( vec2( acr.div( 9.0 ), h.div( 120.0 ) ) ).mul( 0.4 ) );
 		const ribD = vnoise( vec2( acr.add( 2.0 ).div( 28.0 ), h.div( 300.0 ) ) ).sub( vnoise( vec2( acr.sub( 2.0 ).div( 28.0 ), h.div( 300.0 ) ) ) ).div( 4.0 );
 		const detK = smoothstep( 0.08, 0.3, sl0 ).mul( onMtn ).mul( smoothstep( 12000.0, 2000.0, dist ) );
-		const Ng = normalize( Ng0.add( vec3( dnv.x, 0.0, dnv.y ).mul( bandD.mul( - 90.0 ) ) ).add( vec3( dnv.y.negate(), 0.0, dnv.x ).mul( ribD.mul( 70.0 ) ) ).mul( vec3( 1.0 ) ).mul( detK ).add( Ng0.mul( float( 1.0 ).sub( detK ) ) ) );
+		const Ng = Ng0; // the real terrain's own relief (procedural strata looked fake)
 		const id = vI.x;
 		const slope = float( 1.0 ).sub( Ng.y ); // 0 flat .. 1 vertical
 		const isMtn = id.greaterThan( 0.5 ).and( id.lessThan( 3.5 ) );
@@ -233,7 +237,7 @@ function backdropMaterial( hmTex ) {
 		// --- scanned rock: macro (~170 m) + detail (~38 m) projections
 		const rockK = smoothstep( 30.0, 140.0, h ).mul( select( id.greaterThan( 0.5 ), float( 1.0 ), float( 0.0 ) ) );
 		const w = triW( Ng );
-		const sM = 1.0 / 170.0, sD = 1.0 / 38.0;
+		const sM = 1.0 / 55.0, sD = 1.0 / 17.0; // rock grain at realistic scales (large-scale form comes from the real terrain)
 		const dk = smoothstep( 9000.0, 2500.0, dist ); // detail fades with distance
 		const rockMacro = tri( T.rockC, P, w, sM ), rockDet = tri( T.rockC, P, w, sD );
 		const cliffMacro = tri( T.cliffC, P, w, sM * 1.3 ), cliffDet = tri( T.cliffC, P, w, sD * 1.2 );
@@ -280,19 +284,17 @@ function backdropMaterial( hmTex ) {
 
 		const albedo = canopy.toVar();
 		// ledges: the flat tops of the cliff bands hold soil and scrub (as on Paine Grande)
-		const ledge = smoothstep( 0.02, 0.0, bandD.abs() ).mul( smoothstep( 0.5, 0.65, band( h ) ) ).mul( detK ).mul( smoothstep( 1200.0, 600.0, h ) );
+		const ledge = smoothstep( 0.008, 0.0, bandD.abs() ).mul( smoothstep( 0.55, 0.7, band( h ) ) ).mul( detK ).mul( smoothstep( 1200.0, 600.0, h ) ).mul( 0.6 );
 		albedo.assign( select( isPG, pg, albedo ) );
 		albedo.assign( select( isCu, cu, albedo ) );
 		albedo.assign( select( id.greaterThan( 2.5 ).and( id.lessThan( 3.5 ) ), vh, albedo ) );
 		albedo.assign( select( id.greaterThan( 3.5 ), hl, albedo ) );
 		albedo.assign( mix( canopy, albedo, smoothstep( 25.0, 110.0, h ) ) );
-		albedo.assign( mix( albedo, forest.mul( 1.1 ), ledge.mul( 0.7 ) ) );
 		// cliff faces between the ledges: a little lighter, streaked
-		albedo.mulAssign( mix( float( 1.0 ), mix( 0.8, 1.25, rib ), detK.mul( rockiness ).mul( 0.7 ) ) );
 
 		// --- normal: geometry + scanned relief (granite on the Cuernos bodies, dark rock elsewhere)
 		const useCliff = isCu.and( h.lessThan( capLine ) ).and( h.greaterThan( 300.0 ) );
-		const nRock = triN( T.rockN, P, Ng, w, sM, float( 1.2 ) );
+		const nRock = triN( T.rockN, P, Ng, w, sM, float( 0.7 ) );
 		const nRockD = triN( T.rockN, P, Ng, w, sD, float( 0.9 ) );
 		const nCliff = triN( T.cliffN, P, Ng, w, sM * 1.3, float( 1.3 ) );
 		const nCliffD = triN( T.cliffN, P, Ng, w, sD * 1.2, float( 0.9 ) );
@@ -301,6 +303,19 @@ function backdropMaterial( hmTex ) {
 
 		// snow collects in the eroded gullies (concave relief from the mesh)
 		const groove = smoothstep( - 0.05, - 0.45, vK );
+
+		// --- real colour (the webgl-mountains way): Sentinel-2 true colour of the park
+		// (Copernicus, 21 Feb 2022, the sun baked into it removed), 15.6 m per texel.
+		// TCI maps reflectance 0..~0.2 to 0..255 linearly; saturated texels are snow / ice.
+		const suv = xz.div( 32000.0 ).add( 0.5 );
+		const sat = texture( SAT, suv ).rgb;
+		const satSnow = smoothstep( 0.85, 0.97, min( sat.r, min( sat.g, sat.b ) ) );
+		const satAlb = mix( sat.mul( 0.24 ), vec3( 0.82, 0.84, 0.88 ), satSnow );
+		const rO = length( xz );
+		const satK = smoothstep( 1100.0, 2300.0, rO ).mul( step( abs( xz.x ), 15900.0 ) ).mul( step( abs( xz.y ), 15900.0 ) );
+		// scanned rock grain modulates the satellite colour up close
+		const grain = mix( float( 1.0 ), rockL.clamp( 0.6, 1.5 ), rockK.mul( 0.5 ).mul( float( 1.0 ).sub( satSnow ) ) );
+		albedo.assign( mix( albedo, satAlb.mul( grain ), satK ) );
 
 		// --- snow and ice, controlled by U.snow (0 = bare rock .. 1 = deep winter)
 		const sAmt = U.snow;
