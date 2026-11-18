@@ -164,6 +164,7 @@ function backdropMaterial( hmTex ) {
 		rockC: loadTex( 'dark_rock_c', true ), rockN: loadTex( 'dark_rock_n' ),
 		cliffC: loadTex( 'granite_face_c', true ), cliffN: loadTex( 'granite_face_n' ),
 		snowC: loadTex( 'snow_02_c', true ), snowN: loadTex( 'snow_02_n' ),
+		turfC: loadTex( 'aerial_grass_c', true ),
 	};
 
 	// triplanar projection weights (sharpened)
@@ -309,19 +310,52 @@ function backdropMaterial( hmTex ) {
 		// TCI maps reflectance 0..~0.2 to 0..255 linearly; saturated texels are snow / ice.
 		const suv = xz.div( 32000.0 ).add( 0.5 );
 		const sat = texture( SAT, suv ).rgb;
-		const satSnow = smoothstep( 0.85, 0.97, min( sat.r, min( sat.g, sat.b ) ) );
+		// snow edges broken up below the 15 m texel by fine noise (wind-scoured, patchy)
+		const tearS = vnoise( xz.div( 9.0 ).add( vec2( 4, 1 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 3.1 ) ).mul( 0.4 ) ).sub( 0.5 ).mul( 0.22 );
+		const satSnow = smoothstep( 0.8, 0.9, min( sat.r, min( sat.g, sat.b ) ).add( tearS ) );
 		// snow / ice: keep texture and relief (scanned snow + broken grey-blue ice, dirty
 		// moraine streaks), never a flat white decal
 		const snowTexS = tri( T.snowC, P, triW( Ng ), 1.0 / 22.0 );
 		const iceVar = vnoise( xz.div( 60.0 ) ).mul( 0.6 ).add( vnoise( xz.div( 17.0 ) ).mul( 0.4 ) );
 		const satIce = mix( vec3( 0.5, 0.56, 0.62 ), vec3( 0.8, 0.82, 0.85 ), smoothstep( 0.3, 0.75, iceVar ) )
 			.mul( lum( snowTexS.rgb ).div( 0.62 ).clamp( 0.82, 1.1 ) );
-		const satAlb = mix( sat.mul( 0.24 ), satIce, satSnow );
+		// (dark rock that sat in shadow in the image is lifted toward a real rock reflectance)
+		const satRock = pow( sat, vec3( 0.75 ) ).mul( 0.26 ).max( vec3( 0.055, 0.052, 0.048 ) );
+		const satAlb = mix( satRock, satIce, satSnow );
 		const rO = length( xz );
-		const satK = smoothstep( 1100.0, 2300.0, rO ).mul( step( abs( xz.x ), 15900.0 ) ).mul( step( abs( xz.y ), 15900.0 ) );
-		// scanned rock grain modulates the satellite colour up close
-		const grain = mix( float( 1.0 ), rockL.clamp( 0.6, 1.5 ), rockK.mul( 0.5 ).mul( float( 1.0 ).sub( satSnow ) ) );
-		albedo.assign( mix( albedo, satAlb.mul( grain ), satK ) );
+		const satK = smoothstep( 650.0, 1300.0, rO ).mul( step( abs( xz.x ), 15900.0 ) ).mul( step( abs( xz.y ), 15900.0 ) );
+		// --- colour map x tiled detail (as terrain tools / the landscapes article do it):
+		// the satellite gives the true colour at ~15 m; a splat read from it (vegetation =
+		// green-dominant, snow = saturated, rock = the rest) picks scanned detail textures
+		// tiled at three scales (240 m / 60 m / 15 m), each normalised to mean 1, that
+		// multiply that colour, and blended detail normals give the faces their cracks,
+		// ledges and buttresses at every distance.
+		const veg = smoothstep( 0.0, 0.05, sat.g.sub( max( sat.r, sat.b ) ) ).mul( float( 1.0 ).sub( satSnow ) );
+		const rockM = float( 1.0 ).sub( veg ).mul( float( 1.0 ).sub( satSnow ) );
+		const wS = triW( Ng );
+		const fade1 = smoothstep( 16000.0, 3000.0, dist ), fade2 = smoothstep( 6000.0, 900.0, dist ), fade3 = smoothstep( 1800.0, 250.0, dist );
+		const rTex = ( tex, sc ) => tri( tex, P, wS, sc );
+		const isGr = isCu.and( h.lessThan( capLine ) );
+		const rA = select( isGr, rTex( T.cliffC, 1.0 / 240.0 ), rTex( T.rockC, 1.0 / 240.0 ) );
+		const rB = select( isGr, rTex( T.cliffC, 1.0 / 60.0 ), rTex( T.rockC, 1.0 / 60.0 ) );
+		const rC = select( isGr, rTex( T.cliffC, 1.0 / 15.0 ), rTex( T.rockC, 1.0 / 15.0 ) );
+		const meanR = select( isGr, float( 0.36 ), float( 0.11 ) );
+		const dR = ( c, f, k ) => mix( float( 1.0 ), pow( lum( c.rgb ).div( meanR ).mul( mix( 0.7, 1.2, c.a ) ), 1.3 ).clamp( 0.3, 2.4 ), f.mul( k ) );
+		const rockDetail = dR( rA, fade1, 0.85 ).mul( dR( rB, fade2, 0.7 ) ).mul( dR( rC, fade3, 0.5 ) );
+		const tA = texture( T.turfC, xz.div( 30.0 ) ), tB = texture( T.turfC, xz.div( 7.0 ).add( 0.37 ) );
+		const dT = ( c, f ) => mix( float( 1.0 ), lum( c.rgb ).div( 0.58 ).clamp( 0.4, 1.8 ), f );
+		const vegDetail = dT( tA, fade2.mul( 0.8 ) ).mul( dT( tB, fade3.mul( 0.7 ) ) );
+		// cavities (scan height) hold shadow even where the sun does not reach
+		const cav = mix( float( 1.0 ), mix( 0.55, 1.1, rA.a.mul( 0.5 ).add( rB.a.mul( 0.5 ) ) ), rockM.mul( fade2 ) );
+		const detail = mix( mix( float( 1.0 ), rockDetail, rockM ), vegDetail, veg ).mul( cav ).clamp( 0.3, 2.2 );
+		albedo.assign( mix( albedo, satAlb.mul( detail ), satK ) );
+		// detail normals (three scales, perturbations summed), on rock, strongest on the steep faces
+		const nA = triN( T.rockN, P, Ng, wS, 1.0 / 240.0, float( 1.0 ) );
+		const nB = triN( T.rockN, P, Ng, wS, 1.0 / 60.0, float( 0.9 ) );
+		const nC = triN( T.rockN, P, Ng, wS, 1.0 / 15.0, float( 0.7 ) );
+		const pert = nA.sub( Ng ).mul( fade1 ).add( nB.sub( Ng ).mul( fade2 ) ).add( nC.sub( Ng ).mul( fade3 ) );
+		const rockN = rockM.mul( smoothstep( 0.05, 0.3, slope ).mul( 0.7 ).add( 0.3 ) ).mul( satK );
+		N.assign( normalize( mix( N, normalize( Ng.add( pert ) ), rockN ) ) );
 
 		// --- snow and ice, controlled by U.snow (0 = bare rock .. 1 = deep winter)
 		const sAmt = U.snow;
@@ -412,12 +446,16 @@ function backdropMaterial( hmTex ) {
 		// distant cloud shadows: softer and less deep (scattered light fills them in)
 		const sunVis = mix( cloudShadowAt( xz, h ), float( 0.7 ), smoothstep( 1500.0, 6000.0, dist ).mul( 0.6 ) ).max( 0.3 ).mul( smoothstep( - 0.04, 0.06, L.y ) ).mul( cast );
 		const amb = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( mix( 0.75, 1.0, smoothstep( 0.0, 0.5, N.y ) ) ).mul( mix( 0.3, 1.0, occ ) );
+		// skylight on the rock: shaded faces are lit by the bright sky (strongest from the
+		// sky opposite the sun), which is what shows their texture in real photographs
+		const fillDir = normalize( vec3( L.x.negate(), 0.8, L.z.negate() ) );
+		const skyFill = U.skyAmb.add( U.horizon.mul( 0.25 ) ).mul( clamp( dot( N, fillDir ), 0.0, 1.0 ).mul( 2.2 ).add( 1.0 ) ).mul( satK.mul( float( 1.0 ).sub( veg.mul( 0.5 ) ) ) ).mul( mix( 0.35, 1.0, occ ) );
 		const V = normalize( cameraPosition.sub( P ) );
 		const Hh = normalize( L.add( V ) );
 		// snow glitters a little; wet dark rock has a faint sheen; glacier ice is glossy
 		const spec = pow( clamp( dot( N, Hh ), 0.0, 1.0 ), mix( 18.0, 60.0, glacier ) ).mul( snowAmt.mul( 0.22 ).add( glacier.mul( 0.25 ) ).add( rockK.mul( 0.03 ) ) );
 		const sheen = mix( float( 1.0 ), gustSheen( windField( xz ) ), smoothstep( 40.0, 10.0, h ).mul( 0.6 ) );
-		const col = albedo.mul( sheen ).mul( U.sunColor.mul( diff ).mul( sunVis ).add( amb ) ).add( U.sunColor.mul( spec ).mul( sunVis ) ).toVar();
+		const col = albedo.mul( sheen ).mul( U.sunColor.mul( diff ).mul( sunVis ).add( amb ).add( skyFill ) ).add( U.sunColor.mul( spec ).mul( sunVis ) ).toVar();
 		// snow in shade glows faintly blue (skylight scattered through the snowpack)
 		col.addAssign( U.skyAmb.mul( vec3( 0.55, 0.8, 1.35 ) ).mul( snowAmt.mul( float( 1.0 ).sub( diff.mul( sunVis ) ) ).mul( 0.3 ) ) );
 		// aerial perspective: distant rock goes cool blue-grey before the fog proper
