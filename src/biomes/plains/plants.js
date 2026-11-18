@@ -366,7 +366,8 @@ function heroNotro( sp, seed ) {
 export function plantLODs( sp, seed ) {
 
 	const lods = plantLODs3( sp, seed );
-	const hero = sp.name === 'notro' ? heroNotro( sp, seed ) : plantLODs3( sp, seed )[ 0 ];
+	// the same bush at every distance: the near LOD only adds detail (no swap to another plant)
+	const hero = plantLODs3( sp, seed )[ 0 ];
 	return [ hero, ...lods ];
 
 }

@@ -14,7 +14,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec2, vec3, vec4, mix, smoothstep, clamp, max, min, exp, dot, normalize, fract, Loop, If, Break,
-	texture3D, cameraPosition, screenCoordinate, pow
+	texture3D, cameraPosition, screenCoordinate, pow, select
 } from 'three/tsl';
 import { U } from './uniforms.js';
 
@@ -228,6 +228,90 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 	} );
 
 
-	return { march, density, BASE, TOP, SIGMA };
+	// Screen-space volume march (the cloud post pass, after ceddc's ArcGIS RenderNode
+	// clouds): from the eye along `dir` up to `maxDist` (the visible surface from the
+	// depth buffer, or the deck's far side over open sky), so clouds sit in front of
+	// mountains too and summits vanish into them. Steps are spaced quadratically
+	// (dense near the eye, where billows cover the most pixels) and sampled at their
+	// midpoints: no dither pattern, no stripes, stable when paused.
+	const marchView = Fn( ( [ ro, dir, maxDist ] ) => {
+
+		const result = vec4( 0, 0, 0, 1 ).toVar();
+		const dy = select( dir.y.abs().lessThan( 1e-4 ), float( 1e-4 ), dir.y );
+		const tb = float( BASE ).sub( ro.y ).div( dy ), tt = float( TOP ).sub( ro.y ).div( dy );
+		const tEnter = max( min( tb, tt ), 0.0 );
+		const tExit = min( max( tb, tt ), tEnter.add( 14000.0 ) );
+		const end = min( tExit, maxDist );
+		If( end.greaterThan( tEnter.add( 1.0 ) ), () => {
+
+			const L = U.sunDir;
+			const mu = dot( dir, L );
+			const phase = mix( hg( mu, - 0.25 ), hg( mu, 0.65 ), 0.55 ).mul( 4.0 * Math.PI ).add( 0.15 );
+			const T = float( 1.0 ).toVar();
+			const acc = vec3( 0 ).toVar();
+			const ambTop = U.skyAmb.mul( 1.25 ).add( U.zenith.mul( 0.25 ) );
+			const ambBot = U.groundAmb.mul( 1.2 ).add( U.horizonSun.mul( U.twilight.mul( 0.25 ) ) ).add( U.horizon.mul( 0.08 ) );
+			const sunLit = smoothstep( - 0.08, 0.04, L.y );
+			const span = end.sub( tEnter );
+
+			Loop( STEPS, ( { i } ) => {
+
+				const a = float( i ).div( STEPS ), b = float( i ).add( 1.0 ).div( STEPS );
+				const dt = span.mul( b.mul( b ).sub( a.mul( a ) ) );
+				const t = tEnter.add( span.mul( a.mul( a ) ) ).add( dt.mul( 0.5 ) );
+				const p = ro.add( dir.mul( t ) );
+				const d = density( p, false );
+				If( d.greaterThan( 0.003 ), () => {
+
+					// light: a short march toward the sun, strides growing x1.7
+					const od = float( 0 ).toVar();
+					let stride = 120.0, at = 0.0;
+					for ( let k = 0; k < LSTEPS; k ++ ) {
+
+						at += stride * 0.5;
+						od.addAssign( density( p.add( L.mul( at ) ), true ).mul( stride ) );
+						at += stride * 0.5;
+						stride *= 1.7;
+
+					}
+
+					let ms = float( 0 );
+					for ( let o = 0; o < 3; o ++ ) {
+
+						const ka = Math.pow( 0.5, o ), kb = Math.pow( 0.45, o ), kc = Math.pow( 0.6, o );
+						ms = ms.add( exp( od.mul( - SIGMA * kb ) ).mul( mix( float( 1.0 ), phase, kc ) ).mul( ka ) );
+
+					}
+
+					const powder = float( 1.0 ).sub( exp( d.mul( - 2.0 * 120.0 * SIGMA ) ) ).mul( 0.6 ).add( 0.4 );
+					const hf = clamp( p.y.sub( BASE ).div( TOP - BASE ), 0.0, 1.0 );
+					const sun = U.sunColor.mul( ms.mul( powder ).mul( 1.1 ) ).mul( sunLit );
+					const beer = exp( od.mul( - SIGMA ) );
+					const amb = mix( ambBot, ambTop, hf ).mul( mix( 0.3, 1.0, beer.mul( 0.5 ).add( hf.mul( 0.5 ) ) ) );
+					// aerial perspective on the way to the eye
+					const hz = float( 1.0 ).sub( exp( t.div( - 30000.0 ) ) );
+					const S = mix( sun.add( amb ), U.horizon, hz.mul( 0.8 ) );
+					const ab = float( 1.0 ).sub( exp( d.mul( dt ).mul( - SIGMA ) ) );
+					acc.addAssign( S.mul( ab ).mul( T ) );
+					T.mulAssign( float( 1.0 ).sub( ab ) );
+
+				} );
+				If( T.lessThan( 0.012 ), () => {
+
+					Break();
+
+				} );
+
+			} );
+
+			result.assign( vec4( acc, T ) );
+
+		} );
+
+		return result;
+
+	} );
+
+	return { march, marchView, density, BASE, TOP, SIGMA };
 
 }

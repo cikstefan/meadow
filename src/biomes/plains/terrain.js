@@ -226,6 +226,31 @@ function ridged( x, z, oct ) {
 
 }
 
+// ridged multifractal with every octave rotated (~37 deg) and soft-folded
+// (sqrt(x^2 + e) instead of |x|): no lattice-aligned creases, rounded ridge crests
+// at the large scales that sharpen into aretes at the small ones
+const ROT = [ Math.cos( 0.65 ), Math.sin( 0.65 ) ];
+function ridgedRot( x, z, oct ) {
+
+	let s = 0, a = 0.5, norm = 0, prev = 1;
+	for ( let i = 0; i < oct; i ++ ) {
+
+		const v = vnoiseJS( x + i * 17.3, z + i * 5.1 ) * 2 - 1;
+		const eps = 0.06 / ( 1 + i );
+		const n = 1 - Math.sqrt( v * v + eps * eps ) + eps;
+		const r = n * n * ( 0.35 + 0.65 * prev );
+		s += r * a; norm += a;
+		prev = n;
+		a *= 0.5;
+		const nx = ( x * ROT[ 0 ] - z * ROT[ 1 ] ) * 2.03, nz = ( x * ROT[ 1 ] + z * ROT[ 0 ] ) * 2.03;
+		x = nx; z = nz;
+
+	}
+
+	return s / norm;
+
+}
+
 // nearest point on a crest polyline -> { d, h, s } (s: distance along the crest)
 function crestDist( m, x, z ) {
 
@@ -269,8 +294,15 @@ function massif( m, x, z, seed ) {
 	const rg = ridged( wx / 1100 + seed, wz / 1100 + seed * 0.7, 6 );
 	// broad massive faces; the ridged relief mostly sharpens the upper ridges
 	const peaks = 0.9 + 0.16 * rg * ( 0.4 + 0.6 * prof );
-	return Math.max( 0, h * prof * peaks + ( rg - 0.5 ) * m.jag * h * 0.22 * Math.pow( 1 - u, 1.2 ) );
-
+	// spur-and-gully network: a domain-warped, slope-damped ridged multifractal
+	// so ridges branch off the crest as spurs with gullies between them,
+	// the way a real massif's flanks are built, before erosion carves them further
+	const mid = Math.sin( Math.PI * Math.min( 1, u * 1.05 ) );
+	// (ridged multifractal: each octave weighted by the one above, so detail lives on
+	// the ridges and the gullies stay smooth)
+	const ww = vnoiseJS( wx / 600 + 13, wz / 600 - 4 ) - 0.5;
+	const net = ridgedRot( wx / 1100 + seed * 3 + ww * 0.7, wz / 1100 - seed + ww * 0.7, 6 );
+	return Math.max( 0, h * prof * peaks + ( rg - 0.5 ) * m.jag * h * 0.22 * Math.pow( 1 - u, 1.2 ) + ( net - 0.3 ) * h * 0.55 * ( 0.25 + 0.75 * mid ) );
 }
 
 // Cuernos towers: sheer granite walls (steep plateau profile) topped by a

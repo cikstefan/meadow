@@ -17,7 +17,8 @@ export const RELIEF_EXT = 10000; // half extent (m)
 export const RELIEF_N = 768; // cells per side (~26 m)
 const CELL = RELIEF_EXT * 2 / RELIEF_N;
 
-let H = null, TEX = null, ID = null;
+let H = null, TEX = null, ID = null, AUX = null, AUXTEX = null;
+let FLOW = null;
 
 function rng( seed ) {
 
@@ -31,18 +32,18 @@ function rng( seed ) {
 
 }
 
-function erode( h, N, droplets, r ) {
+function erode( h, N, droplets, r, flow ) {
 
 	const inertia = 0.06, capacity = 6, minSlope = 0.02, depositK = 0.25, erodeK = 0.35, evap = 0.02, gravity = 6, maxSteps = 56;
 	// erosion brush (radius 2): wider, smoother channels than single-cell erosion
 	const BR = [];
 	let wsum = 0;
-	for ( let y = - 2; y <= 2; y ++ ) for ( let x = - 2; x <= 2; x ++ ) {
+	for ( let y = - 3; y <= 3; y ++ ) for ( let x = - 3; x <= 3; x ++ ) {
 
 		const d = Math.hypot( x, y );
-		if ( d <= 2.2 ) {
+		if ( d <= 3.2 ) {
 
-			const w = 2.2 - d; BR.push( x, y, w ); wsum += w;
+			const w = 3.2 - d; BR.push( x, y, w ); wsum += w;
 
 		}
 
@@ -57,7 +58,7 @@ function erode( h, N, droplets, r ) {
 		let x = 0, y = 0, ok = false;
 		for ( let k = 0; k < 6 && ! ok; k ++ ) {
 
-			x = 2 + r() * ( N - 5 ); y = 2 + r() * ( N - 5 );
+			x = 4 + r() * ( N - 9 ); y = 4 + r() * ( N - 9 );
 			ok = at( x | 0, y | 0 ) > 1.5;
 
 		}
@@ -78,7 +79,7 @@ function erode( h, N, droplets, r ) {
 			if ( len < 1e-6 ) break;
 			dx /= len; dy /= len;
 			x += dx; y += dy;
-			if ( x < 2 || y < 2 || x >= N - 3 || y >= N - 3 ) break;
+			if ( x < 4 || y < 4 || x >= N - 5 || y >= N - 5 ) break;
 			const jx = x | 0, jy = y | 0, gx2 = x - jx, gy2 = y - jy, j0 = jy * N + jx;
 			const hn = h[ j0 ] * ( 1 - gx2 ) * ( 1 - gy2 ) + h[ j0 + 1 ] * gx2 * ( 1 - gy2 ) + h[ j0 + N ] * ( 1 - gx2 ) * gy2 + h[ j0 + N + 1 ] * gx2 * gy2;
 			const dh = hn - hc;
@@ -104,6 +105,7 @@ function erode( h, N, droplets, r ) {
 
 			}
 
+			if ( flow ) flow[ i0 ] += water;
 			speed = Math.sqrt( Math.max( 0, speed * speed - dh * gravity ) );
 			water *= 1 - evap;
 			if ( water < 0.02 ) break;
@@ -134,11 +136,12 @@ export function buildRelief( m ) {
 
 	const t1 = performance.now();
 	const orig = new Float32Array( h );
-	erode( h, N, 220000, rng( 90210 ) );
+	FLOW = new Float32Array( N * N );
+	erode( h, N, 220000, rng( 90210 ), FLOW );
 	// hard rock (the granite walls) keeps its shape: blend the uneroded height back
 	// keep 55% of the carving everywhere (gullies, not knife-edge fins), and hard rock
 	// (the granite walls) keeps its shape almost entirely
-	for ( let k = 0; k < N * N; k ++ ) h[ k ] = orig[ k ] + ( h[ k ] - orig[ k ] ) * 0.55 * ( 1 - hard[ k ] * 0.85 );
+	for ( let k = 0; k < N * N; k ++ ) h[ k ] = orig[ k ] + ( h[ k ] - orig[ k ] ) * 0.4 * ( 1 - hard[ k ] * 0.85 );
 	// thermal smoothing of single-cell spikes left by the droplets (one gentle pass)
 	const o = new Float32Array( h );
 	for ( let j = 1; j < N - 1; j ++ ) for ( let i = 1; i < N - 1; i ++ ) {
@@ -151,6 +154,7 @@ export function buildRelief( m ) {
 
 	for ( let k = 0; k < N * N; k ++ ) o[ k ] = Math.max( 0, o[ k ] * CELL );
 	H = o;
+	bakeAux( orig, N );
 	console.log( `relief: ${ N }^2 heightmap ${ ( t1 - t0 ).toFixed( 0 ) } ms + erosion ${ ( performance.now() - t1 ).toFixed( 0 ) } ms` );
 	return H;
 
@@ -166,6 +170,82 @@ export function reliefIdJS( x, z ) {
 	return ID[ j * N + i ];
 
 }
+
+// Baked terrain maps (what tools like World Creator / Gaea export as splat maps):
+//   R flow      - how much water ran over each cell (log): streaks, wet channels
+//   G sediment  - deposited (>0.5) or carved (<0.5) by erosion: talus fans vs fresh rock
+//   B occlusion - horizon-based sky visibility (8 directions): gullies and couloirs darken
+//   A slope     - 0 flat .. 1 vertical
+function bakeAux( orig, N ) {
+
+	const t0 = performance.now();
+	const d = new Uint8Array( N * N * 4 );
+	// blur the flow a little (droplet paths are noisy) and log-compress it
+	const f = new Float32Array( N * N );
+	for ( let j = 1; j < N - 1; j ++ ) for ( let i = 1; i < N - 1; i ++ ) {
+
+		const k = j * N + i;
+		f[ k ] = FLOW[ k ] * 0.4 + ( FLOW[ k - 1 ] + FLOW[ k + 1 ] + FLOW[ k - N ] + FLOW[ k + N ] ) * 0.15;
+
+	}
+
+	const dirs = [];
+	for ( let a = 0; a < 8; a ++ ) dirs.push( [ Math.cos( a * Math.PI / 4 ), Math.sin( a * Math.PI / 4 ) ] );
+	for ( let j = 0; j < N; j ++ ) for ( let i = 0; i < N; i ++ ) {
+
+		const k = j * N + i;
+		const h0 = H[ k ];
+		d[ k * 4 ] = Math.min( 255, Math.log( 1 + f[ k ] ) * 55 );
+		d[ k * 4 + 1 ] = Math.max( 0, Math.min( 255, 128 + ( H[ k ] - orig[ k ] * CELL ) * 2.5 ) ); // metres deposited (+) / carved (-)
+		// sky visibility: mean over 8 directions of (1 - sin(horizon angle)), 10 steps out to ~800 m
+		let vis = 0;
+		if ( h0 > 2 ) {
+
+			for ( const [ dx, dz ] of dirs ) {
+
+				let maxT = 0;
+				for ( let s = 1, dist = 1.5; s <= 10; s ++, dist *= 1.45 ) {
+
+					const x = Math.round( i + dx * dist ), z = Math.round( j + dz * dist );
+					if ( x < 0 || z < 0 || x >= N || z >= N ) break;
+					const t = ( H[ z * N + x ] - h0 ) / ( dist * CELL );
+					if ( t > maxT ) maxT = t;
+
+				}
+
+				vis += 1 - maxT / Math.sqrt( 1 + maxT * maxT );
+
+			}
+
+			vis /= 8;
+
+		} else vis = 1;
+		d[ k * 4 + 2 ] = Math.round( vis * 255 );
+		const gx = ( H[ Math.min( N - 1, i + 1 ) + j * N ] - H[ Math.max( 0, i - 1 ) + j * N ] ) / ( 2 * CELL );
+		const gz = ( H[ i + Math.min( N - 1, j + 1 ) * N ] - H[ i + Math.max( 0, j - 1 ) * N ] ) / ( 2 * CELL );
+		d[ k * 4 + 3 ] = Math.round( Math.min( 1, 1 - 1 / Math.sqrt( 1 + gx * gx + gz * gz ) ) * 255 );
+
+	}
+
+	AUX = d;
+	FLOW = null;
+	console.log( `relief: baked flow / sediment / occlusion / slope maps (${ ( performance.now() - t0 ).toFixed( 0 ) } ms)` );
+
+}
+
+export function reliefAuxTexture() {
+
+	if ( AUXTEX ) return AUXTEX;
+	const N = RELIEF_N;
+	AUXTEX = new THREE.DataTexture( AUX || new Uint8Array( N * N * 4 ), N, N, THREE.RGBAFormat );
+	AUXTEX.magFilter = AUXTEX.minFilter = THREE.LinearFilter;
+	AUXTEX.needsUpdate = true;
+	return AUXTEX;
+
+}
+
+// TSL: the baked maps at xz (vec4, see bakeAux)
+export const reliefAux = ( xz ) => texture( reliefAuxTexture(), xz.div( RELIEF_EXT * 2 ).add( 0.5 ) ).level( 0 );
 
 // bilinear lookup (metres); 0 outside the map
 export function reliefJS( x, z ) {
@@ -183,9 +263,19 @@ export function reliefTexture() {
 
 	if ( TEX ) return TEX;
 	const N = RELIEF_N;
-	const d = new Uint16Array( N * N );
-	if ( H ) for ( let k = 0; k < N * N; k ++ ) d[ k ] = THREE.DataUtils.toHalfFloat( H[ k ] );
-	TEX = new THREE.DataTexture( d, N, N, THREE.RedFormat, THREE.HalfFloatType );
+	// two half-float channels: a coarse part (whole multiples of 16 m, exact in half
+	// precision) + the fine remainder (0..16 m at ~1 cm). Linear filtering is linear,
+	// so R + G filters exactly; a single half channel would quantise heights to ~1 m
+	// up high (visible as contour-line terracing in the shading)
+	const d = new Uint16Array( N * N * 2 );
+	if ( H ) for ( let k = 0; k < N * N; k ++ ) {
+
+		const c = Math.floor( H[ k ] / 16 ) * 16;
+		d[ k * 2 ] = THREE.DataUtils.toHalfFloat( c ); d[ k * 2 + 1 ] = THREE.DataUtils.toHalfFloat( H[ k ] - c );
+
+	}
+
+	TEX = new THREE.DataTexture( d, N, N, THREE.RGFormat, THREE.HalfFloatType );
 	TEX.magFilter = TEX.minFilter = THREE.LinearFilter;
 	TEX.wrapS = TEX.wrapT = THREE.ClampToEdgeWrapping;
 	TEX.needsUpdate = true;
@@ -194,4 +284,9 @@ export function reliefTexture() {
 }
 
 // TSL: mountain height (m) at xz (explicit LOD so it also works in compute shaders)
-export const relief = ( xz ) => texture( reliefTexture(), xz.div( RELIEF_EXT * 2 ).add( 0.5 ) ).level( 0 ).r;
+export const relief = ( xz ) => {
+
+	const t = texture( reliefTexture(), xz.div( RELIEF_EXT * 2 ).add( 0.5 ) ).level( 0 );
+	return t.r.add( t.g );
+
+};

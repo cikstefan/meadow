@@ -19,7 +19,7 @@ import {
 	cameraPosition, faceDirection, texture, uv, select, exp
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
-import { U, shadeFoliage } from '../../tsl/world.js';
+import { U, shadeFoliage, windField } from '../../tsl/world.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS, gravelPatchJS } from './terrain.js';
 import { cloudShadowGround } from './index.js';
 import { TILE } from './atlas.js';
@@ -42,7 +42,7 @@ export { scrubFieldsTSL };
 
 // --- geometry ------------------------------------------------------------------
 // lumpy dome (unit radius / height) + leafy cards on its surface
-function moundGeometry( seed, detail, cards ) {
+function moundGeometry( seed, detail, cards, core ) {
 
 	const r = rng( seed );
 	const ico = new THREE.IcosahedronGeometry( 1, detail );
@@ -58,6 +58,9 @@ function moundGeometry( seed, detail, cards ) {
 
 	};
 
+	// the core: up close only a small, dark inner mass that keeps the bush from
+	// looking hollow (hidden inside the foliage); far away the full dome stands for
+	// the whole bush
 	for ( let i = 0; i < P.count; i += 3 ) {
 
 		const tri = [ 0, 1, 2 ].map( ( k ) => new THREE.Vector3( P.getX( i + k ), P.getY( i + k ), P.getZ( i + k ) ) );
@@ -65,7 +68,7 @@ function moundGeometry( seed, detail, cards ) {
 		for ( const v of tri ) {
 
 			const n = v.clone().normalize();
-			const k = lump( n );
+			const k = lump( n ) * core;
 			pos.push( n.x * k, Math.max( - 0.2, n.y ) * k, n.z * k );
 			nrm.push( n.x, Math.max( 0, n.y ) + 0.2, n.z );
 			uvs.push( 0, 0 );
@@ -75,27 +78,33 @@ function moundGeometry( seed, detail, cards ) {
 
 	}
 
-	// cards: rooted just inside the surface, standing out along the normal, upper part favoured
+	// foliage: sprig cards filling the whole volume (more toward the outside, where
+	// the light is), each rooted toward the centre and leaning outward and up, like
+	// shoots growing out of the bush; soft canopy normals for volume shading
 	for ( let c = 0; c < cards; c ++ ) {
 
-		const th = r() * Math.PI * 2, ph = Math.acos( 1 - r() * 1.15 );
+		const th = r() * Math.PI * 2, ph = Math.acos( 1 - r() * 1.2 );
 		const n = new THREE.Vector3( Math.sin( ph ) * Math.cos( th ), Math.cos( ph ), Math.sin( ph ) * Math.sin( th ) );
+		const depth = Math.pow( r(), 0.45 ); // 0 centre .. 1 surface
 		const k = lump( n );
-		const o = n.clone().multiplyScalar( k * 0.82 );
-		const d = n.clone().add( new THREE.Vector3( 0, 0.6, 0 ) ).add( new THREE.Vector3( r() - 0.5, 0, r() - 0.5 ).multiplyScalar( 0.6 ) ).normalize();
+		const o = n.clone().multiplyScalar( k * ( 0.25 + 0.6 * depth ) );
+		o.y = Math.max( o.y, - 0.05 );
+		const d = n.clone().multiplyScalar( 0.7 ).add( new THREE.Vector3( 0, 0.75, 0 ) ).add( new THREE.Vector3( r() - 0.5, r() * 0.3, r() - 0.5 ).multiplyScalar( 0.7 ) ).normalize();
 		const side = new THREE.Vector3().crossVectors( d, new THREE.Vector3( r() - 0.5, r() - 0.5, r() - 0.5 ) ).normalize();
-		const s = ( 0.5 + r() * 0.3 ) * ( cards > 60 ? 1 : 1.35 ), w = s * ( 0.95 + r() * 0.35 );
-		const top = n.y > 0.45 ? 2 : 1;
+		const s = ( 0.34 + r() * 0.22 ) * ( cards > 80 ? 1 : 1.45 ), w = s * ( 0.9 + r() * 0.35 );
+		const top = n.y > 0.45 && depth > 0.6 ? 2 : 1;
 		const corners = [ [ - 0.5, 0, 0, 1 ], [ 0.5, 0, 1, 1 ], [ 0.5, 1, 1, 0 ], [ - 0.5, 1, 0, 0 ] ];
 		const v = corners.map( ( [ a, b, u, vv ] ) => [ o.clone().addScaledVector( side, a * w ).addScaledVector( d, b * s ), u, vv ] );
 		const seedc = r();
+		const cn = n.clone().multiplyScalar( 0.6 + 0.4 * depth ).add( new THREE.Vector3( 0, 0.35, 0 ) ).normalize();
 		for ( const idx of [ 0, 1, 2, 0, 2, 3 ] ) {
 
 			const [ p, u, vv ] = v[ idx ];
 			pos.push( p.x, p.y, p.z );
-			nrm.push( n.x, n.y + 0.3, n.z );
+			nrm.push( cn.x, cn.y, cn.z );
 			uvs.push( u, vv );
-			kind.push( top, n.y, seedc );
+			// y: height on the bush (for wind + AO), z: card seed
+			kind.push( top, Math.min( 1, p.y ) * ( 0.5 + 0.5 * depth ), seedc );
 
 		}
 
@@ -185,10 +194,10 @@ export class Scrub {
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
 		this.lastTilePos = new THREE.Vector3( 1e9, 0, 0 );
 		const mat = this.material();
-		const LODS = [ { detail: 2, cards: 120, cap: 6000 }, { detail: 1, cards: 18, cap: 26000 }, { detail: 0, cards: 0, cap: 70000 } ];
-		this.meshes = [ ...LODS, { flowers: 14, cap: 600 } ].map( ( L, l ) => {
+		const LODS = [ { detail: 1, cards: 190, cap: 6000, core: 0.55 }, { detail: 1, cards: 46, cap: 26000, core: 0.62 }, { detail: 0, cards: 0, cap: 70000, core: 1 } ];
+		this.meshes = LODS.map( ( L, l ) => {
 
-			const g = L.flowers ? flowerGeometry( 777, L.flowers ) : moundGeometry( 4242 + l, L.detail, L.cards );
+			const g = L.flowers ? flowerGeometry( 777, L.flowers ) : moundGeometry( 4242 + l, L.detail, L.cards, L.core );
 			const a = new THREE.InstancedBufferAttribute( new Float32Array( L.cap * 4 ), 4 );
 			const b = new THREE.InstancedBufferAttribute( new Float32Array( L.cap * 4 ), 4 );
 			a.setUsage( THREE.DynamicDrawUsage ); b.setUsage( THREE.DynamicDrawUsage );
@@ -236,15 +245,18 @@ export class Scrub {
 			const c = cos( B.y ), s = sin( B.y );
 			const rot = ( v ) => vec3( v.x.mul( c ).sub( v.z.mul( s ) ), v.y, v.x.mul( s ).add( v.z.mul( c ) ) );
 			const local = rot( vec3( p.x.mul( A.w ), p.y.mul( B.x ), p.z.mul( A.w ) ) );
-			// wind: the dome barely moves, the leafy rim shivers
+			// wind, like the grass: the travelling gust field bends the whole bush
+			// downwind (more toward the top and outside), each shoot sways on a slow,
+			// wind-driven phase of its own: no repetitive per-card flicker
 			const W = vec3( U.windDir.x, 0, U.windDir.y );
-			const gust = vnoise( A.xz.sub( U.windOffset ).div( 13.0 ) ).mul( 0.7 ).add( 0.3 );
-			const hk = clamp( p.y, 0.0, 1.2 );
-			const flut = sin( U.time.mul( mix( 6.0, 11.0, K.z ) ).add( K.z.mul( 50.0 ) ) ).mul( select( K.x.greaterThan( 0.5 ), float( 0.04 ), float( 0.0 ) ) );
-			const disp = W.mul( U.windStrength.mul( gust ).mul( hk ).mul( B.x ).mul( 0.03 ) ).add( normalize( rot( n ) ).mul( flut.mul( U.windStrength ).mul( B.x ) ) );
-			// 3D flowers only on notro mounds, only the clusters within the bush's bloom
-			const tubeOff = K.x.greaterThan( 2.5 ).and( B.z.lessThan( 3.5 ).or( K.z.greaterThan( mix( 0.35, 0.8, B.w ) ) ) );
-			const w = select( tubeOff, A.xyz, A.xyz.add( local ).add( disp ) );
+			const wind = windField( A.xz );
+			const hk = clamp( K.y, 0.0, 1.0 ).pow( 1.4 );
+			const phase = dot( A.xz, U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( K.z.mul( 6.0 ) );
+			const sway = sin( phase ).mul( 0.35 ).add( sin( phase.mul( 2.3 ).add( K.z.mul( 13.0 ) ) ).mul( 0.12 ) ).add( 0.6 );
+			const shoot = select( K.x.greaterThan( 0.5 ), float( 1.0 ), float( 0.25 ) );
+			const disp = W.mul( wind.mul( sway ).mul( hk ).mul( B.x ).mul( 0.12 ).mul( shoot ) )
+				.add( vec3( 0, - 1, 0 ).mul( wind.mul( hk ).mul( B.x ).mul( 0.03 ).mul( shoot ) ) );
+			const w = A.xyz.add( local ).add( disp );
 			vW.assign( w );
 			vN.assign( normalize( rot( n ).mul( vec3( 1.0 / 1.0, 1.0, 1.0 ) ) ) );
 			vK.assign( vec4( K.x, K.y, K.z, B.z ) );
@@ -335,20 +347,12 @@ export class Scrub {
 		this.lastPos.copy( cp );
 		const L0 = LOD_DIST[ 0 ] ** 2, L1 = LOD_DIST[ 1 ] ** 2, R2 = RADIUS * RADIUS;
 		const A = this.meshes.map( ( m ) => m.geometry.attributes.iA.array ), B = this.meshes.map( ( m ) => m.geometry.attributes.iB.array );
-		const n = [ 0, 0, 0, 0 ];
+		const n = [ 0, 0, 0 ];
 		for ( const d of this.tiles.values() ) for ( let i = 0; i < d.length; i += 8 ) {
 
 			const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z, r2 = dx * dx + dz * dz;
 			if ( r2 > R2 ) continue;
 			const l = r2 < L0 ? 0 : r2 < L1 ? 1 : 2;
-			if ( d[ i + 6 ] > 3.5 && r2 < 225 && n[ 3 ] * 4 < A[ 3 ].length ) {
-
-				const k = ( n[ 3 ] ++ ) * 4;
-				A[ 3 ][ k ] = d[ i ]; A[ 3 ][ k + 1 ] = d[ i + 1 ]; A[ 3 ][ k + 2 ] = d[ i + 2 ]; A[ 3 ][ k + 3 ] = d[ i + 3 ];
-				B[ 3 ][ k ] = d[ i + 4 ]; B[ 3 ][ k + 1 ] = d[ i + 5 ]; B[ 3 ][ k + 2 ] = d[ i + 6 ]; B[ 3 ][ k + 3 ] = d[ i + 7 ];
-
-			}
-
 			if ( n[ l ] * 4 >= A[ l ].length ) continue;
 			const k = ( n[ l ] ++ ) * 4;
 			A[ l ][ k ] = d[ i ]; A[ l ][ k + 1 ] = d[ i + 1 ]; A[ l ][ k + 2 ] = d[ i + 2 ]; A[ l ][ k + 3 ] = d[ i + 3 ];

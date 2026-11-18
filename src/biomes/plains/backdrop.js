@@ -25,6 +25,7 @@ import {
 import { vnoise } from '../../tsl/noise.js';
 import { U, applyFog, windField, gustSheen } from '../../tsl/world.js';
 import { landHeightJS, massifIdJS, lakeDistJS, mountainHeightJS, mountainHeight } from './terrain.js';
+import { reliefAux } from './relief.js';
 import { CUERNOS, PAINE_GRANDE, LAKE, polar } from './layout.js';
 import { cloudShadowAt } from './index.js';
 import { BIOME } from '../index.js';
@@ -334,6 +335,22 @@ function backdropMaterial( hmTex ) {
 		const reliefAO = mix( 0.55, 1.15, smoothstep( - 0.8, 0.6, relief ) ).mul( mix( 0.7, 1.05, relH.mul( rockK ).add( float( 1.0 ).sub( rockK ).mul( 0.6 ) ) ) );
 		albedo.mulAssign( select( id.greaterThan( 0.5 ), reliefAO, float( 1.0 ) ) );
 
+		// --- baked erosion maps (the 'splat' layer of terrain tools): where the water ran,
+		// where debris settled and where rock was freshly cut, and how open to the sky
+		const aux = reliefAux( xz );
+		const flowW = aux.r, sed = aux.g.sub( 0.5 ), occ = aux.b;
+		const onRock = rockK.mul( onMtn ).mul( float( 1.0 ).sub( snowAmt ) );
+		// talus and scree fans below the walls: paler, grey-brown, fine-grained
+		const fan = smoothstep( 0.01, 0.12, sed ).mul( onRock );
+		albedo.assign( mix( albedo, scree.mul( vec3( 1.12, 1.06, 0.98 ) ).mul( mix( 0.85, 1.15, rn ) ), fan.mul( 0.75 ) ) );
+		// freshly carved rock in the gullies: a touch lighter and rust-stained
+		albedo.mulAssign( mix( float( 1.0 ), vec3( 1.18, 1.08, 0.98 ), smoothstep( 0.01, 0.12, sed.negate() ).mul( onRock ) ) );
+		// water streaks: long dark wet stains down the faces, following the flow
+		albedo.mulAssign( mix( float( 1.0 ), float( 0.58 ), smoothstep( 0.3, 0.75, flowW ).mul( onRock ) ) );
+		// on the lower slopes the scrub follows the water: greener along the channels
+		const vegK = smoothstep( 300.0, 120.0, h ).mul( onMtn ).mul( float( 1.0 ).sub( rockiness ) );
+		albedo.assign( mix( albedo, forest.mul( 0.8 ), smoothstep( 0.25, 0.6, flowW ).mul( vegK ).mul( 0.6 ) ) );
+
 		// --- cast shadows: march the heightmap toward the light
 		const L = U.sunDir;
 		const shadowK = smoothstep( nearHalf.add( 60.0 ), nearHalf.add( 500.0 ), length( xz.sub( cameraPosition.xz ) ) );
@@ -353,10 +370,10 @@ function backdropMaterial( hmTex ) {
 		// --- lighting
 		const NdL = dot( N, L );
 		const wrap = 0.1;
-		const diff = clamp( NdL.add( wrap ).div( 1.0 + wrap ), 0.0, 1.0 );
+		const diff = clamp( NdL.add( wrap ).div( 1.0 + wrap ), 0.0, 1.0 ).mul( mix( 0.7, 1.0, occ ) );
 		// distant cloud shadows: softer and less deep (scattered light fills them in)
 		const sunVis = mix( cloudShadowAt( xz, h ), float( 0.7 ), smoothstep( 1500.0, 6000.0, dist ).mul( 0.6 ) ).max( 0.3 ).mul( smoothstep( - 0.04, 0.06, L.y ) ).mul( cast );
-		const amb = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( mix( 0.75, 1.0, smoothstep( 0.0, 0.5, N.y ) ) );
+		const amb = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( mix( 0.75, 1.0, smoothstep( 0.0, 0.5, N.y ) ) ).mul( mix( 0.3, 1.0, occ ) );
 		const V = normalize( cameraPosition.sub( P ) );
 		const Hh = normalize( L.add( V ) );
 		// snow glitters a little; wet dark rock has a faint sheen; glacier ice is glossy

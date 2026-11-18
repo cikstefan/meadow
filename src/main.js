@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn } from 'three/tsl';
+import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
@@ -223,7 +223,8 @@ async function start() {
 
 	// ------------------------------------------------------------ post
 	let pipeline = null;
-	const post = { sunUV: uniform( new THREE.Vector2( 0.5, 0.5 ) ), shaftAmt: uniform( 0 ), aspect: uniform( 1 ) };
+	const post = { sunUV: uniform( new THREE.Vector2( 0.5, 0.5 ) ), shaftAmt: uniform( 0 ), aspect: uniform( 1 ),
+		invProj: uniform( new THREE.Matrix4() ), camWorld: uniform( new THREE.Matrix4() ), camPos: uniform( new THREE.Vector3() ) };
 
 	// Giant Squid-style painterly grade: richer colour, cool shadows, warm highlights
 	const painterly = Fn( ( [ c ] ) => {
@@ -241,7 +242,37 @@ async function start() {
 		if ( pipeline ) pipeline.dispose();
 		pipeline = new THREE.RenderPipeline( renderer );
 		const scenePass = pass( scene, camera );
-		const color = scenePass.getTextureNode( 'output' );
+		let color = scenePass.getTextureNode( 'output' );
+
+		if ( BIOME.postClouds && BIOME.clouds ) {
+
+			// volumetric clouds as a screen-space pass (after ceddc's ArcGIS RenderNode
+			// clouds): every pixel marches the deck from the eye up to the surface the
+			// depth buffer saw, at half resolution, then the scene is composited as
+			// scene * transmittance + scattered light (clouds in front of mountains too)
+			const depthTex = scenePass.getTextureNode( 'depth' );
+			const vol = rtt( Fn( () => {
+
+				const suv = uv();
+				const d = depthTex.sample( suv ).x;
+				const nx = suv.x.mul( 2.0 ).sub( 1.0 ), ny = float( 1.0 ).sub( suv.y.mul( 2.0 ) );
+				const unproject = ( z ) => {
+
+					const v = post.invProj.mul( vec4( nx, ny, z, 1.0 ) );
+					return post.camWorld.mul( vec4( v.xyz.div( v.w ), 1.0 ) ).xyz;
+
+				};
+				const isSky = reversedDepth ? d.lessThan( 1e-7 ) : d.greaterThan( 0.9999999 );
+				const wp = unproject( d );
+				const dir = normalize( unproject( float( 0.5 ) ).sub( post.camPos ) );
+				const dist = select( isSky, float( 1e9 ), length( wp.sub( post.camPos ) ) );
+				return BIOME.clouds.marchView( post.camPos, dir, dist );
+
+			} )(), null, null, { resolutionScale: 0.5 } );
+			color = vec4( color.rgb.mul( vol.a ).add( vol.rgb ), 1.0 );
+
+		}
+
 		let col = color.rgb;
 		const glow = bloom( color, 0.22, 0.55, 1.1 );
 		col = col.add( glow.rgb );
@@ -653,6 +684,11 @@ async function start() {
 			} );
 
 		}
+
+		// camera for the screen-space cloud pass
+		post.invProj.value.copy( camera.projectionMatrixInverse );
+		post.camWorld.value.copy( camera.matrixWorld );
+		post.camPos.value.copy( camera.position );
 
 		if ( settings.sunShafts ) {
 

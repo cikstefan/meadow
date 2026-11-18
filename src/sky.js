@@ -13,7 +13,8 @@ import { BIOME } from './biomes/index.js';
 
 const SK = BIOME.sky || {};
 // raymarched 3D clouds (biomes that provide a weather map)
-const VOLUME = SK.volumetric && BIOME.clouds ? BIOME.clouds.march : null;
+// (biomes with a screen-space cloud pass draw their clouds in the post pipeline instead)
+const VOLUME = SK.volumetric && BIOME.clouds && ! BIOME.postClouds ? BIOME.clouds.march : null;
 
 // elevation (deg) -> palette. Colours are linear-ish, hand tuned.
 const KEYS = [
