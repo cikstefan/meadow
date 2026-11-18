@@ -19,7 +19,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec2, vec3, vec4, mix, smoothstep, clamp, max, pow, sin, cos, dot, normalize, length, attribute, varying,
-	cameraPosition, faceDirection, texture, uv, select, exp
+	cameraPosition, faceDirection, texture, uv, select, exp, fract
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, shadeFoliage } from '../../tsl/world.js';
@@ -63,7 +63,7 @@ function scatter( density = 1 ) {
 		const gravel = gravelPatchJS( x, z );
 		const m = vnoiseJS( x / 120 + 3, z / 120 + 8 );
 		const w = [
-			dens * ( 0.35 + 0.65 * m ) * 0.18, // tree-form notro (rarer than the notro mounds)
+			dens * ( 0.35 + 0.65 * m ) * 0.75, // tree-form notro (trunks and branches)
 			( 0.12 + dens * 0.3 ) * ( 1.1 - m * 0.5 ), // calafate everywhere, sparser
 			( 0.1 + dens * 0.35 ) * 0.8, // mata negra
 			( 0.06 + gravel * 0.5 ) * 0.9, // mata barrosa on dry gravel
@@ -257,8 +257,14 @@ export class Shrubs {
 			// small hot cores cross the bloom threshold and get a soft halo
 			const flowerLight = albedo.mul( vec3( 2.2, 1.2, 1.1 ) ).add( glowCol.mul( 0.04 ) );
 			const hot = core.mul( core ).mul( 3.0 );
-			const emit = flowerLight.mul( red.mul( 0.9 ) ).add( glowCol.mul( hot ) ).mul( rim.mul( 0.4 ).add( 0.8 ) ).add( glowCol.mul( halo ) )
-				.mul( U.night.mul( U.glow ).mul( pulse ).mul( far ).mul( sp.glow * 0.11 ) );
+			// every flower cluster its own brightness: some barely lit, some burning
+			const varyF = mix( 0.25, 1.9, fract( vT.w.mul( 37.3 ) ).pow( 1.5 ) );
+			const emitFire = flowerLight.mul( red.mul( 0.9 ) ).add( glowCol.mul( hot ) ).mul( rim.mul( 0.4 ).add( 0.8 ) ).add( glowCol.mul( halo ) )
+				.mul( U.night.mul( U.glow ).mul( pulse ).mul( far ).mul( varyF ).mul( sp.glow * 0.11 ) );
+			// calafate's little yellow cups glow too
+			const isCalaFl = vC.x.equal( float( TILE.calaFl ) );
+			const yel = smoothstep( 0.15, 0.4, sample.r.add( sample.g ).mul( 0.5 ).sub( sample.b.mul( 1.2 ) ) ).mul( select( isCalaFl, float( 1.0 ), float( 0.0 ) ) );
+			const emit = emitFire.add( vec3( 1.0, 0.75, 0.2 ).mul( yel.mul( U.night ).mul( U.glow ).mul( far ).mul( varyF ).mul( 0.12 ) ) );
 			return shadeFoliage( albedo, N, vW, ao, vC.w, transmit, spec, float( 0.35 ), emit );
 
 		} )();

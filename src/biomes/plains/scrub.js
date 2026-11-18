@@ -16,7 +16,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec2, vec3, vec4, mix, smoothstep, clamp, pow, sin, cos, dot, normalize, length, attribute, varying,
-	cameraPosition, faceDirection, texture, uv, select, exp
+	cameraPosition, faceDirection, texture, uv, select, exp, fract
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, shadeFoliage, windField } from '../../tsl/world.js';
@@ -25,15 +25,15 @@ import { cloudShadowGround } from './index.js';
 import { TILE } from './atlas.js';
 import { rng, Builder } from './grow.js';
 
-const TILE_M = 32, RADIUS = 200, SPACING = 1.55;
-const LOD_DIST = [ 32, 92 ];
+const TILE_M = 32, RADIUS = 420, SPACING = 1.55;
+const LOD_DIST = [ 30, 100 ];
 
 // species: leaf tile, flower tile (-1 none), body colour, card tint
 export const SCRUB = [
 	{ name: 'mata negra', leaf: TILE.negra, flower: - 1, body: [ 0.03, 0.045, 0.018 ], tint: [ 0.95, 1.0, 0.9 ], r: [ 0.5, 1.45 ], h: [ 0.4, 1.0 ] },
 	{ name: 'calafate', leaf: TILE.cala, flower: TILE.calaFl, body: [ 0.045, 0.065, 0.022 ], tint: [ 1.0, 1.05, 0.95 ], r: [ 0.45, 1.3 ], h: [ 0.45, 1.1 ] },
 	{ name: 'mata verde', leaf: TILE.cala, flower: - 1, body: [ 0.06, 0.1, 0.03 ], tint: [ 1.25, 1.45, 0.85 ], r: [ 0.4, 0.95 ], h: [ 0.3, 0.7 ] },
-	{ name: 'silver cushion', leaf: TILE.barrosa, flower: - 1, body: [ 0.1, 0.112, 0.088 ], tint: [ 1.15, 1.25, 1.12 ], r: [ 0.35, 0.8 ], h: [ 0.25, 0.55 ] },
+	{ name: 'silver cushion', leaf: TILE.barrosa, flower: - 1, body: [ 0.07, 0.08, 0.06 ], tint: [ 0.85, 0.95, 0.82 ], r: [ 0.35, 0.8 ], h: [ 0.25, 0.55 ] },
 	{ name: 'notro', leaf: TILE.notro, flower: TILE.notroFl2, body: [ 0.035, 0.05, 0.02 ], tint: [ 1.0, 1.0, 1.0 ], r: [ 0.7, 1.4 ], h: [ 0.8, 1.7 ] },
 ];
 
@@ -61,7 +61,7 @@ function moundGeometry( seed, detail, cards, core ) {
 	// the core: up close only a small, dark inner mass that keeps the bush from
 	// looking hollow (hidden inside the foliage); far away the full dome stands for
 	// the whole bush
-	for ( let i = 0; i < P.count; i += 3 ) {
+	for ( let i = 0; core > 0 && i < P.count; i += 3 ) {
 
 		const tri = [ 0, 1, 2 ].map( ( k ) => new THREE.Vector3( P.getX( i + k ), P.getY( i + k ), P.getZ( i + k ) ) );
 		if ( tri.every( ( v ) => v.y < - 0.25 ) ) continue; // below ground
@@ -194,7 +194,7 @@ export class Scrub {
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
 		this.lastTilePos = new THREE.Vector3( 1e9, 0, 0 );
 		const mat = this.material();
-		const LODS = [ { detail: 1, cards: 190, cap: 6000, core: 0.55 }, { detail: 1, cards: 46, cap: 26000, core: 0.62 }, { detail: 0, cards: 0, cap: 70000, core: 1 } ];
+		const LODS = [ { detail: 1, cards: 210, cap: 6000, core: 0 }, { detail: 1, cards: 56, cap: 30000, core: 0.4 }, { detail: 0, cards: 0, cap: 160000, core: 1 } ];
 		this.meshes = LODS.map( ( L, l ) => {
 
 			const g = L.flowers ? flowerGeometry( 777, L.flowers ) : moundGeometry( 4242 + l, L.detail, L.cards, L.core );
@@ -302,8 +302,12 @@ export class Scrub {
 			const wave = sin( P.x.mul( 0.045 ).add( P.z.mul( 0.03 ) ).sub( U.time.mul( 0.55 ) ) ).mul( 0.3 ).add( 0.7 );
 			const glow = select( isTube, float( 1.0 ), smoothstep( 0.1, 0.35, albedo.r.sub( albedo.g.mul( 1.5 ) ) ) ).mul( isRed ).mul( select( isNotro, float( 1.0 ), float( 0.0 ) ) );
 			const hot = smoothstep( 0.55, 0.8, albedo.r ).mul( glow );
+			const varyF = mix( 0.25, 1.9, fract( vK.z.mul( 37.3 ).add( vI.y.mul( 11.0 ) ) ).pow( 1.5 ) );
+			// calafate's yellow cups (flower cards of species 1)
+			const yel = smoothstep( 0.15, 0.4, albedo.r.add( albedo.g ).mul( 0.5 ).sub( albedo.b.mul( 1.2 ) ) ).mul( select( useFl.and( sp.greaterThan( 0.5 ) ).and( sp.lessThan( 1.5 ) ), float( 1.0 ), float( 0.0 ) ) );
 			const emit = albedo.mul( vec3( 2.2, 1.2, 1.1 ) ).mul( glow ).add( vec3( 1.0, 0.2, 0.12 ).mul( hot.mul( 3.0 ) ) )
-				.mul( U.night.mul( U.glow ).mul( far ).mul( wave ).mul( 0.11 ) );
+				.mul( U.night.mul( U.glow ).mul( far ).mul( wave ).mul( varyF ).mul( 0.11 ) )
+				.add( vec3( 1.0, 0.75, 0.2 ).mul( yel.mul( U.night ).mul( U.glow ).mul( far ).mul( varyF ).mul( 0.12 ) ) );
 			return shadeFoliage( albedo, N, P, ao, vI.x, select( isCard, float( 0.5 ), float( 0.25 ) ), float( 0.1 ), float( 0.45 ), emit );
 
 		} )();
@@ -343,8 +347,13 @@ export class Scrub {
 
 		}
 
-		if ( cp.distanceToSquared( this.lastPos ) < 4 ) return;
-		this.lastPos.copy( cp );
+		// re-bucket when the camera moved or turned (instances behind the view are skipped)
+		const fwd = new THREE.Vector3( 0, 0, - 1 ).applyQuaternion( camera.quaternion );
+		fwd.y = 0; fwd.normalize();
+		this.lastFwd = this.lastFwd || new THREE.Vector3( 0, 0, 1 );
+		if ( cp.distanceToSquared( this.lastPos ) < 4 && fwd.dot( this.lastFwd ) > 0.97 ) return;
+		this.lastPos.copy( cp ); this.lastFwd.copy( fwd );
+		const cosCut = Math.cos( 78 * Math.PI / 180 );
 		const L0 = LOD_DIST[ 0 ] ** 2, L1 = LOD_DIST[ 1 ] ** 2, R2 = RADIUS * RADIUS;
 		const A = this.meshes.map( ( m ) => m.geometry.attributes.iA.array ), B = this.meshes.map( ( m ) => m.geometry.attributes.iB.array );
 		const n = [ 0, 0, 0 ];
@@ -352,6 +361,7 @@ export class Scrub {
 
 			const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z, r2 = dx * dx + dz * dz;
 			if ( r2 > R2 ) continue;
+			if ( r2 > 900 && ( dx * fwd.x + dz * fwd.z ) < cosCut * Math.sqrt( r2 ) ) continue; // behind / outside the view
 			const l = r2 < L0 ? 0 : r2 < L1 ? 1 : 2;
 			if ( n[ l ] * 4 >= A[ l ].length ) continue;
 			const k = ( n[ l ] ++ ) * 4;

@@ -35,7 +35,7 @@ export function speciesWeights( f, gravel ) {
 		0.35, // calafate
 		0.15 + Math.max( 0, f.green - 0.5 ) * 1.6, // bright green swales
 		0.16 + Math.max( 0, f.silver - 0.5 ) * 2.4 + gravel * 0.8, // silver cushions on dry ground
-		Math.max( 0, f.notro - 0.56 ) * 2.2, // notro in drifts
+		Math.max( 0, f.notro - 0.62 ) * 1.2, // low notro mounds (fewer: the tree-form notro carry the colour)
 	];
 
 }

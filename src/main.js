@@ -277,6 +277,7 @@ async function start() {
 
 		let col = color.rgb;
 		const glow = bloom( color, 0.22, 0.55, 1.1 );
+		post.bloom = glow;
 		col = col.add( glow.rgb );
 
 		if ( settings.sunShafts ) {
@@ -315,7 +316,8 @@ async function start() {
 		// daylight is bright: settle at ~0.8 exposure once the sun is up; dawn,
 		// dusk and night keep their exposure (night is lifted for readability)
 		const day = THREE.MathUtils.smoothstep( el, 4, 16 );
-		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * 0.7 ) * THREE.MathUtils.lerp( 1, 0.8, day );
+		// eyes adapt at night (more under cloud): the moonlit plains stay readable
+		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * ( BIOME.nightExposure ?? 0.7 ) * ( 1 + settings.clouds * 0.6 ) ) * THREE.MathUtils.lerp( 1, 0.8, day );
 		U.dry.value = settings.dryPatches;
 		U.glow.value = settings.flowerGlow;
 		U.mist.value = settings.mist;
@@ -688,6 +690,16 @@ async function start() {
 		}
 
 		// camera for the screen-space cloud pass
+		// at night the glowing flowers bloom: a lower threshold and a stronger, wider halo
+		if ( post.bloom ) {
+
+			const nt = U.night.value;
+			post.bloom.threshold.value = THREE.MathUtils.lerp( 1.1, 0.32, nt );
+			post.bloom.strength.value = THREE.MathUtils.lerp( 0.22, 0.6, nt );
+			post.bloom.radius.value = THREE.MathUtils.lerp( 0.55, 0.85, nt );
+
+		}
+
 		post.invProj.value.copy( camera.projectionMatrixInverse );
 		post.camWorld.value.copy( camera.matrixWorld );
 		post.camPos.value.copy( camera.position );

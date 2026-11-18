@@ -121,13 +121,18 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 	// edges by Worley detail noise (billows on top, torn wisps underneath).
 	const density = ( p, cheap ) => {
 
-		const hf = clamp( p.y.sub( BASE ).div( TOP - BASE ), 0.0, 1.0 );
 		const cov = coverage( p.xz ).toVar();
 		const q = p.sub( vec3( U.cloudOffset.x, 0.0, U.cloudOffset.y ) ).add( vec3( 0.0, U.cloudTime.mul( - 1.0 ), 0.0 ) );
-		const type = texture3D( vol(), fract( vec3( q.x.div( 26000.0 ), 0.37, q.z.div( 26000.0 ) ) ) ).level( 0 ).b;
+		// regional variety: the cloud base rises and falls by several hundred metres and
+		// the layer thins out to flat sheets in places, swells to deep heaps in others
+		const big = texture3D( vol(), fract( vec3( q.x.div( 15000.0 ), 0.71, q.z.div( 15000.0 ) ) ) ).level( 0 );
+		const baseY = float( BASE ).add( big.g.sub( 0.5 ).mul( 700.0 ) );
+		const thick = mix( 0.25, 1.0, smoothstep( 0.3, 0.75, big.r ) );
+		const hf = clamp( p.y.sub( baseY ).div( thick.mul( TOP - BASE ) ), 0.0, 1.0 );
+		const type = texture3D( vol(), fract( vec3( q.x.div( 9000.0 ), 0.37, q.z.div( 9000.0 ) ) ) ).level( 0 ).b;
 		const ctype = smoothstep( 0.35, 0.75, type );
 		// height profiles: stratus 0..0.3 of the layer, cumulus 0..~1 (rounded top)
-		const topH = mix( 0.32, 1.0, ctype );
+		const topH = mix( 0.22, 1.0, ctype );
 		const profile = smoothstep( 0.0, 0.07, hf ).mul( smoothstep( topH, topH.mul( mix( 0.55, 0.35, ctype ) ), hf ) );
 		const shape = texture3D( vol(), fract( q.mul( vec3( 1 / 4600, 1 / 1500, 1 / 4600 ) ) ) ).level( 0 ).r.toVar();
 		const base = remap( shape.mul( profile ), float( 1.0 ).sub( cov.mul( 0.92 ) ), float( 1.0 ) ).mul( cov ).toVar();
@@ -238,7 +243,7 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 
 		const result = vec4( 0, 0, 0, 1 ).toVar();
 		const dy = select( dir.y.abs().lessThan( 1e-4 ), float( 1e-4 ), dir.y );
-		const tb = float( BASE ).sub( ro.y ).div( dy ), tt = float( TOP ).sub( ro.y ).div( dy );
+		const tb = float( BASE - 350 ).sub( ro.y ).div( dy ), tt = float( TOP + 350 ).sub( ro.y ).div( dy );
 		const tEnter = max( min( tb, tt ), 0.0 );
 		const tExit = min( max( tb, tt ), tEnter.add( 14000.0 ) );
 		const end = min( tExit, maxDist );

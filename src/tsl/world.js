@@ -192,6 +192,9 @@ export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt,
 	const V = normalize( cameraPosition.sub( P ) );
 	const L = U.sunDir;
 	const NdL = dot( N, L );
+	// far away blades / leaf cards are sub-pixel: their glints and back-light flicker as
+	// sparkles, so the sharp lobes fade out with distance
+	const near = smoothstep( 160.0, 35.0, P.sub( cameraPosition ).length() );
 	const diff = clamp( NdL.add( wrap ).div( float( 1.0 ).add( wrap ) ), 0.0, 1.0 );
 
 	const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) );
@@ -200,11 +203,11 @@ export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt,
 
 	// translucency: strongest looking toward the sun through the leaf
 	const back = pow( clamp( dot( V.negate(), L ), 0.0, 1.0 ), 3.0 );
-	const thru = back.mul( 1.4 ).add( clamp( NdL.negate(), 0.0, 1.0 ).mul( 0.35 ) );
+	const thru = back.mul( mix( 0.35, 1.4, near ) ).add( clamp( NdL.negate(), 0.0, 1.0 ).mul( 0.35 ) );
 	const transCol = albedo.mul( vec3( 1.25, 1.3, 0.55 ) ).mul( U.sunColor ).mul( thru ).mul( transmit ).mul( sunVis );
 
 	const H = normalize( L.add( V ) );
-	const spec = pow( clamp( dot( N, H ), 0.0, 1.0 ), 48.0 ).mul( specAmt ).mul( sunVis );
+	const spec = pow( clamp( dot( N, H ), 0.0, 1.0 ), 48.0 ).mul( specAmt ).mul( sunVis ).mul( near );
 
 	const col = albedo.mul( direct.add( ambient ) ).add( transCol ).add( U.sunColor.mul( spec ) ).add( emit );
 	return applyFog( col, P );

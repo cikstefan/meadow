@@ -431,9 +431,15 @@ export class Flowers {
 			const twinkle = sin( U.time.mul( mix( 0.6, 1.4, seed ) ).add( seed.mul( 50.0 ) ) ).mul( 0.25 ).add( 0.85 );
 			const glowAmt = select( part.lessThan( 0.5 ), float( 0.06 ),
 				select( part.lessThan( 1.5 ), mix( 0.75, 0.35, pu ), float( 1.1 ) ) );
-			const emit = U.glowColor.mul( U.night.mul( U.glow ).mul( glowAmt ).mul( twinkle ) );
+			// biomes can keep each flower's own colour in its glow (Pandora-like: white, violet,
+			// yellow lights), each flower a little brighter or dimmer than the next
+			const ownGlow = BIOME.flowerGlowOwnColour ? 1 : 0;
+			const vary = mix( 0.3, 1.7, fract( seed.mul( 91.7 ) ) );
+			const ownCol = select( part.lessThan( 1.5 ), petalCol, centreCol ).mul( 2.4 ).add( 0.03 );
+			const glowC = ownGlow ? ownCol.mul( vary ) : U.glowColor;
+			const emit = glowC.mul( U.night.mul( U.glow ).mul( glowAmt ).mul( twinkle ).mul( ownGlow ? 0.55 : 1.0 ) );
 			// petals lose their day colour at night: the glow is the colour
-			const nightAlbedo = mix( albedo, albedo.mul( vec3( 0.1, 0.25, 0.6 ) ), U.night.mul( 0.9 ) );
+			const nightAlbedo = ownGlow ? albedo : mix( albedo, albedo.mul( vec3( 0.1, 0.25, 0.6 ) ), U.night.mul( 0.9 ) );
 
 			return shadeFoliage( nightAlbedo, N, vWorld, ao, cloud, transmit, spec, float( 0.5 ), emit );
 
