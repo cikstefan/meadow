@@ -303,9 +303,9 @@ async function start() {
 			const lum = dot( col, vec3( 0.2126, 0.7152, 0.0722 ) );
 			const blueish = vec3( lum ).mul( vec3( 0.62, 0.78, 1.15 ) );
 			// keep the glowing flowers' own colours (bright pixels are left alone)
-			const keep = smoothstep( 0.15, 0.6, lum );
+			const keep = smoothstep( 0.04, 0.16, lum );
 			col = mix( col, mix( blueish, col, keep ), post.night.mul( 0.6 ) );
-			const lift = post.night.mul( mix( 0.006, 0.022, post.cloudy ) );
+			const lift = post.night.mul( mix( 0.006, 0.016, post.cloudy ) );
 			col = col.mul( float( 1.0 ).sub( lift.mul( 4.0 ) ) ).add( vec3( 0.5, 0.65, 1.0 ).mul( lift ) );
 
 		}

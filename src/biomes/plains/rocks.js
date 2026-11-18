@@ -166,7 +166,7 @@ export class Rocks {
 			const alb = grey.mul( mix( 0.75, 1.1, a.a ) ).toVar();
 			// yellow-green and orange lichen on the tops, a damp dark band at the ground
 			const lich = smoothstep( 0.55, 0.75, vnoise( P.xz.mul( 3.0 ).add( P.y ) ) ).mul( smoothstep( 0.3, 0.9, N.y ) );
-			alb.assign( mix( alb, mix( vec3( 0.3, 0.32, 0.12 ), vec3( 0.5, 0.3, 0.08 ), vnoise( P.xz.mul( 9.0 ) ) ), lich.mul( 0.55 ) ) );
+			alb.assign( mix( alb, mix( vec3( 0.3, 0.32, 0.12 ), vec3( 0.5, 0.3, 0.08 ), vnoise( P.xz.mul( 9.0 ) ) ), lich.mul( 0.22 ) ) );
 			alb.mulAssign( mix( 0.55, 1.0, smoothstep( 0.0, 0.25, P.y.sub( vI.y ) ) ) );
 			const L = U.sunDir;
 			const diff = clamp( dot( N, L ).add( 0.1 ).div( 1.1 ), 0.0, 1.0 ).mul( vI.z ).mul( smoothstep( - 0.04, 0.06, L.y ) );
