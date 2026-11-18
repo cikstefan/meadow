@@ -15,6 +15,8 @@ const SK = BIOME.sky || {};
 // raymarched 3D clouds (biomes that provide a weather map)
 // (biomes with a screen-space cloud pass draw their clouds in the post pipeline instead)
 const VOLUME = SK.volumetric && BIOME.clouds && ! BIOME.postClouds ? BIOME.clouds.march : null;
+// a biome with real volumetric clouds draws no painted cloud layers in the sky dome
+const NO_PAINTED = !! ( SK.volumetric && BIOME.clouds );
 
 // elevation (deg) -> palette. Colours are linear-ish, hand tuned.
 const KEYS = [
@@ -85,7 +87,7 @@ export class Sky {
 			const bil = ( v ) => vnoise( v ).mul( 2.0 ).sub( 1.0 ).abs();
 			const billow = bil( p.mul( 11.0 ).add( vec2( 2.2, 6.1 ) ) ).mul( 0.6 ).add( bil( p.mul( 23.0 ).add( vec2( 8.4, 1.9 ) ) ).mul( 0.4 ) );
 			const fE = f.sub( billow.mul( 0.08 ).mul( detK ) );
-			const dens = VOLUME ? float( 0 ) : smoothstep( this.u.skyCover, this.u.skyCover.add( mix( 0.3, 0.12, detK ) ), fE ).mul( smoothstep( 0.0, 0.18, y ) ).mul( cAmt );
+			const dens = NO_PAINTED ? float( 0 ) : smoothstep( this.u.skyCover, this.u.skyCover.add( mix( 0.3, 0.12, detK ) ), fE ).mul( smoothstep( 0.0, 0.18, y ) ).mul( cAmt );
 			// darker, thicker cores; bright sun-facing rims (silver lining)
 			const core = smoothstep( this.u.skyCover.add( 0.08 ), this.u.skyCover.add( 0.45 ), f );
 			const shadowCol = mix( U.skyAmb.mul( 1.6 ), U.horizon.mul( 0.7 ), 0.4 );
@@ -133,7 +135,7 @@ export class Sky {
 			col.assign( mix( col, mix( U.horizon, cloudCol, haze ), dens.mul( 0.92 ) ) );
 
 			let deck = float( 0 );
-			if ( SK.storm && ! VOLUME ) {
+			if ( SK.storm && ! NO_PAINTED ) {
 
 				// low storm deck racing downwind: domain-warped cloud masses, self-shadowed
 				// along the sun direction (bright sun-facing edges, dark bellies), broken

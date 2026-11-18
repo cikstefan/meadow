@@ -30,8 +30,8 @@ import { CUERNOS, PAINE_GRANDE, LAKE, polar } from './layout.js';
 import { cloudShadowAt } from './index.js';
 import { BIOME } from '../index.js';
 
-const R0 = 40, R1 = 16000, NR = 440, NA = 1152;
-const HM_SIZE = 512, HM_EXT = 9500; // shadow heightmap: texels, half extent (m)
+const R0 = 40, R1 = 16000, NR = 640, NA = 1280;
+const HM_SIZE = 640, HM_EXT = 15500; // shadow heightmap: texels, half extent (m)
 
 const texURL = ( n ) => new URL( `../../assets/plains/${ n }.webp`, import.meta.url ).href;
 function loadTex( n, srgb ) {
@@ -194,17 +194,28 @@ function backdropMaterial( hmTex ) {
 
 		const P = vW;
 		const xz = P.xz;
+		const h = P.y;
+		const dist = length( P.sub( cameraPosition ) );
 		// per-pixel normal from the eroded heightmap: crisp gullies at any mesh density
 		const eh = 18.0;
 		const hxp = mountainHeight( xz.add( vec2( eh, 0 ) ) ), hxm = mountainHeight( xz.sub( vec2( eh, 0 ) ) );
 		const hzp = mountainHeight( xz.add( vec2( 0, eh ) ) ), hzm = mountainHeight( xz.sub( vec2( 0, eh ) ) );
 		const nRel = normalize( vec3( hxm.sub( hxp ), eh * 2, hzm.sub( hzp ) ) );
 		const onMtn = smoothstep( 8.0, 40.0, hxp.add( hxm ).mul( 0.5 ) );
-		const Ng = normalize( mix( normalize( vN ), nRel, onMtn ) );
+		// sub-grid relief on the real terrain (it is ~20 m data): cliff bands that
+		// follow the contours (sedimentary layers), ribs and gullies down the fall line
+		const Ng0 = normalize( mix( normalize( vN ), nRel, onMtn ) );
+		const sl0 = float( 1.0 ).sub( Ng0.y );
+		const dnv = normalize( Ng0.xz.add( vec2( 1e-4, 0 ) ) );
+		const acr = dot( xz, vec2( dnv.y.negate(), dnv.x ) );
+		const band = ( hh ) => vnoise( vec2( hh.div( 38.0 ), dot( xz, vec2( 0.004, 0.003 ) ) ) ).mul( 0.6 ).add( vnoise( vec2( hh.div( 13.0 ), acr.div( 60.0 ) ) ).mul( 0.4 ) );
+		const bandD = band( h.add( 2.0 ) ).sub( band( h.sub( 2.0 ) ) ).div( 4.0 ); // d(band)/dh
+		const rib = vnoise( vec2( acr.div( 28.0 ), h.div( 300.0 ) ) ).mul( 0.6 ).add( vnoise( vec2( acr.div( 9.0 ), h.div( 120.0 ) ) ).mul( 0.4 ) );
+		const ribD = vnoise( vec2( acr.add( 2.0 ).div( 28.0 ), h.div( 300.0 ) ) ).sub( vnoise( vec2( acr.sub( 2.0 ).div( 28.0 ), h.div( 300.0 ) ) ) ).div( 4.0 );
+		const detK = smoothstep( 0.08, 0.3, sl0 ).mul( onMtn ).mul( smoothstep( 12000.0, 2000.0, dist ) );
+		const Ng = normalize( Ng0.add( vec3( dnv.x, 0.0, dnv.y ).mul( bandD.mul( - 90.0 ) ) ).add( vec3( dnv.y.negate(), 0.0, dnv.x ).mul( ribD.mul( 70.0 ) ) ).mul( vec3( 1.0 ) ).mul( detK ).add( Ng0.mul( float( 1.0 ).sub( detK ) ) ) );
 		const id = vI.x;
-		const h = P.y;
 		const slope = float( 1.0 ).sub( Ng.y ); // 0 flat .. 1 vertical
-		const dist = length( P.sub( cameraPosition ) );
 		const isMtn = id.greaterThan( 0.5 ).and( id.lessThan( 3.5 ) );
 		const isPG = id.greaterThan( 0.5 ).and( id.lessThan( 1.5 ) );
 		const isCu = id.greaterThan( 1.5 ).and( id.lessThan( 2.5 ) );
@@ -237,7 +248,7 @@ function backdropMaterial( hmTex ) {
 		const strata = vnoise( xz.div( 380.0 ).add( vec2( h.div( 260.0 ), 0.0 ) ) ); // broad tonal variation (no bands)
 		const rn = vnoise( xz.div( 25.0 ).add( vec2( 41, 3 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 7.0 ).add( vec2( 2, 9 ) ) ).mul( 0.4 ) );
 		// Paine Grande: near-black sedimentary rock, faintly banded, rust-stained
-		const darkRock = mix( vec3( 0.032, 0.03, 0.028 ), vec3( 0.075, 0.066, 0.056 ), rn.mul( 0.5 ).add( strata.mul( 0.5 ) ) )
+		const darkRock = mix( vec3( 0.06, 0.056, 0.05 ), vec3( 0.15, 0.135, 0.115 ), rn.mul( 0.5 ).add( strata.mul( 0.5 ) ) )
 			.mul( rockL.clamp( 0.35, 2.2 ) ).mul( mix( 0.75, 1.15, rockH ) );
 		// Cuernos granite: pale cream-grey, streaked by meltwater
 		const granite = mix( vec3( 0.3, 0.295, 0.28 ), vec3( 0.48, 0.465, 0.44 ), rn.mul( 0.4 ).add( strata.mul( 0.15 ) ).add( 0.2 ) )
@@ -248,30 +259,36 @@ function backdropMaterial( hmTex ) {
 		// lower flanks: lenga / ñirre scrub and grassy benches, mottled (the scrub mosaic
 		// seen from kilometres away), grey ghost-forest snags here and there
 		const mott = vnoise( xz.div( 38.0 ).add( vec2( 3, 7 ) ) ).mul( 0.6 ).add( vnoise( xz.div( 11.0 ) ).mul( 0.4 ) );
-		const forest = mix( mix( vec3( 0.035, 0.05, 0.02 ), vec3( 0.09, 0.11, 0.04 ), mott ), vec3( 0.16, 0.15, 0.09 ), smoothstep( 0.7, 0.85, vnoise( xz.div( 90.0 ).add( vec2( 1, 9 ) ) ) ).mul( 0.5 ) );
+		const forest = mix( mix( vec3( 0.04, 0.05, 0.022 ), vec3( 0.1, 0.105, 0.05 ), mott ), vec3( 0.16, 0.15, 0.1 ), smoothstep( 0.6, 0.8, vnoise( xz.div( 90.0 ).add( vec2( 1, 9 ) ) ) ).mul( 0.6 ) );
 		// talus and scree fans at the foot of the walls: lighter, broken
 		const scree = mix( vec3( 0.1, 0.095, 0.085 ), vec3( 0.2, 0.19, 0.17 ), rn ).mul( rockL.clamp( 0.6, 1.6 ) );
 		const talus = smoothstep( 0.35, 0.18, slope ).mul( smoothstep( 150.0, 300.0, h ) ).mul( smoothstep( 900.0, 600.0, h ) );
 
 		// Paine Grande: scrub climbs high on the lower flanks; rock breaks through on the
 		// steep spurs and takes over above ~500 m
-		const rockiness = max( smoothstep( 200.0, 430.0, h.add( vnoise( xz.div( 160.0 ) ).sub( 0.5 ).mul( 260.0 ) ) ), smoothstep( 0.3, 0.48, slope ).mul( smoothstep( 40.0, 150.0, h ) ) );
+		// rock wherever it is steeper than ~32-40 deg (cliff bands break through the scrub), and above the scrub line
+		const rockiness = max( smoothstep( 420.0, 750.0, h.add( vnoise( xz.div( 160.0 ) ).sub( 0.5 ).mul( 300.0 ) ) ), smoothstep( 0.15, 0.26, slope.add( vnoise( xz.div( 45.0 ) ).sub( 0.5 ).mul( 0.1 ) ) ).mul( smoothstep( 30.0, 120.0, h ) ) );
 		// grey-brown talus and scattered scrub above the green foot, then rock
 		const flank = mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.8 ) ), scree.mul( vec3( 1.05, 1.0, 0.92 ) ), smoothstep( 110.0, 300.0, h.add( vnoise( xz.div( 120.0 ) ).sub( 0.5 ).mul( 180.0 ) ) ).mul( 0.7 ) );
 		const pg = mix( mix( flank, darkRock, rockiness ), scree, talus.mul( 0.45 ) );
 		// Cuernos: scrub and talus base, then the pale granite walls wherever it is steep
 		const cuBase = mix( mix( canopy, forest, smoothstep( 20.0, 120.0, h ).mul( 0.85 ) ), scree, talus.mul( 0.6 ).add( smoothstep( 0.3, 0.5, slope ).mul( 0.4 ) ) );
-		const cuBody = mix( cuBase, granite, smoothstep( 300.0, 480.0, h ).mul( smoothstep( 0.3, 0.55, slope ).mul( 0.7 ).add( 0.3 ) ) );
+		const cuBody = mix( cuBase, granite, smoothstep( 600.0, 850.0, h ).mul( smoothstep( 0.3, 0.55, slope ).mul( 0.7 ).add( 0.3 ) ) );
 		const cu = mix( cuBody, capCol, smoothstep( capLine.sub( 20.0 ), capLine.add( 20.0 ), h ) );
 		const vh = mix( mix( flank, darkRock, rockiness ), granite.mul( 1.08 ), smoothstep( 300.0, 700.0, h ) );
 		const hl = mix( flank, darkRock, rockiness.mul( 0.85 ) );
 
 		const albedo = canopy.toVar();
+		// ledges: the flat tops of the cliff bands hold soil and scrub (as on Paine Grande)
+		const ledge = smoothstep( 0.02, 0.0, bandD.abs() ).mul( smoothstep( 0.5, 0.65, band( h ) ) ).mul( detK ).mul( smoothstep( 1200.0, 600.0, h ) );
 		albedo.assign( select( isPG, pg, albedo ) );
 		albedo.assign( select( isCu, cu, albedo ) );
 		albedo.assign( select( id.greaterThan( 2.5 ).and( id.lessThan( 3.5 ) ), vh, albedo ) );
 		albedo.assign( select( id.greaterThan( 3.5 ), hl, albedo ) );
 		albedo.assign( mix( canopy, albedo, smoothstep( 25.0, 110.0, h ) ) );
+		albedo.assign( mix( albedo, forest.mul( 1.1 ), ledge.mul( 0.7 ) ) );
+		// cliff faces between the ledges: a little lighter, streaked
+		albedo.mulAssign( mix( float( 1.0 ), mix( 0.8, 1.25, rib ), detK.mul( rockiness ).mul( 0.7 ) ) );
 
 		// --- normal: geometry + scanned relief (granite on the Cuernos bodies, dark rock elsewhere)
 		const useCliff = isCu.and( h.lessThan( capLine ) ).and( h.greaterThan( 300.0 ) );
@@ -303,9 +320,9 @@ function backdropMaterial( hmTex ) {
 			.add( concave.mul( 0.3 ) ).add( tear.sub( 0.5 ).mul( 0.35 ) ).sub( 0.08 );
 		const snow = smoothstep( snowLine.sub( 120.0 ), snowLine.add( 220.0 ), h ).mul( smoothstep( 0.46, 0.54, snowField ) ).mul( smoothstep( 0.0, 0.06, sAmt ) ).toVar();
 		const gl = polar( PAINE_GRANDE.glacier.az, PAINE_GRANDE.glacier.d );
-		const gd = length( xz.sub( vec2( gl[ 0 ], gl[ 1 ] ) ) ).div( float( PAINE_GRANDE.glacier.size ).mul( mix( 0.25, 1.35, sAmt ) ) );
-		const glacier = smoothstep( 1.0, 0.55, gd.add( vnoise( xz.div( 70.0 ) ).sub( 0.5 ).mul( 0.6 ) ) ).mul( smoothstep( mix( 900.0, 380.0, sAmt ), mix( 1100.0, 600.0, sAmt ), h ) )
-			.mul( select( isPG, float( 1 ), float( 0 ) ) ).mul( smoothstep( 0.0, 0.1, sAmt ) );
+		// glacier ice: the high, gentler benches and cirques of the massifs (real terrain)
+		const glacier = smoothstep( mix( 2100.0, 1300.0, sAmt ), mix( 2300.0, 1550.0, sAmt ), h.add( vnoise( xz.div( 180.0 ) ).sub( 0.5 ).mul( 220.0 ) ) )
+			.mul( smoothstep( 0.55, 0.3, slope ) ).mul( select( isMtn, float( 1 ), float( 0 ) ) ).mul( smoothstep( 0.0, 0.1, sAmt ) );
 		// glacier ice: blue, banded by ogives, split by crevasses running across the flow
 		const flow = vec2( gl[ 0 ], gl[ 1 ] ).sub( xz );
 		const across = dot( xz, normalize( vec2( flow.y, flow.x.negate() ).add( vec2( 1e-3, 0 ) ) ) );

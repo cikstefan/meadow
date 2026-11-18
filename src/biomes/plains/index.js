@@ -260,6 +260,14 @@ export const PLAINS = {
 
 	},
 
+	// the real terrain of the massifs (fetched before the world is built)
+	async preload() {
+
+		const { loadDEM } = await import( './relief.js' );
+		await loadDEM();
+
+	},
+
 	// systems the meadow doesn't have; loaded lazily so the meadow stays lean
 	async createExtras( ctx ) {
 

@@ -95,6 +95,8 @@ async function start() {
 	// capable desktop GPUs start at ultra; adaptive quality steps down if it struggles
 	if ( ! params.has( 'q' ) && ! isMobile && ( requiredLimits.maxStorageBufferBindingSize || 0 ) >= 512 * 1024 * 1024 ) settings.quality = 'ultra';
 	await renderer.init();
+	// biome data that must exist before anything samples the terrain (real elevation)
+	if ( BIOME.preload ) await BIOME.preload();
 	if ( ! renderer.backend.isWebGPUBackend ) return fail( 'WebGPU adapter unavailable (fell back to WebGL). Compute + indirect draw need a WebGPU device.' );
 
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;

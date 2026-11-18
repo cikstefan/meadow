@@ -13,11 +13,34 @@
 import * as THREE from 'three/webgpu';
 import { texture, vec2, float } from 'three/tsl';
 
-export const RELIEF_EXT = 10000; // half extent (m)
-export const RELIEF_N = 768; // cells per side (~26 m)
+export const RELIEF_EXT = 16000; // half extent (m)
+export const RELIEF_N = 1536; // cells per side (~21 m)
 const CELL = RELIEF_EXT * 2 / RELIEF_N;
 
 let H = null, TEX = null, ID = null, AUX = null, AUXTEX = null;
+let DEM = null; // real terrain (metres relative to the plains), when loaded
+
+// The real Torres del Paine: a 1536^2 grid of SRTM-derived elevation (AWS open
+// terrain tiles, Mapzen terrarium encoding) over +-16 km around the trail between
+// Lago Skottsberg and Campamento Italiano, stored as decimetres + 400 m in the
+// R (high byte) and G (low byte) of a lossless PNG. Like the webgl-mountains demo,
+// the mountains are real terrain; the shading adds rock, snow and erosion detail.
+export async function loadDEM() {
+
+	if ( DEM ) return;
+	const url = new URL( '../../assets/plains/dem.png', import.meta.url ).href;
+	const blob = await ( await fetch( url ) ).blob();
+	const bmp = await createImageBitmap( blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' } );
+	const c = document.createElement( 'canvas' );
+	c.width = bmp.width; c.height = bmp.height;
+	const g = c.getContext( '2d', { willReadFrequently: true } );
+	g.drawImage( bmp, 0, 0 );
+	const px = g.getImageData( 0, 0, bmp.width, bmp.height ).data;
+	const N = bmp.width;
+	DEM = new Float32Array( N * N );
+	for ( let k = 0; k < N * N; k ++ ) DEM[ k ] = ( px[ k * 4 ] * 256 + px[ k * 4 + 1 ] ) / 10 - 400;
+
+}
 let FLOW = null;
 
 function rng( seed ) {
@@ -117,9 +140,46 @@ function erode( h, N, droplets, r, flow ) {
 }
 
 /** Build (once) from the analytic mountain function m(x, z) -> metres above the plains. */
+function buildFromDEM( m ) {
+
+	const t0 = performance.now();
+	const N = RELIEF_N;
+	H = new Float32Array( N * N );
+	ID = new Uint8Array( N * N );
+	const free = m.freeRadius || 950;
+	for ( let j = 0; j < N; j ++ ) for ( let i = 0; i < N; i ++ ) {
+
+		const k = j * N + i;
+		const x = ( ( i + 0.5 ) / N * 2 - 1 ) * RELIEF_EXT, z = ( ( j + 0.5 ) / N * 2 - 1 ) * RELIEF_EXT;
+		const r = Math.hypot( x, z );
+		// the walkable plains stay procedural; the real land rises around them
+		const t = Math.min( 1, Math.max( 0, ( r - free ) / 900 ) ), w = t * t * ( 3 - 2 * t );
+		let v = DEM[ k ];
+		if ( v < 0 ) v = - 40 * ( 1 - Math.exp( v / 40 ) ); // valleys and lake basins: shallow floors
+		H[ k ] = v * w;
+		// massif ids for the materials: Paine Grande NW..N, the Cuernos / Almirante Nieto NNE..NE
+		const az = Math.atan2( x, - z ) * 180 / Math.PI;
+		ID[ k ] = H[ k ] < 60 ? 0 : az > - 100 && az < 12 ? 1 : az >= 12 && az < 60 && r > 4500 ? 2 : 4;
+
+	}
+
+	// flow map from droplets run over a scratch copy (the real terrain is not eroded)
+	const scratch = new Float32Array( N * N );
+	for ( let k = 0; k < N * N; k ++ ) scratch[ k ] = Math.max( 0, H[ k ] ) / CELL;
+	FLOW = new Float32Array( N * N );
+	erode( scratch, N, 160000, rng( 90210 ), FLOW );
+	const orig = new Float32Array( N * N );
+	for ( let k = 0; k < N * N; k ++ ) orig[ k ] = H[ k ] / CELL; // no sediment change
+	bakeAux( orig, N );
+	console.log( `relief: real terrain ${ N }^2 (${ ( performance.now() - t0 ).toFixed( 0 ) } ms)` );
+	return H;
+
+}
+
 export function buildRelief( m ) {
 
 	if ( H ) return H;
+	if ( DEM ) return buildFromDEM( m );
 	const t0 = performance.now();
 	const N = RELIEF_N;
 	const h = new Float32Array( N * N );

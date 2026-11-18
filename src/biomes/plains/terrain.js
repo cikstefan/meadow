@@ -172,6 +172,7 @@ function baseHeightJS( x, z ) {
 
 }
 
+mountainJS.freeRadius = MOUNTAIN_FREE_RADIUS + 150;
 const ensureRelief = () => buildRelief( mountainJS );
 
 export const terrainHeight = Fn( ( [ xz ] ) => {

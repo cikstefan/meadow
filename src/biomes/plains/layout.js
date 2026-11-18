@@ -70,7 +70,7 @@ export const CUERNOS = {
 	width: 1150,
 	steep: 1.35, // talus and scrub base below the walls
 	jag: 0.42,
-	capBase: 820, // height (above the plains) where the dark cap starts
+	capBase: 1650, // (real terrain: the black caps start ~1950 m a.s.l.) // height (above the plains) where the dark cap starts
 	// the towers themselves: [azimuth, distance, top height, radius, horn height]
 	towers: [
 		// (as seen from the plains: two slender spires, then the great granite wall
