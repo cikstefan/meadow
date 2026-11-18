@@ -13,7 +13,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, int, vec2, vec3, vec4, mix, smoothstep, clamp, sin, cos, dot, normalize, length, floor, attribute,
-	varying, instanceIndex, cameraPosition, texture, uv, select, uniform, faceDirection
+	varying, instanceIndex, cameraPosition, texture, uv, select, uniform, faceDirection, step
 } from 'three/tsl';
 import { hash2i, hash2i2, vnoise } from '../../tsl/noise.js';
 import { U, shadeFoliage, windField, cloudShadow } from '../../tsl/world.js';
@@ -222,7 +222,13 @@ export class Carpet {
 			const albedo = mix( s.rgb, straw, vD.y.mul( 0.55 ) ).mul( vTint ).mul( 0.85 );
 			const N = normalize( mix( vec3( 0, 1, 0 ), vec3( 0, 1, 0 ).mul( faceDirection ), 0.0 ) );
 			const ao = mix( 0.45, 1.0, vD.z );
-			return shadeFoliage( albedo, N, vW, ao, vD.w, float( 0.5 ), float( 0.04 ), float( 0.4 ), vec3( 0 ) );
+			// night: the rosettes' tiny violet / cream flowers glow (violet and spirit-cyan
+			// lights scattered across the far plain, like the meadow's glowing flowers)
+			const fl = step( 2.5, vD.x ).mul( smoothstep( 0.28, 0.42, lum ) );
+			const isViolet = step( s.b, s.r.add( 0.02 ) ).oneMinus().mul( step( s.g, s.b ) );
+			const gc = mix( U.glowColor.mul( 1.4 ), vec3( 0.8, 0.25, 1.0 ), isViolet );
+			const emit = gc.mul( fl ).mul( U.night ).mul( U.glow ).mul( 1.6 ).mul( vTint );
+			return shadeFoliage( albedo, N, vW, ao, vD.w, float( 0.5 ), float( 0.04 ), float( 0.4 ), emit );
 
 		} )();
 

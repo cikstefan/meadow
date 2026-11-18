@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select } from 'three/tsl';
+import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
@@ -18,6 +18,8 @@ import { makeRaptor, makeHuman } from './characters.js';
 import { DeerHerd } from './deer.js';
 import { WindSpirits } from './spirits.js';
 import { BIOME, BIOMES } from './biomes/index.js';
+// the plains' own look (night grade, bloom, exposure) never touches the meadow
+const PLAINS = BIOME.id === 'plains';
 import { mountWorldSwitch } from './ui/worldswitch.js';
 
 const QUALITY = {
@@ -25,8 +27,8 @@ const QUALITY = {
 	// blades/area = dense near field, mid/midArea, far/farArea out to the hills
 	low: { blades: 576, area: 56, mid: 512, midArea: 150, far: 384, farArea: 360, flowers: 224, dpr: 1, lod: 0.8 },
 	medium: { blades: 896, area: 76, mid: 704, midArea: 190, far: 512, farArea: 400, flowers: 304, dpr: 1.25, lod: 1 },
-	high: { blades: 1280, area: 96, mid: 896, midArea: 240, far: 768, farArea: 620, flowers: 384, dpr: 1.5, lod: 1.15 },
-	ultra: { blades: 1664, area: 120, mid: 1152, midArea: 300, far: 960, farArea: 760, flowers: 480, dpr: 2, lod: 1.4 },
+	high: { blades: 1280, area: 96, mid: 896, midArea: 240, far: PLAINS ? 768 : 640, farArea: PLAINS ? 620 : 440, flowers: 384, dpr: 1.5, lod: 1.15 },
+	ultra: { blades: 1664, area: 120, mid: 1152, midArea: 300, far: PLAINS ? 960 : 768, farArea: PLAINS ? 760 : 500, flowers: 480, dpr: 2, lod: 1.4 },
 };
 
 const params = new URLSearchParams( location.search );
@@ -271,7 +273,13 @@ async function start() {
 				return BIOME.clouds.marchView( post.camPos, dir, dist );
 
 			} )(), null, null, { resolutionScale: 0.5 } );
-			color = vec4( color.rgb.mul( vol.a ).add( vol.rgb ), 1.0 );
+			// a small tent filter over the half-res march hides its per-pixel step jitter
+			const px = vec2( 1.5 ).div( screenSize );
+			const suv = uv();
+			const v = vol.sample( suv ).mul( 0.28 )
+				.add( vol.sample( suv.add( vec2( px.x, px.y ) ) ).mul( 0.18 ) ).add( vol.sample( suv.add( vec2( px.x.negate(), px.y ) ) ).mul( 0.18 ) )
+				.add( vol.sample( suv.add( vec2( px.x, px.y.negate() ) ) ).mul( 0.18 ) ).add( vol.sample( suv.sub( px ) ).mul( 0.18 ) );
+			color = vec4( color.rgb.mul( v.a ).add( v.rgb ), 1.0 );
 
 		}
 
@@ -296,17 +304,21 @@ async function start() {
 
 		if ( settings.painterly ) col = painterly( col );
 
-		// night grade: moonlight is seen in midnight blues (rod vision loses colour),
+		// night grade (plains only): moonlit midnight blue that stays vivid — colours are
+		// pushed toward blue rather than greyed, the glowing flowers keep their own hues,
 		// and under cloud the blacks are lifted (scattered light, more dynamic range)
-		{
+		if ( PLAINS ) {
 
 			const lum = dot( col, vec3( 0.2126, 0.7152, 0.0722 ) );
-			const blueish = vec3( lum ).mul( vec3( 0.62, 0.78, 1.15 ) );
-			// keep the glowing flowers' own colours (bright pixels are left alone)
-			const keep = smoothstep( 0.04, 0.16, lum );
-			col = mix( col, mix( blueish, col, keep ), post.night.mul( 0.6 ) );
-			const lift = post.night.mul( mix( 0.006, 0.016, post.cloudy ) );
-			col = col.mul( float( 1.0 ).sub( lift.mul( 4.0 ) ) ).add( vec3( 0.5, 0.65, 1.0 ).mul( lift ) );
+			const moon = mix( vec3( lum ).mul( vec3( 0.5, 0.74, 1.4 ) ), col.mul( vec3( 0.7, 0.92, 1.35 ) ), 0.6 );
+			const keep = smoothstep( 0.05, 0.22, lum );
+			const graded = mix( moon, col, keep );
+			// a little extra saturation so the night reads deep blue and the lights vivid
+			const gl = dot( graded, vec3( 0.2126, 0.7152, 0.0722 ) );
+			const vivid = mix( vec3( gl ), graded, 1.25 ).max( 0.0 );
+			col = mix( col, vivid, post.night.mul( 0.75 ) );
+			const lift = post.night.mul( mix( 0.005, 0.014, post.cloudy ) );
+			col = col.mul( float( 1.0 ).sub( lift.mul( 4.0 ) ) ).add( vec3( 0.35, 0.55, 1.0 ).mul( lift ) );
 
 		}
 
@@ -331,7 +343,7 @@ async function start() {
 		// dusk and night keep their exposure (night is lifted for readability)
 		const day = THREE.MathUtils.smoothstep( el, 4, 16 );
 		// eyes adapt at night (more under cloud): the moonlit plains stay readable
-		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * ( BIOME.nightExposure ?? 0.7 ) * ( 1 + settings.clouds * 0.6 ) ) * THREE.MathUtils.lerp( 1, 0.8, day );
+		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * ( PLAINS ? BIOME.nightExposure * ( 1 + settings.clouds * 0.6 ) : 0.7 ) ) * THREE.MathUtils.lerp( 1, 0.8, day );
 		U.dry.value = settings.dryPatches;
 		U.glow.value = settings.flowerGlow;
 		U.mist.value = settings.mist;
@@ -707,7 +719,7 @@ async function start() {
 		post.night.value = U.night.value;
 		post.cloudy.value = THREE.MathUtils.smoothstep( settings.clouds, 0.3, 0.8 );
 		// at night the glowing flowers bloom: a lower threshold and a stronger, wider halo
-		if ( post.bloom ) {
+		if ( post.bloom && PLAINS ) {
 
 			const nt = U.night.value;
 			post.bloom.threshold.value = THREE.MathUtils.lerp( 1.1, 0.32, nt );

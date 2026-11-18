@@ -7,7 +7,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, uniform, float, int, uint, vec2, vec3, vec4, If, instanceIndex, uv, varying, floor, fract,
-	mix, smoothstep, clamp, max, pow, sin, cos, dot, length, normalize, cross, abs, select,
+	mix, smoothstep, clamp, max, min, step, pow, sin, cos, dot, length, normalize, cross, abs, select,
 	cameraPosition, faceDirection, positionGeometry, PI
 } from 'three/tsl';
 import { hash2i, hash2i2, pcg, vnoise } from './tsl/noise.js';
@@ -435,9 +435,17 @@ export class Flowers {
 			// yellow lights), each flower a little brighter or dimmer than the next
 			const ownGlow = BIOME.flowerGlowOwnColour ? 1 : 0;
 			const vary = mix( 0.3, 1.7, fract( seed.mul( 91.7 ) ) );
-			const ownCol = select( part.lessThan( 1.5 ), petalCol, centreCol ).mul( 2.4 ).add( 0.03 );
+			const own0 = select( part.lessThan( 1.5 ), petalCol, centreCol );
+			// vivid, Pandora-like: the flower's own hue pushed to full saturation; pale
+			// (white) petals take the meadow's spirit glow, some cyan, some violet-magenta
+			const oL = dot( own0, vec3( 0.2126, 0.7152, 0.0722 ) );
+			const oMax = max( own0.x, max( own0.y, own0.z ) ), oMin = min( own0.x, min( own0.y, own0.z ) );
+			const sat = oMax.sub( oMin ).div( oMax.add( 1e-3 ) );
+			const vividOwn = mix( vec3( oL ), own0, 2.2 ).max( 0.0 ).div( oMax.add( 0.02 ) );
+			const pale = mix( U.glowColor.div( max( U.glowColor.x, max( U.glowColor.y, U.glowColor.z ) ).add( 1e-3 ) ), vec3( 0.75, 0.3, 1.0 ), step( 0.55, fract( seed.mul( 37.3 ) ) ) );
+			const ownCol = mix( pale, vividOwn, smoothstep( 0.18, 0.4, sat ) ).mul( 1.1 );
 			const glowC = ownGlow ? ownCol.mul( vary ) : U.glowColor;
-			const emit = glowC.mul( U.night.mul( U.glow ).mul( glowAmt ).mul( twinkle ).mul( ownGlow ? 0.55 : 1.0 ) );
+			const emit = glowC.mul( U.night.mul( U.glow ).mul( glowAmt ).mul( twinkle ).mul( ownGlow ? 3.0 : 1.0 ) );
 			// petals lose their day colour at night: the glow is the colour
 			const nightAlbedo = ownGlow ? albedo : mix( albedo, albedo.mul( vec3( 0.1, 0.25, 0.6 ) ), U.night.mul( 0.9 ) );
 

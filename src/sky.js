@@ -12,6 +12,8 @@ import { U, skyColor } from './tsl/world.js';
 import { BIOME } from './biomes/index.js';
 
 const SK = BIOME.sky || {};
+// plains-only sky tweaks (the meadow keeps its original sky)
+const PL = BIOME.id === 'plains';
 // raymarched 3D clouds (biomes that provide a weather map)
 // (biomes with a screen-space cloud pass draw their clouds in the post pipeline instead)
 const VOLUME = SK.volumetric && BIOME.clouds && ! BIOME.postClouds ? BIOME.clouds.march : null;
@@ -81,13 +83,13 @@ export class Sky {
 				.add( vnoise( p.mul( 8.3 ).add( vec2( 1.3, 9.9 ) ) ).mul( 0.0625 ) )
 				.div( 0.9375 );
 			// 0 clouds = a perfectly clear sky
-			const cAmt = smoothstep( 0.0, 0.2, U.clouds );
+			const cAmt = PL ? smoothstep( 0.0, 0.2, U.clouds ) : float( 1.0 );
 			// high-frequency billows eat into the edges: crisp cauliflower rims, not blur
-			const detK = smoothstep( 0.05, 0.3, y );
+			const detK = PL ? smoothstep( 0.05, 0.3, y ) : float( 0.0 );
 			const bil = ( v ) => vnoise( v ).mul( 2.0 ).sub( 1.0 ).abs();
 			const billow = bil( p.mul( 11.0 ).add( vec2( 2.2, 6.1 ) ) ).mul( 0.6 ).add( bil( p.mul( 23.0 ).add( vec2( 8.4, 1.9 ) ) ).mul( 0.4 ) );
 			const fE = f.sub( billow.mul( 0.08 ).mul( detK ) );
-			const dens = NO_PAINTED ? float( 0 ) : smoothstep( this.u.skyCover, this.u.skyCover.add( mix( 0.3, 0.12, detK ) ), fE ).mul( smoothstep( 0.0, 0.18, y ) ).mul( cAmt );
+			const dens = NO_PAINTED ? float( 0 ) : smoothstep( this.u.skyCover, this.u.skyCover.add( PL ? mix( 0.3, 0.12, detK ) : float( 0.3 ) ), PL ? fE : f ).mul( smoothstep( 0.0, 0.18, y ) ).mul( cAmt );
 			// darker, thicker cores; bright sun-facing rims (silver lining)
 			const core = smoothstep( this.u.skyCover.add( 0.08 ), this.u.skyCover.add( 0.45 ), f );
 			const shadowCol = mix( U.skyAmb.mul( 1.6 ), U.horizon.mul( 0.7 ), 0.4 );
@@ -150,7 +152,7 @@ export class Sky {
 				const th = float( 0.44 ).sub( U.cloudCover.mul( 0.4 ) );
 				// billowy erosion near the edges (fades out toward the horizon, where
 				// the projection would alias): crisp, textured rims instead of fuzz
-				const dk = smoothstep( 0.05, 0.28, y );
+				const dk = PL ? smoothstep( 0.05, 0.28, y ) : float( 0.0 );
 				const bil = ( v ) => vnoise( v ).mul( 2.0 ).sub( 1.0 ).abs();
 				const bq = wq.add( drift.mul( 0.6 ) );
 				const billow2 = bil( bq.mul( 7.3 ).add( vec2( 2.2, 6.1 ) ) ).mul( 0.55 )
@@ -160,7 +162,7 @@ export class Sky {
 				const edge = float( 1.0 ).sub( smoothstep( th, th.add( 0.2 ), d00 ) );
 				const d0 = d00.sub( billow2.mul( edge.mul( 0.75 ).add( 0.25 ) ).mul( 0.1 ).mul( dk ) );
 				const gapH = smoothstep( 0.035, 0.16, y );
-				const dens2 = smoothstep( th, th.add( mix( 0.085, 0.03, dk ) ), d0 ).mul( gapH ).mul( cAmt );
+				const dens2 = smoothstep( th, th.add( PL ? mix( 0.085, 0.03, dk ) : float( 0.085 ) ), d0 ).mul( gapH ).mul( cAmt );
 				// light march toward the sun (one step in the cloud plane)
 				const sunP = normalize( vec2( U.trueSunDir.x, U.trueSunDir.z ).add( vec2( 1e-4, 0 ) ) ).mul( 0.16 );
 				const dl = fbm( wq.add( sunP ) );
@@ -257,7 +259,7 @@ export class Sky {
 		U.horizon.value.setRGB( ...grey( p.hor, overcast * 0.6 ) );
 		U.horizonSun.value.setRGB( ...grey( p.hsun, overcast ) );
 		U.sunColor.value.setRGB( ...p.sun.map( ( v ) => v * ( 1 - overcast * 0.6 ) ) );
-		U.skyAmb.value.setRGB( ...p.amb.map( ( v ) => v * ( 1 + overcast * 1.1 ) ) );
+		U.skyAmb.value.setRGB( ...p.amb.map( ( v ) => v * ( 1 + overcast * ( PL ? 1.1 : 0.4 ) ) ) );
 		// ground bounce: grassy, proportional to sun + sky
 		const g = [ 0.09, 0.12, 0.04 ];
 		U.groundAmb.value.setRGB( ...g.map( ( v, i ) => v * ( p.sun[ i ] * 0.12 + p.amb[ i ] * 0.6 ) ) );

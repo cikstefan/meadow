@@ -20,6 +20,7 @@ import {
 } from 'three/tsl';
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, shadeFoliage, windField } from '../../tsl/world.js';
+import { rockAtJS } from './rockmask.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS, gravelPatchJS } from './terrain.js';
 import { cloudShadowGround } from './index.js';
 import { TILE } from './atlas.js';
@@ -160,7 +161,7 @@ function tileInstances( tx, tz ) {
 		if ( roll > f.cover ) continue;
 		const td = trailDistJS( x, z );
 		// a grassy verge along the trail, then the scrub (bushes crowd in only here and there)
-		if ( td < 1.9 + vnoiseJS( x / 9, z / 9 ) * 2.2 || lakeDistJS( x, z ) < 4 ) continue;
+		if ( td < 1.9 + vnoiseJS( x / 9, z / 9 ) * 2.2 || lakeDistJS( x, z ) < 4 || rockAtJS( x, z ) > 0.25 ) continue;
 		const mh = mountainHeightJS( x, z );
 		if ( mh > 220 || ( mh > 80 && roll > f.cover * ( 1 - ( mh - 80 ) / 140 ) ) ) continue;
 		const gravel = gravelPatchJS( x, z );

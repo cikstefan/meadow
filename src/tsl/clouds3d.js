@@ -258,12 +258,15 @@ export function makeVolumetricClouds( coverage, o = {} ) {
 			const ambBot = U.groundAmb.mul( 1.2 ).add( U.horizonSun.mul( U.twilight.mul( 0.25 ) ) ).add( U.horizon.mul( 0.08 ) );
 			const sunLit = smoothstep( - 0.08, 0.04, L.y );
 			const span = end.sub( tEnter );
+			const ign = fract( fract( dot( screenCoordinate.xy, vec2( 0.06711056, 0.00583715 ) ) ).mul( 52.9829189 ) );
 
 			Loop( STEPS, ( { i } ) => {
 
 				const a = float( i ).div( STEPS ), b = float( i ).add( 1.0 ).div( STEPS );
 				const dt = span.mul( b.mul( b ).sub( a.mul( a ) ) );
-				const t = tEnter.add( span.mul( a.mul( a ) ) ).add( dt.mul( 0.5 ) );
+				// jittered within its interval per pixel (interleaved gradient noise): no
+				// fixed sample slices, so no horizontal bands; the composite blurs the grain
+				const t = tEnter.add( span.mul( a.mul( a ) ) ).add( dt.mul( ign ) );
 				const p = ro.add( dir.mul( t ) );
 				const d = density( p, false );
 				If( d.greaterThan( 0.003 ), () => {

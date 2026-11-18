@@ -457,7 +457,7 @@ export class Grass {
 			// midrib: slightly lighter centre line
 			albedo.mulAssign( mix( 1.12, 0.94, smoothstep( 0.0, 0.35, abs( vS ) ) ) );
 			// fine parallel veins along the blade (close up only)
-			albedo.mulAssign( sin( vS.mul( 17.0 ).add( bSeed.mul( 20.0 ) ) ).mul( 0.09 ).mul( smoothstep( 12.0, 2.0, vDist ) ).add( 1.0 ) );
+			if ( G.tussock ) albedo.mulAssign( sin( vS.mul( 17.0 ).add( bSeed.mul( 20.0 ) ) ).mul( 0.09 ).mul( smoothstep( 12.0, 2.0, vDist ) ).add( 1.0 ) );
 
 			// --- normal: rounded blade + blend toward ground normal (canopy
 			// behaves like a volume, stabilises lighting at distance)

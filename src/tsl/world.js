@@ -69,7 +69,8 @@ const cloudShadowDefault = Fn( ( [ xz ] ) => {
 
 	const p = xz.sub( U.cloudOffset );
 	const c = vnoise( p.div( 85.0 ) ).mul( 0.7 ).add( vnoise( p.div( 27.0 ).add( vec2( 3.0, 8.0 ) ) ).mul( 0.3 ) );
-	const lit = max( smoothstep( U.cloudCover.sub( 0.1 ), U.cloudCover.add( 0.1 ), c ), smoothstep( 0.2, 0.0, U.clouds ) );
+	const lit0 = smoothstep( U.cloudCover.sub( 0.1 ), U.cloudCover.add( 0.1 ), c );
+	const lit = BIOME.id === 'plains' ? max( lit0, smoothstep( 0.2, 0.0, U.clouds ) ) : lit0;
 	return mix( float( 1.0 ).sub( U.cloudDark ), float( 1.0 ), lit );
 
 } );
@@ -194,7 +195,7 @@ export const shadeFoliage = Fn( ( [ albedo, N, P, ao, shadow, transmit, specAmt,
 	const NdL = dot( N, L );
 	// far away blades / leaf cards are sub-pixel: their glints and back-light flicker as
 	// sparkles, so the sharp lobes fade out with distance
-	const near = smoothstep( 160.0, 35.0, P.sub( cameraPosition ).length() );
+	const near = BIOME.id === 'plains' ? smoothstep( 160.0, 35.0, P.sub( cameraPosition ).length() ) : float( 1.0 );
 	const diff = clamp( NdL.add( wrap ).div( float( 1.0 ).add( wrap ) ), 0.0, 1.0 );
 
 	const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) );

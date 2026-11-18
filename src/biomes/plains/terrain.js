@@ -11,6 +11,7 @@ import { Fn, float, vec2, vec3, mix, smoothstep, clamp, max, min, abs, sqrt, sin
 import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import { TRAIL, LAKE, PAINE_GRANDE, CUERNOS, VALLEY_HEAD, FAR_HILLS, MOUNTAIN_FREE_RADIUS } from './layout.js';
+import { rockFree } from './rockmask.js';
 import { buildRelief, reliefJS, relief, reliefIdJS } from './relief.js';
 
 const D2R = Math.PI / 180;
@@ -412,7 +413,7 @@ export const fieldFlowers = Fn( ( [ xz ] ) => {
 	const a = vnoise( xz.div( 19 ).add( vec2( 7.0, 140.0 ) ) );
 	const b = vnoise( xz.div( 4.0 ).add( vec2( 66.0, 12.0 ) ) );
 	const verge = smoothstep( 4.0, 0.8, trailDist( xz ) );
-	return clamp( smoothstep( 0.55, 0.92, a.mul( 0.7 ).add( b.mul( 0.3 ) ) ).add( verge.mul( 0.45 ) ), 0.0, 1.0 );
+	return clamp( smoothstep( 0.45, 0.88, a.mul( 0.7 ).add( b.mul( 0.3 ) ) ).add( verge.mul( 0.45 ) ), 0.0, 1.0 );
 
 } );
 
@@ -451,7 +452,8 @@ export const grassMask = Fn( ( [ xz ] ) => {
 	const wet = smoothstep( - 2.0, 3.0, lakeSDF( xz ) );
 	// grass thins out up the mountain slopes (scree and rock above)
 	const alp = smoothstep( 320.0, 70.0, mountainHeight( xz ) );
-	return trail.mul( g ).mul( wet ).mul( alp );
+	// and none growing up through the boulders
+	return trail.mul( g ).mul( wet ).mul( alp ).mul( rockFree( xz ) );
 
 } );
 

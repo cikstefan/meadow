@@ -14,6 +14,7 @@ import { U, applyFog } from '../../tsl/world.js';
 import { landHeightJS, trailDistJS, lakeDistJS, gravelPatchJS, mountainHeightJS } from './terrain.js';
 import { cloudShadowGround } from './index.js';
 import { rng } from './grow.js';
+import { stampRock, rockMaskDone } from './rockmask.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const LOD_DIST = 90, RADIUS = 1100;
@@ -97,9 +98,11 @@ function scatter() {
 		const erratic = roll < 0.0035 + outcrop * 0.004;
 		const s = erratic ? 1.6 + sz * 1.8 : ( 0.25 + Math.pow( sz, 3 ) * 1.4 ) * ( outcrop > 0.1 ? 1.4 : 1 );
 		out.push( x, landHeightJS( x, z ) - s * 0.28, z, s, yaw, erratic ? 0.95 : tint * 0.85, 0, 0 );
+		stampRock( x, z, s * 0.95 );
 
 	}
 
+	rockMaskDone();
 	return new Float32Array( out );
 
 }
@@ -111,7 +114,7 @@ export class Rocks {
 		this.data = scatter();
 		this.group = new THREE.Group();
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
-		const T = { rock: tex( 'dry_ground_rocks_c', true ), cliff: tex( 'cliff_side_c', true ), n: tex( 'cliff_side_n' ) };
+		const T = { rock: tex( 'mossy_rock_c', true ), cliff: tex( 'granite_face_c', true ) };
 		const mat = this.material( T );
 		const V = 4, cnt = this.data.length / 8;
 		this.meshes = [ 0, 1, 2, 3 ].map( ( v ) => [ 5, 3 ].map( ( detail ) => {
@@ -157,16 +160,18 @@ export class Rocks {
 			const w = pow( abs( N ), vec3( 4.0 ) ).toVar();
 			w.divAssign( w.x.add( w.y ).add( w.z ) );
 			const tri = ( t, sc ) => texture( t, P.zy.mul( sc ) ).mul( w.x ).add( texture( t, P.xz.mul( sc ) ).mul( w.y ) ).add( texture( t, P.xy.mul( sc ) ).mul( w.z ) );
-			const a = tri( T.cliff, 0.45 ), b = tri( T.rock, 0.6 );
+			// scanned lichen-crusted granite (Poly Haven mossy_rock, via jose) on the
+			// tops and faces; the steepest faces and undersides show bare grey granite
+			const m = tri( T.rock, 0.42 ), g = tri( T.cliff, 0.35 );
 			const lum = ( c ) => dot( c, vec3( 0.3, 0.55, 0.15 ) );
-			// grey schist / pale granite, per boulder
-			const grey0 = mix( vec3( lum( a.rgb ) ).mul( vec3( 0.95, 0.93, 0.9 ) ).mul( 0.55 ), vec3( lum( b.rgb ) ).mul( vec3( 1.0, 0.97, 0.92 ) ).mul( 0.62 ), vI.x.div( 0.85 ).min( 1.0 ) );
-			// erratics: weathered rust-brown granite
-			const grey = mix( grey0, vec3( lum( a.rgb ) ).mul( vec3( 0.62, 0.42, 0.28 ) ), smoothstep( 0.88, 0.92, vI.x ) );
-			const alb = grey.mul( mix( 0.75, 1.1, a.a ) ).toVar();
-			// yellow-green and orange lichen on the tops, a damp dark band at the ground
-			const lich = smoothstep( 0.55, 0.75, vnoise( P.xz.mul( 3.0 ).add( P.y ) ) ).mul( smoothstep( 0.3, 0.9, N.y ) );
-			alb.assign( mix( alb, mix( vec3( 0.3, 0.32, 0.12 ), vec3( 0.5, 0.3, 0.08 ), vnoise( P.xz.mul( 9.0 ) ) ), lich.mul( 0.22 ) ) );
+			const bare = vec3( lum( g.rgb ) ).mul( vec3( 0.98, 0.96, 0.92 ) ).mul( 0.62 );
+			const lichen = m.rgb.mul( 0.9 );
+			const top = smoothstep( - 0.35, 0.55, N.y );
+			const alb = mix( bare, lichen, top.mul( mix( 0.55, 1.0, vI.x ) ) ).toVar();
+			// cavities from the scan's height (alpha): darker cracks
+			alb.mulAssign( mix( 0.6, 1.08, m.a ) );
+			// erratics: a slightly warmer, rustier granite (subtle)
+			alb.mulAssign( mix( vec3( 1.0 ), vec3( 1.08, 0.94, 0.82 ), smoothstep( 0.88, 0.92, vI.x ) ) );
 			alb.mulAssign( mix( 0.55, 1.0, smoothstep( 0.0, 0.25, P.y.sub( vI.y ) ) ) );
 			const L = U.sunDir;
 			const diff = clamp( dot( N, L ).add( 0.1 ).div( 1.1 ), 0.0, 1.0 ).mul( vI.z ).mul( smoothstep( - 0.04, 0.06, L.y ) );

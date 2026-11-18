@@ -199,7 +199,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, nightExposure: 1.7, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 3.5, // clouds and their shadows drift together at a real wind speed aloft (~14 m/s)
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, nightExposure: 1.7, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 12, // clouds and their shadows drift and churn together, time-lapsed with the 12-minute day (~48 m/s aloft)
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,
@@ -244,7 +244,7 @@ export const PLAINS = {
 		petalCol: [ [ 0.86, 0.46, 0.015 ], [ 0.33, 0.17, 0.6 ], [ 0.82, 0.8, 0.74 ], [ 0.82, 0.6, 0.02 ], [ 0.66, 0.24, 0.45 ], [ 0.86, 0.82, 0.6 ], [ 0.85, 0.68, 0.04 ], [ 0.44, 0.4, 0.74 ] ],
 		centreCol: [ [ 0.45, 0.07, 0.02 ], [ 0.75, 0.66, 0.3 ], [ 0.75, 0.55, 0.08 ], [ 0.6, 0.4, 0.02 ], [ 0.62, 0.55, 0.2 ], [ 0.7, 0.62, 0.12 ], [ 0.38, 0.22, 0.03 ], [ 0.85, 0.8, 0.66 ] ],
 		glossy: 3, blotch: 0, daisy: 2, frilly: - 1, notched: - 1,
-		density: 0.5, grassFollow: 0,
+		density: 0.75, grassFollow: 0,
 	},
 
 	// a GUI folder for the plains' own knobs

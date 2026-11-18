@@ -10,6 +10,7 @@ import {
 } from 'three/tsl';
 import { pcg } from './tsl/noise.js';
 import { U } from './tsl/world.js';
+import { BIOME } from './biomes/index.js';
 
 export class Pollen {
 
@@ -57,7 +58,7 @@ export class Pollen {
 			const d = length( p.sub( cameraPosition ) );
 			const edge = clamp( float( 1.0 ).sub( length( rel.xz ).div( box * 0.5 ) ), 0, 1 );
 			// specks right in front of the lens would bloom into flashes: fade them out up close
-			vFade.assign( smoothstep( 0.0, 0.35, edge ).mul( smoothstep( 0.8, 2.2, d ) ) );
+			vFade.assign( smoothstep( 0.0, 0.35, edge ).mul( ( BIOME.id === 'plains' ? smoothstep( 0.8, 2.2, d ) : smoothstep( 0.25, 0.9, d ) ) ) );
 			vWorld.assign( p );
 			return world;
 
@@ -74,7 +75,7 @@ export class Pollen {
 			const col = U.sunColor.mul( back.mul( 2.2 ).add( 0.22 ) ).mul( lit ).add( U.skyAmb.mul( 0.5 ) ).toVar();
 			// night: drifting blue spores, gently pulsing
 			const pulse = sin( U.time.mul( 1.7 ).add( vWorld.x.mul( 3.1 ) ).add( vWorld.z.mul( 2.3 ) ) ).mul( 0.4 ).add( 0.6 );
-			col.addAssign( U.glowColor.mul( U.night.mul( U.glow.min( 1.0 ) ).mul( pulse ).mul( 0.5 ) ) );
+			col.addAssign( U.glowColor.mul( BIOME.id === 'plains' ? U.night.mul( U.glow.min( 1.0 ) ).mul( pulse ).mul( 0.5 ) : U.night.mul( U.glow ).mul( pulse ).mul( 0.6 ) ) );
 			return vec4( col.mul( disc ).mul( vFade ), 1.0 );
 
 		} )();
