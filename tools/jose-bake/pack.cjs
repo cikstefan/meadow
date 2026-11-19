@@ -44,12 +44,19 @@ const path = require( 'path' );
 		const buf = fs.readFileSync( path.join( inDir, f.replace( '.json', '.raw' ) ) );
 		raw += buf.length;
 		const s = m.scale;
-		const texNames = ( m.texs || [] ).map( ( t ) => {
+		// materials: photo scan (full-resolution file when there is one), card mode, colours
+		const mats = ( m.texs || [] ).map( ( t ) => {
 
-			const full = t.name.replace( /_s$/, '' );
-			const name = fs.existsSync( path.join( TEX_SRC, full + '.webp' ) ) ? full : t.name;
-			TEXS[ name ] = { mean: t.mean, amt: t.amt };
-			return name;
+			let name = null;
+			if ( t.name ) {
+
+				const full = t.name.replace( /_s$/, '' );
+				name = fs.existsSync( path.join( TEX_SRC, full + '.webp' ) ) ? full : t.name;
+				TEXS[ name ] = { mean: t.mean, amt: t.amt };
+
+			}
+
+			return { tex: name, mode: t.mode || 'solid', amt: t.amt, mean: t.mean, base: t.base, edge: t.edge, outer: t.outer };
 
 		} );
 		let o = 0;
@@ -156,7 +163,7 @@ const path = require( 'path' );
 				for ( const [ k, list ] of [ ...bySlot ].sort( ( a, b ) => a[ 0 ] - b[ 0 ] ) ) {
 
 					sorted.set( list, at );
-					groups.push( { tex: k ? texNames[ k - 1 ] : null, start: at, count: list.length } );
+					groups.push( { mat: k ? mats[ k - 1 ] : { tex: null, mode: 'solid' }, start: at, count: list.length } );
 					at += list.length;
 
 				}

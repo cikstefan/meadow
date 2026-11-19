@@ -33,6 +33,23 @@ const WG = 64, GROUPS = 8192, MAXVIS = 1 << 19;
 // mesh or voxel, never both and never neither, and the pattern is fixed to the plant (no
 // screen-door crawl as the camera moves).
 export const FADE_PX = 1.15, FADE_W = 1.3;
+
+// night glow, shared by meshes and voxels: only some plants glow (each its own strength),
+// and on those only some flowers, each a little brighter or dimmer; never leaf greens.
+// lp: position in the prototype's own space (the same for a plant's mesh and voxels)
+export function flowerGlow( albedo, isFlower, lp, seed ) {
+
+	const sd = uint( seed.mul( 65535.0 ) );
+	const plantOn = select( pcg( sd.add( uint( 7 ) ) ).lessThan( 0.42 ), float( 1.0 ), float( 0.0 ) );
+	const plantK = mix( 0.35, 1.6, pcg( sd.add( uint( 13 ) ) ) );
+	const cell = lp.div( 0.22 ).floor();
+	const flowerK = smoothstep( 0.45, 0.95, cellHash( cell, seed.add( 0.37 ) ) ).mul( 1.6 );
+	const greenish = albedo.y.greaterThanEqual( albedo.x.mul( 0.78 ) ).and( albedo.y.greaterThanEqual( albedo.z ) );
+	const al = dot( albedo, vec3( 0.2126, 0.7152, 0.0722 ) );
+	const own = mix( vec3( al ), albedo, 1.8 ).max( 0.0 ).div( max( albedo.x, max( albedo.y, albedo.z ) ).add( 0.03 ) ).mul( 0.25 );
+	return select( isFlower.and( greenish.not() ), own, vec3( 0 ) ).mul( plantOn ).mul( plantK ).mul( flowerK );
+
+}
 export const cellHash = ( g, seed ) => pcg( uint( int( g.x ) ).mul( uint( 73856093 ) ).bitXor( uint( int( g.y ) ).mul( uint( 19349663 ) ) )
 	.bitXor( uint( int( g.z ) ).mul( uint( 83492791 ) ) ).add( uint( seed.mul( 65535.0 ) ) ) );
 
@@ -258,23 +275,22 @@ export class VoxelRaster {
 								const albedo = vec3( dec( w1, 0 ), dec( w1, 8 ), dec( w1, 16 ) ).pow( 2.0 ).mul( tint ).toVar();
 								const N = normalize( rot( vec3( dec( w2, 0 ), dec( w2, 8 ), dec( w2, 16 ) ).mul( 2.0 ).sub( 1.0 ) ) ).toVar();
 								const ao = dec( w2, 24 );
+								// the same lighting as the meshes (shadeFoliage): no jump at the hand-over
 								const L = U.sunDir;
 								const V = normalize( u.eye.sub( P ) );
 								const NdL = dot( N, L );
+								const aoM = mix( 0.35, 1.0, ao );
 								const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) );
-								const diff = clamp( NdL.add( 0.45 ).div( 1.45 ), 0.0, 1.0 ).mul( mix( 0.55, 1.0, ao ) );
-								const ambient = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( ao );
+								const near = smoothstep( 160.0, 35.0, dist );
+								const diff = clamp( NdL.add( 0.4 ).div( 1.4 ), 0.0, 1.0 );
+								const ambient = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( aoM );
 								const back = pow( clamp( dot( V.negate(), L ), 0.0, 1.0 ), 3.0 );
-								const thru = back.mul( 0.6 ).add( clamp( NdL.negate(), 0.0, 1.0 ).mul( 0.35 ) );
-								const trans = albedo.mul( vec3( 1.25, 1.3, 0.55 ) ).mul( U.sunColor ).mul( thru ).mul( 0.45 ).mul( sunVis );
-								// night: flowers glow in their own colour, saturated (Pandora-like)
+								const thru = back.mul( mix( 0.35, 1.4, near ) ).add( clamp( NdL.negate(), 0.0, 1.0 ).mul( 0.35 ) );
+								const trans = albedo.mul( vec3( 1.25, 1.3, 0.55 ) ).mul( U.sunColor ).mul( thru ).mul( 0.55 ).mul( sunVis );
 								const glow = w0.shiftRight( uint( 24 ) );
-								const varyF = mix( 0.35, 1.7, pcg( s.add( uint( 77 ) ) ) );
-								const farK = smoothstep( 900.0, 300.0, dist ).mul( 0.55 ).add( 0.45 );
-								const al = dot( albedo, vec3( 0.2126, 0.7152, 0.0722 ) );
-								const emitO = mix( vec3( al ), albedo, 1.8 ).max( 0.0 ).div( max( albedo.x, max( albedo.y, albedo.z ) ).add( 0.03 ) ).mul( 0.22 );
-								const emit = select( glow.equal( uint( 3 ) ), emitO, vec3( 0 ) ).mul( U.night.mul( U.glow ).mul( farK ).mul( varyF ) );
-								const col = applyFogFrom( albedo.mul( U.sunColor.mul( diff ).mul( sunVis ).add( ambient ) ).add( trans ).add( emit ), P, u.eye ).toVar();
+								const emit = flowerGlow( albedo, glow.equal( uint( 3 ) ), lp, seed ).mul( U.night.mul( U.glow ) );
+								const sunL = U.sunColor.mul( diff ).mul( sunVis );
+								const col = applyFogFrom( albedo.mul( sunL.add( ambient ) ).add( trans ).add( emit ), P, u.eye ).toVar();
 								footprint( ( pi ) => {
 
 									If( depthRead.element( pi ).equal( key ), () => {

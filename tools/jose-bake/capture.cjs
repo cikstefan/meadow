@@ -36,7 +36,7 @@ const PLANTS = {
 };
 const STAGES = [ 1.0, 0.62 ];
 // near-field mesh budgets (triangles) per LOD
-const LOD_TRIS = [ 160000, 36000, 8000 ];
+const LOD_TRIS = [ 150000, 40000, 10000 ];
 
 if ( process.env.ONLY_SEED ) for ( const k of Object.keys( PLANTS ) ) PLANTS[ k ].seeds = PLANTS[ k ].seeds.filter( ( x ) => x === process.env.ONLY_SEED );
 const url = process.argv[ 2 ], outDir = process.argv[ 3 ], only = process.argv[ 4 ] ? process.argv[ 4 ].split( ',' ) : null;
@@ -296,7 +296,9 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 
 		const mx = Math.max( r, g, b ), mn = Math.min( r, g, b ), lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 		const sat = ( mx - mn ) / ( mx + 1e-4 );
-		return ( sat > 0.35 && g < mx * 0.97 && lum > 0.06 ) || ( lum > 0.55 && sat < 0.2 );
+		// (never leaf greens or yellow-greens: those glowing made messy green specks at night)
+		const greenish = g >= r * 0.78 && g >= b;
+		return ! greenish && ( ( sat > 0.35 && lum > 0.06 ) || ( lum > 0.55 && sat < 0.2 ) );
 
 	};
 	const grid = new window.__vox.VoxelGrid( lo, [ vsz, vsz, vsz ], res );
@@ -323,7 +325,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 		if ( vis ) meshes.push( o );
 
 	} );
-	const P = [], NN = [], WOOD = [], IDX = [], UV = [], SLOT = [], TEXS = [];
+	const P = [], NN = [], WOOD = [], IDX = [], UV = [], SLOT = [], TEXS = [], ORG = [];
 	let srcTris = 0;
 	const cs = new THREE.Scene(), ccam = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
 	for ( const o of meshes ) {
@@ -337,7 +339,14 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 		const mat = new THREE.ShaderMaterial( {
 			uniforms: Object.assign( {}, m0.uniforms, { uCapW: { value: W }, uCapH: { value: H }, uCapN: { value: nv }, uMode: { value: 0 } } ),
 			vertexShader: vs2, defines: Object.assign( {}, m0.defines ), depthTest: false, depthWrite: false,
-			fragmentShader: 'uniform float uMode; varying vec3 vW; varying vec3 vN; varying vec2 vUv; void main(){ gl_FragColor = uMode < .5 ? vec4( vW, 1. ) : uMode < 1.5 ? vec4( normalize( vN ), 1. ) : vec4( vUv, 0., 1. ); }',
+			fragmentShader: `uniform float uMode; varying vec3 vW; varying vec3 vN; varying vec2 vUv; varying vec2 vV;
+				void main(){
+					vec2 tuv = vUv;
+					#ifdef CARD
+						// jose's alpha cards: one of four scan variants side by side, picked per organ
+						float var = floor( fract( vV.y * 13.7 + .37 ) * 4. ); tuv = vec2( ( var + clamp( vUv.x, .002, .998 ) ) / 4., clamp( vUv.y, .002, .998 ) );
+					#endif
+					gl_FragColor = uMode < .5 ? vec4( vW, 1. ) : uMode < 1.5 ? vec4( normalize( vN ), 1. ) : vec4( tuv, 0., 1. ); }`,
 		} );
 		let pts;
 		if ( o.isInstancedMesh ) {
@@ -361,24 +370,18 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 		mat.uniforms.uMode.value = 2;
 		R.clear(); R.render( cs, ccam );
 		R.readRenderTargetPixels( crt, 0, 0, W, H, uvb );
-		// the photo scan this material uses (jose: tissue() -> scanTexture), its strength and tiling
+		// the material: its photo scan (jose: tissue() -> scanTexture), card mode and colours
 		const U0 = m0.uniforms, tv = U0.uTex && U0.uTex.value, src = tv && ( ( tv.image && tv.image.src ) || ( tv.source && tv.source.data && tv.source.data.src ) ) || '';
 		const tm = src.match( /tex\/([a-z_0-9]+)\.webp/i );
 		const texName = tm && U0.uTexMean && U0.uTexMean.value.w > 0 ? tm[ 1 ] : null;
-		let slot = 0;
-		if ( texName ) {
-
-			slot = TEXS.findIndex( ( t ) => t.name === texName ) + 1;
-			if ( ! slot ) {
-
-				TEXS.push( { name: texName, amt: U0.uTexMean.value.w, mean: [ U0.uTexMean.value.x, U0.uTexMean.value.y, U0.uTexMean.value.z ] } );
-				slot = TEXS.length;
-
-			}
-
-		}
-
-		const uvScale = U0.uScale ? U0.uScale.value : 1;
+		const D0 = m0.defines || {};
+		const mode = 'CARD' in D0 ? ( 'CARD_TINT' in D0 ? 'tint' : 'CARD_RAW' in D0 ? 'raw' : 'card' ) : 'solid';
+		const cc = ( n ) => U0[ n ] ? [ U0[ n ].value.r, U0[ n ].value.g, U0[ n ].value.b ] : [ 1, 1, 1 ];
+		TEXS.push( { name: texName, amt: texName ? U0.uTexMean.value.w : 0, mean: texName ? [ U0.uTexMean.value.x, U0.uTexMean.value.y, U0.uTexMean.value.z ] : [ 0.5, 0.5, 0.5 ],
+			mode, base: cc( 'uBase' ), edge: cc( 'uEdge' ), outer: cc( 'uOuter' ) } );
+		const slot = TEXS.length; // one slot per material
+		const organs = o.isInstancedMesh; // leaves, florets, cards: thinned per organ for far LODs
+		const uvScale = mode === 'solid' && U0.uScale ? U0.uScale.value : 1;
 		cs.remove( pts ); crt.dispose(); mat.dispose();
 
 		const wood = /attribute float aB;/.test( vs ) ? 1 : 0;
@@ -389,6 +392,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 			NN.push( nrm[ i * 4 ], nrm[ i * 4 + 1 ], nrm[ i * 4 + 2 ] );
 			UV.push( uvb[ i * 4 ] * uvScale, uvb[ i * 4 + 1 ] * uvScale );
 			SLOT.push( slot );
+			ORG.push( organs ? slot * 1048576 + Math.floor( i / nv ) : - 1 );
 			WOOD.push( pos[ i * 4 + 3 ] > 0.5 ? wood : 255 ); // 255: never written
 
 		}
@@ -412,103 +416,8 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 
 	srcTris = IDX.length / 3;
 
-	// alpha cut-outs (needle / leaf cards) become geometry: big triangles are split into
-	// pixel-sized pieces and each piece is tested against the 14 views. A piece any view
-	// sees is surface; one that no view sees but some view looks straight through (the
-	// depth there is behind it) lies on a transparent part of a card and is dropped;
-	// pieces hidden from every view (inside the crown) are kept.
-	{
+	// (alpha cards stay cards: their cut-out comes from the scan's alpha at runtime)
 
-		const px = 2 * rad / N, deps = 2.5 * px + 0.004;
-		const classify = ( x, y, z ) => {
-
-			let through = false;
-			for ( const V of views ) {
-
-				const rx = x - V.pos.x, ry = y + ground - V.pos.y, rz = z - V.pos.z;
-				const vd = rx * V.fwd.x + ry * V.fwd.y + rz * V.fwd.z;
-				const sx = ( ( rx * V.right.x + ry * V.right.y + rz * V.right.z ) / rad * 0.5 + 0.5 ) * N;
-				const sy = ( ( rx * V.up.x + ry * V.up.y + rz * V.up.z ) / rad * 0.5 + 0.5 ) * N;
-				const ix = Math.floor( sx ), iy = Math.floor( sy );
-				if ( ix < 0 || iy < 0 || ix >= N || iy >= N ) continue;
-				const dc = V.dep[ iy * N + ix ];
-				if ( Math.abs( dc - vd ) < deps ) return 1; // seen
-				if ( dc > vd + deps ) through = true;
-
-			}
-
-			return through ? 0 : 1;
-
-		};
-		const out = [];
-		const addV = ( a, b, c, u, v ) => {
-
-			const w = 1 - u - v;
-			P.push( P[ a * 3 ] * w + P[ b * 3 ] * u + P[ c * 3 ] * v, P[ a * 3 + 1 ] * w + P[ b * 3 + 1 ] * u + P[ c * 3 + 1 ] * v, P[ a * 3 + 2 ] * w + P[ b * 3 + 2 ] * u + P[ c * 3 + 2 ] * v );
-			NN.push( NN[ a * 3 ] * w + NN[ b * 3 ] * u + NN[ c * 3 ] * v, NN[ a * 3 + 1 ] * w + NN[ b * 3 + 1 ] * u + NN[ c * 3 + 1 ] * v, NN[ a * 3 + 2 ] * w + NN[ b * 3 + 2 ] * u + NN[ c * 3 + 2 ] * v );
-			WOOD.push( WOOD[ a ] );
-			UV.push( UV[ a * 2 ] * w + UV[ b * 2 ] * u + UV[ c * 2 ] * v, UV[ a * 2 + 1 ] * w + UV[ b * 2 + 1 ] * u + UV[ c * 2 + 1 ] * v );
-			SLOT.push( SLOT[ a ] );
-			return P.length / 3 - 1;
-
-		};
-		let dropped = 0;
-		for ( let t = 0; t < IDX.length; t += 3 ) {
-
-			const a = IDX[ t ], b = IDX[ t + 1 ], c = IDX[ t + 2 ];
-			const e = Math.max(
-				Math.hypot( P[ a * 3 ] - P[ b * 3 ], P[ a * 3 + 1 ] - P[ b * 3 + 1 ], P[ a * 3 + 2 ] - P[ b * 3 + 2 ] ),
-				Math.hypot( P[ a * 3 ] - P[ c * 3 ], P[ a * 3 + 1 ] - P[ c * 3 + 1 ], P[ a * 3 + 2 ] - P[ c * 3 + 2 ] ),
-				Math.hypot( P[ b * 3 ] - P[ c * 3 ], P[ b * 3 + 1 ] - P[ c * 3 + 1 ], P[ b * 3 + 2 ] - P[ c * 3 + 2 ] ) );
-			const k = Math.min( 8, Math.ceil( e / ( 1.5 * px ) ) );
-			if ( k <= 1 ) {
-
-				const cx = ( P[ a * 3 ] + P[ b * 3 ] + P[ c * 3 ] ) / 3, cy = ( P[ a * 3 + 1 ] + P[ b * 3 + 1 ] + P[ c * 3 + 1 ] ) / 3, cz = ( P[ a * 3 + 2 ] + P[ b * 3 + 2 ] + P[ c * 3 + 2 ] ) / 3;
-				if ( classify( cx, cy, cz ) ) out.push( a, b, c ); else dropped ++;
-				continue;
-
-			}
-
-			// barycentric grid: vertex (i, j) at u = i / k, v = j / k
-			const grid = new Map();
-			const gv = ( i, j ) => {
-
-				const key = i * 16 + j;
-				let n = grid.get( key );
-				if ( n === undefined ) {
-
-					n = i === 0 && j === 0 ? a : i === k && j === 0 ? b : i === 0 && j === k ? c : addV( a, b, c, i / k, j / k );
-					grid.set( key, n );
-
-				}
-
-				return n;
-
-			};
-			const test = ( u, v ) => {
-
-				const w = 1 - u - v;
-				return classify( P[ a * 3 ] * w + P[ b * 3 ] * u + P[ c * 3 ] * v, P[ a * 3 + 1 ] * w + P[ b * 3 + 1 ] * u + P[ c * 3 + 1 ] * v, P[ a * 3 + 2 ] * w + P[ b * 3 + 2 ] * u + P[ c * 3 + 2 ] * v );
-
-			};
-			for ( let j = 0; j < k; j ++ ) for ( let i = 0; i < k - j; i ++ ) {
-
-				if ( test( ( i + 1 / 3 ) / k, ( j + 1 / 3 ) / k ) ) out.push( gv( i, j ), gv( i + 1, j ), gv( i, j + 1 ) ); else dropped ++;
-				if ( i + j < k - 1 ) {
-
-					if ( test( ( i + 2 / 3 ) / k, ( j + 2 / 3 ) / k ) ) out.push( gv( i + 1, j ), gv( i + 1, j + 1 ), gv( i, j + 1 ) ); else dropped ++;
-
-				}
-
-			}
-
-		}
-
-		IDX.length = 0;
-		for ( const v of out ) IDX.push( v );
-		console.log( `[bake] alpha test: dropped ${ dropped } pieces, kept ${ out.length / 3 } triangles` );
-
-	}
 	R.setRenderTarget( null );
 	R.toneMapping = prevTM;
 	rt.dispose(); rt2.dispose();
@@ -530,19 +439,62 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 	};
 	const eps = 2.5 * 2 * rad / N + 0.004;
 	const lods = [];
-	let prev = I0;
-	for ( let l = 0; l < LOD_TRIS.length; l ++ ) {
+	// organs (leaves, florets, cards: instanced in jose) are thinned per organ for the
+	// lighter LODs, the survivors grown a little to keep the crown's density (as jose's own
+	// screen-size LOD does); only the wood is simplified. Every LOD keeps the real organs.
+	const barkIdx = [], organTris = new Map();
+	for ( let t = 0; t < I0.length; t += 3 ) {
 
-		let idx = prev;
-		const target = LOD_TRIS[ l ] * 3;
-		if ( idx.length > target ) {
+		const o = ORG[ I0[ t ] ];
+		if ( o < 0 ) barkIdx.push( I0[ t ], I0[ t + 1 ], I0[ t + 2 ] );
+		else {
 
-			[ idx ] = simp.simplify( prev, Pf, 3, target, l === 0 ? 0.004 : 0.02, [] );
-			if ( idx.length > target * 1.3 ) [ idx ] = simp.simplifySloppy( prev, Pf, 3, null, target, l === 0 ? 0.01 : 0.05 );
+			if ( ! organTris.has( o ) ) organTris.set( o, [] );
+			organTris.get( o ).push( I0[ t ], I0[ t + 1 ], I0[ t + 2 ] );
 
 		}
 
-		prev = idx;
+	}
+
+	const centre = new Map();
+	for ( const [ o, list ] of organTris ) {
+
+		let cx = 0, cy = 0, cz = 0;
+		for ( const v of list ) {
+
+			cx += Pf[ v * 3 ]; cy += Pf[ v * 3 + 1 ]; cz += Pf[ v * 3 + 2 ];
+
+		}
+
+		centre.set( o, [ cx / list.length, cy / list.length, cz / list.length ] );
+
+	}
+
+	let organCount = 0;
+	for ( const list of organTris.values() ) organCount += list.length / 3;
+	const B0 = new Uint32Array( barkIdx ), hashO = ( o ) => ( ( Math.imul( o + 1, 2654435761 ) ^ Math.imul( o + 7, 2246822519 ) ) >>> 0 ) / 4294967296;
+	for ( let l = 0; l < LOD_TRIS.length; l ++ ) {
+
+		const barkBudget = Math.min( B0.length / 3, [ 45000, 9000, 1800 ][ l ] );
+		let bark = B0;
+		if ( B0.length / 3 > barkBudget ) {
+
+			[ bark ] = simp.simplify( B0, Pf, 3, barkBudget * 3, l === 0 ? 0.002 : 0.01, [] );
+			if ( bark.length / 3 > barkBudget * 1.4 ) [ bark ] = simp.simplifySloppy( B0, Pf, 3, null, barkBudget * 3, 0.02 );
+
+		}
+
+		const keepK = Math.max( 0.03, Math.min( 1, ( LOD_TRIS[ l ] - bark.length / 3 ) / Math.max( 1, organCount ) ) );
+		const grow = Math.min( 1.7, 1 / Math.sqrt( Math.max( keepK, 0.12 ) ) );
+		const idxL = Array.from( bark ), orgScale = new Map();
+		for ( const [ o, list ] of organTris ) if ( hashO( o ) < keepK ) {
+
+			for ( const v of list ) idxL.push( v );
+			orgScale.set( o, grow );
+
+		}
+
+		const idx = new Uint32Array( idxL );
 		// compact
 		const remap = new Map(), pos = [], nrm = [], col = [], uv = [], sl = [];
 		const out = new Uint32Array( idx.length );
@@ -552,13 +504,22 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 			if ( n === undefined ) {
 
 				n = remap.size; remap.set( idx[ i ], n );
-				const v = idx[ i ], x = Pf[ v * 3 ], y = Pf[ v * 3 + 1 ], z = Pf[ v * 3 + 2 ];
+				const v = idx[ i ];
+				let x = Pf[ v * 3 ], y = Pf[ v * 3 + 1 ], z = Pf[ v * 3 + 2 ];
+				const org = ORG[ v ], gs = org >= 0 ? orgScale.get( org ) || 1 : 1;
+				if ( gs !== 1 ) {
+
+					const c = centre.get( org );
+					x = c[ 0 ] + ( x - c[ 0 ] ) * gs; y = c[ 1 ] + ( y - c[ 1 ] ) * gs; z = c[ 2 ] + ( z - c[ 2 ] ) * gs;
+
+				}
+
 				pos.push( x, y, z ); nrm.push( NN[ v * 3 ], NN[ v * 3 + 1 ], NN[ v * 3 + 2 ] ); uv.push( UV[ v * 2 ], UV[ v * 2 + 1 ] ); sl.push( SLOT[ v ] );
 				// colour: the views that see this vertex (depth test), weighted toward facing views
 				let r = 0, g = 0, bb = 0, w = 0;
 				for ( const V of views ) {
 
-					const [ px, py, vd ] = view( V, x, y, z );
+					const [ px, py, vd ] = view( V, Pf[ v * 3 ], Pf[ v * 3 + 1 ], Pf[ v * 3 + 2 ] );
 					const facing = NN[ v * 3 ] * V.d.x + NN[ v * 3 + 1 ] * V.d.y + NN[ v * 3 + 2 ] * V.d.z;
 					for ( let oy = - 1; oy <= 1; oy ++ ) for ( let ox = - 1; ox <= 1; ox ++ ) {
 
@@ -585,7 +546,8 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 
 				const q = ( f ) => Math.max( 0, Math.min( 255, Math.round( Math.sqrt( Math.max( 0, f ) ) * 255 ) ) );
 				const ao = aoAt( x, y, z );
-				const kind = WOOD[ v ] === 1 ? 0 : ( r >= 0 && isFlower( r, g, bb ) ? 2 : 1 );
+				const M = TEXS[ SLOT[ v ] - 1 ];
+				const kind = WOOD[ v ] === 1 ? 0 : ( ( M && M.mode === 'tint' ) || ( r >= 0 && isFlower( r, g, bb ) ) ? 2 : 1 );
 				col.push( r < 0 ? 0 : q( r ), r < 0 ? 0 : q( g ), r < 0 ? 0 : q( bb ), ( kind << 6 ) | Math.round( ao * 63 ), r < 0 ? 1 : 0 );
 
 			}

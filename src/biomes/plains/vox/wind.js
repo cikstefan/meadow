@@ -38,9 +38,10 @@ export function plantWind( lp, H, xz, seed ) {
 	const a2 = wind.mul( 0.4 ).add( 0.06 ).mul( stiff ).mul( mix( 0.05, 0.03, grass ) ).mul( h.mul( 0.25 ).add( r.mul( 0.35 ) ).add( 0.15 ) );
 	const sec = W.mul( sin( t.mul( rate ).add( ph ) ) ).add( Wp.mul( cos( t.mul( rate.mul( 0.83 ) ).add( ph.mul( 1.7 ) ) ).mul( 0.6 ) ) ).mul( a2 ).toVar();
 	// twigs and leaves at the outside: quick flutter
-	const tw = vnoise( lp.xz.mul( 6.0 ).add( vec2( lp.y.mul( 4.0 ), seed.mul( 9.0 ) ) ) ).toVar();
+	// (phase coherent over ~40 cm: a leaf or floret cluster moves as one, never its corners apart)
+	const tw = vnoise( lp.xz.mul( 1.6 ).add( vec2( lp.y.mul( 1.3 ), seed.mul( 9.0 ) ) ) ).toVar();
 	const flut = vec3( sin( t.mul( 6.3 ).add( tw.mul( 25.0 ) ) ), sin( t.mul( 7.9 ).add( tw.mul( 31.0 ) ) ).mul( 0.6 ), cos( t.mul( 5.7 ).add( tw.mul( 19.0 ) ) ) )
-		.mul( wind.mul( 0.7 ).add( 0.15 ).mul( stiff.mul( stiff ) ).mul( 0.012 ) );
+		.mul( wind.mul( 0.7 ).add( 0.15 ).mul( stiff.mul( stiff ) ).mul( 0.008 ) );
 	return W.mul( prim ).add( sec ).add( flut );
 
 }

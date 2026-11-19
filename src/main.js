@@ -309,9 +309,14 @@ async function start() {
 
 
 		let col = color.rgb;
-		const glow = bloom( color, 0.22, 0.55, 1.1 );
-		post.bloom = glow;
-		col = col.add( glow.rgb );
+		// (the plains go without bloom: a clean, high-contrast image, glows sit on black)
+		if ( ! PLAINS ) {
+
+			const glow = bloom( color, 0.22, 0.55, 1.1 );
+			post.bloom = glow;
+			col = col.add( glow.rgb );
+
+		}
 
 		if ( settings.sunShafts ) {
 
@@ -342,8 +347,11 @@ async function start() {
 			const gl = dot( graded, vec3( 0.2126, 0.7152, 0.0722 ) );
 			const vivid = mix( vec3( gl ), graded, 1.25 ).max( 0.0 );
 			col = mix( col, vivid, post.night.mul( 0.75 ) );
-			const lift = post.night.mul( mix( 0.005, 0.014, post.cloudy ) );
-			col = col.mul( float( 1.0 ).sub( lift.mul( 4.0 ) ) ).add( vec3( 0.35, 0.55, 1.0 ).mul( lift ) );
+			// deep, clean blacks (no grey veil): the darks fall toward blue-black with a toe,
+			// so the ground reads black and the glowing flowers and spores stand out on it
+			const l2 = dot( col, vec3( 0.2126, 0.7152, 0.0722 ) );
+			const toe = mix( float( 1.0 ), smoothstep( 0.0, 0.12, l2 ).mul( 0.82 ).add( 0.18 ), post.night.mul( mix( 1.0, 0.7, post.cloudy ) ) );
+			col = col.mul( toe ).add( vec3( 0.002, 0.004, 0.012 ).mul( post.night ) );
 
 		}
 
