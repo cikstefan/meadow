@@ -48,7 +48,13 @@ const path = require( 'path' );
 		const mats = ( m.texs || [] ).map( ( t ) => {
 
 			let name = null;
-			if ( t.name ) {
+			if ( t.generated ) {
+
+				// a plant's own leaf / petal atlas rendered by the capture
+				name = t.name;
+				TEXS[ name ] = { mean: t.mean, amt: t.amt, src: path.join( inDir, 'tex', name + '.png' ) };
+
+			} else if ( t.name ) {
 
 				const full = t.name.replace( /_s$/, '' );
 				name = fs.existsSync( path.join( TEX_SRC, full + '.webp' ) ) ? full : t.name;
@@ -224,7 +230,17 @@ const path = require( 'path' );
 
 	// the photo scans (CC0, see jose's tex/README.md) the meshes use, with their linear mean colours
 	fs.mkdirSync( path.join( outDir, 'tex' ), { recursive: true } );
-	for ( const n of Object.keys( TEXS ) ) fs.copyFileSync( path.join( TEX_SRC, n + '.webp' ), path.join( outDir, 'tex', n + '.webp' ) );
+	const gen = [];
+	for ( const [ n, T ] of Object.entries( TEXS ) ) {
+
+		if ( T.src ) gen.push( [ T.src, path.join( outDir, 'tex', n + '.webp' ) ] );
+		else fs.copyFileSync( path.join( TEX_SRC, n + '.webp' ), path.join( outDir, 'tex', n + '.webp' ) );
+		delete T.src;
+
+	}
+
+	// generated atlases: PNG -> WebP (alpha kept)
+	if ( gen.length ) require( 'child_process' ).execFileSync( 'python3', [ '-c', 'import sys,json\nfrom PIL import Image\nfor a,b in json.loads(sys.argv[1]): Image.open(a).save(b,"WEBP",quality=92,method=6)', JSON.stringify( gen ) ] );
 	fs.writeFileSync( path.join( outDir, 'jose.json' ), JSON.stringify( { protos, textures: TEXS } ) );
 	console.log( 'scans:', Object.keys( TEXS ).join( ' ' ) );
 	console.log( protos.length, 'prototypes;', ( raw / 1e6 ).toFixed( 1 ), 'MB raw ->', ( total / 1e6 ).toFixed( 1 ), 'MB' );

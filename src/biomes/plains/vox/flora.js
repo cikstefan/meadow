@@ -163,7 +163,12 @@ export class Flora {
 
 				} );
 				const base = vec3( ...M.base ), edge = vec3( ...M.edge ), outer = vec3( ...M.outer );
-				if ( mode === 'leaf' ) {
+				if ( mode === 'atlas' ) {
+
+					// this plant's own leaf / petal, as jose renders it (shape, veins, colour)
+					albedo = pow( T.rgb, vec3( 2.2 ) ).mul( select( front, vec3( 1.0 ), vec3( 1.1, 1.12, 0.94 ) ) );
+
+				} else if ( mode === 'leaf' ) {
 
 					// a photographed leaf (sprig) on jose's leaf: the photo's veins, serration and
 					// light, around the colour jose's render gave this leaf; paler underneath
@@ -191,7 +196,7 @@ export class Flora {
 
 			const N = normalize( vN ).mul( faceDirection );
 			// (thin photo leaves glow yellow-green when the sun is behind them)
-			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( mode === 'leaf' ? 0.95 : 0.55 ), float( 0.75 ) ) );
+			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( mode === 'leaf' || mode === 'atlas' ? 0.9 : 0.55 ), float( 0.75 ) ) );
 			// night: some flowers of some plants glow in their own colour, each its own strength
 			const emit = flowerGlow( albedo, kind.greaterThan( 1.5 ), vL, vI.z ).mul( U.night.mul( U.glow ) );
 			return shadeFoliage( albedo, N, vW, mix( 0.35, 1.0, ao ), vI.x, transmit, float( 0.12 ), float( 0.4 ), emit );

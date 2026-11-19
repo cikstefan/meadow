@@ -35,16 +35,12 @@ const PLANTS = {
 	mugo: { h: 2.2, res: 96, seeds: [ 'mugo-0', 'mugo-4' ] },
 };
 const STAGES = [ 1.0, 0.62 ];
-// near-field leaves: jose's geometric leaves replaced by photo leaf cards (CC0 scans in
-// jose's tex/): 'sprig' cards carry a twig of several leaves (one card per few leaves,
-// larger), single cards one leaf each. scale: card height / leaf length.
-const LEAF_CARDS = {
-	olive: { atlas: 'card_willow', sprig: true, keep: 0.34, scale: 2.3 },
-	oleander: { atlas: 'card_willow', sprig: true, keep: 0.4, scale: 2.0 },
-	echium: { atlas: 'card_willow', sprig: true, keep: 0.45, scale: 1.7 },
-	benjamina: { atlas: 'card_ovs', sprig: false, keep: 1, scale: 1.3 },
-	plumeria: { atlas: 'card_ovs', sprig: false, keep: 1, scale: 1.25 },
-};
+// near-field leaves and petals as cards carrying jose's own look: for each species /
+// cultivar the bake isolates a few typical leaves (and flat petals), renders each face-on
+// with jose's own shaders into that plant's atlas, and puts a card on every leaf's frame.
+// Grasses (curved blades) and species already drawn with jose's photo cards are left as they are.
+const ATLAS_SPECIES = [ 'oleander', 'olive', 'echium', 'benjamina', 'plumeria', 'gypso' ];
+const ATLAS_KINDS = [ 7, 0 ]; // leaf, petal
 // near-field mesh budgets (triangles) per LOD
 const LOD_TRIS = [ 150000, 40000, 10000 ];
 
@@ -103,7 +99,7 @@ const b64 = ( s, T ) => {
 				}
 
 				const t0 = Date.now();
-				const r = await p.evaluate( capture, { sp, seed, t, RES0: cfg.res, N: 512, LOD_TRIS, LC: LEAF_CARDS[ sp ] || null } ).catch( ( e ) => ( { error: e.message } ) );
+				const r = await p.evaluate( capture, { sp, seed, t, RES0: cfg.res, N: 512, LOD_TRIS, LC: ATLAS_SPECIES.includes( sp ) ? { kinds: ATLAS_KINDS, tag: `${ sp }_${ seed }` } : null } ).catch( ( e ) => ( { error: e.message } ) );
 				if ( r.error ) {
 
 					console.log( sp, seed, t, 'ERROR', r.error );
@@ -117,6 +113,8 @@ const b64 = ( s, T ) => {
 				const lods = r.lods.map( ( L ) => ( { pos: b64( L.pos, Float32Array ), nrm: b64( L.nrm, Float32Array ), col: b64( L.col, Uint8Array ), idx: b64( L.idx, Uint32Array ), uv: b64( L.uv, Float32Array ), slot: b64( L.slot, Uint8Array ) } ) );
 				const meta = { sp, seed, t, scale, cultivar: r.cultivar, texs: r.texs, info: r.info, height: r.height, counts: r.levels.map( ( l ) => l.length / 3 ), lods: lods.map( ( L ) => ( { verts: L.pos.length / 3, tris: L.idx.length / 3 } ) ) };
 				fs.writeFileSync( path.join( outDir, name + '.json' ), JSON.stringify( meta ) );
+				fs.mkdirSync( path.join( outDir, 'tex' ), { recursive: true } );
+				for ( const A of r.atlases || [] ) fs.writeFileSync( path.join( outDir, 'tex', A.name + '.png' ), Buffer.from( A.data.split( ',' )[ 1 ], 'base64' ) );
 				// raw payload: voxel words, then per LOD: pos f32, nrm f32, col u8 (padded to 4), idx u32
 				const parts = [ Buffer.from( new Uint32Array( r.levels.flat() ).buffer ) ];
 				for ( const L of lods ) {
@@ -335,7 +333,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 		if ( vis ) meshes.push( o );
 
 	} );
-	const P = [], NN = [], WOOD = [], IDX = [], UV = [], SLOT = [], TEXS = [], ORG = [], LEAVES = [], REPL = new Set(), SAMPLE = new Map();
+	const P = [], NN = [], WOOD = [], IDX = [], UV = [], SLOT = [], TEXS = [], ORG = [], LEAVES = [], REPL = new Set(), SAMPLE = new Map(), ATLAS = [], SLOTATLAS = {};
 	let srcTris = 0;
 	const cs = new THREE.Scene(), ccam = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
 	for ( const o of meshes ) {
@@ -393,7 +391,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 		const organs = o.isInstancedMesh; // leaves, florets, cards: thinned per organ for far LODs
 		const uvScale = mode === 'solid' && U0.uScale ? U0.uScale.value : 1;
 		// geometric leaves to be replaced by photo leaf cards: keep their frames
-		const asCards = LC && organs && mode === 'solid' && U0.uKind && U0.uKind.value === 7;
+		const asCards = LC && organs && mode === 'solid' && U0.uKind && LC.kinds.includes( U0.uKind.value );
 		let loc = null;
 		if ( asCards ) {
 
@@ -493,7 +491,123 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 			const ax = U.map( ( q ) => q * tipS ), len = Math.hypot( ...ax );
 			const wid = ( wmax - wmin ) * Math.hypot( ...V );
 			if ( len < 1e-4 ) continue;
-			LEAVES.push( { slot, org: slot * 1048576 + inst, base: T, ax, len, side: V, wid, mesh: TEXS[ slot - 1 ] } );
+			// the card frame: a along the leaf, b across it, n its face (turned skyward)
+			const nrmz = ( v ) => {
+
+				const l = Math.hypot( ...v ) || 1;
+				return v.map( ( q ) => q / l );
+
+			};
+			const a = nrmz( ax );
+			let bb = nrmz( V.map( ( q, i ) => q - a[ i ] * ( V[ 0 ] * a[ 0 ] + V[ 1 ] * a[ 1 ] + V[ 2 ] * a[ 2 ] ) ) );
+			let nn = nrmz( [ bb[ 1 ] * a[ 2 ] - bb[ 2 ] * a[ 1 ], bb[ 2 ] * a[ 0 ] - bb[ 0 ] * a[ 2 ], bb[ 0 ] * a[ 1 ] - bb[ 1 ] * a[ 0 ] ] );
+			if ( nn[ 1 ] < 0 ) {
+
+				bb = bb.map( ( q ) => - q ); nn = nn.map( ( q ) => - q );
+
+			}
+
+			LEAVES.push( { slot, inst, org: slot * 1048576 + inst, base: T, ax, len, wid, a, b: bb, n: nn } );
+
+		}
+
+		// this material's atlas: four typical organs, each isolated and rendered face-on with
+		// jose's own shader (white light from the eye, as the voxel views), into one row
+		if ( asCards ) {
+
+			const mine = LEAVES.filter( ( L ) => L.slot === slot ).sort( ( x, y ) => x.len - y.len );
+			if ( mine.length ) {
+
+				const ratio = mine.map( ( L ) => L.wid / L.len ).sort( ( x, y ) => x - y )[ mine.length >> 1 ];
+				const aspect = Math.min( 1, Math.max( 0.22, ratio * 1.25 ) );
+				const CH = 512, CW = Math.max( 64, Math.round( CH * aspect / 8 ) * 8 );
+				const cv = document.createElement( 'canvas' );
+				cv.width = CW * 4; cv.height = CH;
+				const cx = cv.getContext( '2d' );
+				const img = cx.createImageData( CW * 4, CH );
+				const ART = new THREE.WebGLRenderTarget( CW, CH, { type: THREE.FloatType } );
+				const buf = new Float32Array( CW * CH * 4 );
+				const picks = [ 0.35, 0.5, 0.62, 0.75 ].map( ( q ) => mine[ Math.min( mine.length - 1, Math.floor( q * mine.length ) ) ] );
+				picks.forEach( ( L, cell ) => {
+
+					// one organ alone: the mesh's instanced attributes cut down to this instance
+					const g2 = new THREE.BufferGeometry();
+					g2.index = g.index;
+					for ( const [ name, at ] of Object.entries( g.attributes ) ) {
+
+						if ( at.isInstancedBufferAttribute ) g2.setAttribute( name, new THREE.InstancedBufferAttribute( at.array.slice( L.inst * at.itemSize, ( L.inst + 1 ) * at.itemSize ), at.itemSize, at.normalized, at.meshPerAttribute ) );
+						else g2.setAttribute( name, at );
+
+					}
+
+					g2.drawRange = g.drawRange;
+					const one = new THREE.InstancedMesh( g2, m0, 1 );
+					const mtx = new THREE.Matrix4();
+					o.getMatrixAt( L.inst, mtx );
+					one.setMatrixAt( 0, mtx );
+					one.frustumCulled = false; one.matrixAutoUpdate = false; one.matrixWorld.copy( o.matrixWorld );
+					const sc1 = new THREE.Scene();
+					sc1.add( one );
+					const Hc = L.len * 1.08, Wc = Hc * aspect;
+					const ctr = [ 0, 1, 2 ].map( ( i ) => L.base[ i ] + L.a[ i ] * ( 0.5 * Hc - 0.04 * Hc ) );
+					ctr[ 1 ] += ground;
+					const cam = new THREE.OrthographicCamera( - Wc / 2, Wc / 2, Hc / 2, - Hc / 2, 0.001, L.len * 4 );
+					cam.position.set( ctr[ 0 ] + L.n[ 0 ] * L.len * 2, ctr[ 1 ] + L.n[ 1 ] * L.len * 2, ctr[ 2 ] + L.n[ 2 ] * L.len * 2 );
+					cam.up.set( ...L.a );
+					cam.lookAt( ...ctr );
+					cam.updateMatrixWorld( true );
+					sh.uKey.value.set( ...L.n );
+					R.setRenderTarget( ART ); R.setClearColor( 0x000000, 0 ); R.clear(); R.render( sc1, cam );
+					R.readRenderTargetPixels( ART, 0, 0, CW, CH, buf );
+					for ( let y = 0; y < CH; y ++ ) for ( let x = 0; x < CW; x ++ ) {
+
+						const q = ( y * CW + x ) * 4, d = ( ( CH - 1 - y ) * CW * 4 + cell * CW + x ) * 4; // canvas rows go down
+						const on = buf[ q + 3 ] > 0.5;
+						for ( let c = 0; c < 3; c ++ ) img.data[ d + c ] = Math.round( 255 * Math.pow( Math.min( 1, Math.max( 0, buf[ q + c ] * LIT ) ), 1 / 2.2 ) );
+						img.data[ d + 3 ] = on ? 255 : 0;
+
+					}
+
+					g2.dispose();
+
+				} );
+				ART.dispose();
+				// bleed colour past the outline (mipmaps then never average in black)
+				const Wd = CW * 4, D2 = img.data;
+				for ( let pass = 0; pass < 12; pass ++ ) {
+
+					const src = new Uint8ClampedArray( D2 );
+					for ( let y = 0; y < CH; y ++ ) for ( let x = 0; x < Wd; x ++ ) {
+
+						const d = ( y * Wd + x ) * 4;
+						if ( src[ d + 3 ] > 0 || src[ d ] + src[ d + 1 ] + src[ d + 2 ] > 0 ) continue;
+						let r = 0, gg = 0, b2 = 0, n2 = 0;
+						for ( const [ dx, dy ] of [ [ 1, 0 ], [ - 1, 0 ], [ 0, 1 ], [ 0, - 1 ] ] ) {
+
+							const xx = x + dx, yy = y + dy;
+							if ( xx < 0 || yy < 0 || xx >= Wd || yy >= CH ) continue;
+							const e = ( yy * Wd + xx ) * 4;
+							if ( src[ e ] + src[ e + 1 ] + src[ e + 2 ] === 0 ) continue;
+							r += src[ e ]; gg += src[ e + 1 ]; b2 += src[ e + 2 ]; n2 ++;
+
+						}
+
+						if ( n2 ) {
+
+							D2[ d ] = r / n2; D2[ d + 1 ] = gg / n2; D2[ d + 2 ] = b2 / n2;
+
+						}
+
+					}
+
+				}
+
+				cx.putImageData( img, 0, 0 );
+				const name = `jl_${ LC.tag }_${ slot }`.replace( /[^a-z0-9_]/gi, '_' );
+				ATLAS.push( { name, data: cv.toDataURL( 'image/png' ) } );
+				SLOTATLAS[ slot ] = { name, aspect };
+
+			}
 
 		}
 
@@ -518,65 +632,54 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 
 	// (alpha cards stay cards: their cut-out comes from the scan's alpha at runtime)
 
-	// photo leaf cards in place of the geometric leaves (LEAF_CARDS): on each leaf's own
-	// frame, gently bowed under gravity, a random photo variant each; 'sprig' cards carry a
-	// whole twig of leaves, so one card stands for a few of jose's leaves
+	// cards in place of the geometric leaves and petals: one per organ, on its own frame,
+	// gently bowed under gravity, showing one of four of this plant's own leaves (petals)
+	// as jose renders them
 	if ( LC && LEAVES.length ) {
 
 		const kept = [];
-		for ( let t = 0; t < IDX.length; t += 3 ) if ( ! REPL.has( SLOT[ IDX[ t ] ] ) ) kept.push( IDX[ t ], IDX[ t + 1 ], IDX[ t + 2 ] );
+		for ( let t = 0; t < IDX.length; t += 3 ) if ( ! ( REPL.has( SLOT[ IDX[ t ] ] ) && SLOTATLAS[ SLOT[ IDX[ t ] ] ] ) ) kept.push( IDX[ t ], IDX[ t + 1 ], IDX[ t + 2 ] );
 		IDX.length = 0;
 		for ( const v of kept ) IDX.push( v );
-		const m0 = D.TEX_MEAN[ LC.atlas ] || [ 0.4, 0.5, 0.25 ];
-		const src = LEAVES[ 0 ].mesh;
-		TEXS.push( { name: LC.atlas, amt: 1, mean: m0.map( ( q ) => Math.pow( q, 2.2 ) ), mode: 'leaf', base: src.base, edge: src.edge, outer: src.outer } );
-		const cardSlot = TEXS.length;
-		const aspect = 1.0; // the atlases hold four square cells side by side
+		const cardSlot = {};
+		for ( const [ sl, A ] of Object.entries( SLOTATLAS ) ) {
+
+			const src = TEXS[ sl - 1 ];
+			TEXS.push( { name: A.name, amt: 1, mean: [ 0.5, 0.5, 0.5 ], mode: 'atlas', base: src.base, edge: src.edge, outer: src.outer, generated: true } );
+			cardSlot[ sl ] = TEXS.length;
+
+		}
+
 		const hashL = ( o ) => ( ( Math.imul( o + 3, 2246822519 ) ^ Math.imul( o + 11, 3266489917 ) ) >>> 0 ) / 4294967296;
-		const norm = ( v ) => {
-
-			const l = Math.hypot( ...v ) || 1;
-			return v.map( ( q ) => q / l );
-
-		};
-		const cross = ( a, b ) => [ a[ 1 ] * b[ 2 ] - a[ 2 ] * b[ 1 ], a[ 2 ] * b[ 0 ] - a[ 0 ] * b[ 2 ], a[ 0 ] * b[ 1 ] - a[ 1 ] * b[ 0 ] ];
 		let made = 0;
 		LEAVES.forEach( ( L, li ) => {
 
-			if ( LC.sprig && hashL( L.org ) >= LC.keep ) return;
-			const a = norm( L.ax );
-			const sd = L.side.map( ( q, i ) => q - a[ i ] * ( L.side[ 0 ] * a[ 0 ] + L.side[ 1 ] * a[ 1 ] + L.side[ 2 ] * a[ 2 ] ) );
-			let b = norm( sd ), n = norm( cross( b, a ) );
-			if ( n[ 1 ] < 0 ) {
-
-				b = b.map( ( q ) => - q ); n = n.map( ( q ) => - q );
-
-			}
-
-			const Hc = L.len * LC.scale, Wc = Hc * aspect;
+			const A = SLOTATLAS[ L.slot ];
+			if ( ! A ) return;
+			const cs2 = cardSlot[ L.slot ];
+			const Hc = L.len * 1.08, Wc = Hc * A.aspect;
 			const variant = Math.floor( hashL( L.org * 7 + 1 ) * 4 );
-			const org = cardSlot * 1048576 + li;
-			const centre = [ L.base[ 0 ] + L.ax[ 0 ] * 0.5, L.base[ 1 ] + L.ax[ 1 ] * 0.5, L.base[ 2 ] + L.ax[ 2 ] * 0.5 ];
+			const org = cs2 * 1048576 + li;
+			const centre = [ 0, 1, 2 ].map( ( i ) => L.base[ i ] + L.ax[ i ] * 0.5 );
 			const ids = [];
 			for ( const v of [ 0, 0.5, 1 ] ) for ( const u of [ 0, 1 ] ) {
 
-				const droop = 0.12 * Hc * v * v;
-				P.push( L.base[ 0 ] + a[ 0 ] * Hc * v + b[ 0 ] * Wc * ( u - 0.5 ), L.base[ 1 ] + a[ 1 ] * Hc * v + b[ 1 ] * Wc * ( u - 0.5 ) - droop, L.base[ 2 ] + a[ 2 ] * Hc * v + b[ 2 ] * Wc * ( u - 0.5 ) );
-				NN.push( n[ 0 ], n[ 1 ], n[ 2 ] );
+				const droop = 0.06 * Hc * v * v, along = Hc * v - 0.04 * Hc;
+				P.push( L.base[ 0 ] + L.a[ 0 ] * along + L.b[ 0 ] * Wc * ( u - 0.5 ), L.base[ 1 ] + L.a[ 1 ] * along + L.b[ 1 ] * Wc * ( u - 0.5 ) - droop, L.base[ 2 ] + L.a[ 2 ] * along + L.b[ 2 ] * Wc * ( u - 0.5 ) );
+				NN.push( L.n[ 0 ], L.n[ 1 ], L.n[ 2 ] );
 				UV.push( ( variant + Math.min( 0.998, Math.max( 0.002, u ) ) ) / 4, Math.min( 0.998, Math.max( 0.002, v ) ) );
-				SLOT.push( cardSlot ); ORG.push( org ); WOOD.push( 0 );
+				SLOT.push( cs2 ); ORG.push( org ); WOOD.push( 0 );
 				const vid = P.length / 3 - 1;
 				SAMPLE.set( vid, centre );
 				ids.push( vid );
 
 			}
 
-			// rows: 0-1, 2-3, 4-5 (u = 0, 1)
 			for ( const r of [ 0, 2 ] ) IDX.push( ids[ r ], ids[ r + 1 ], ids[ r + 3 ], ids[ r ], ids[ r + 3 ], ids[ r + 2 ] );
 			made ++;
 
 		} );
-		console.log( `[bake] leaf cards: ${ made } photo cards for ${ LEAVES.length } leaves` );
+		console.log( `[bake] cards: ${ made } organs as cards of the plant's own leaves / petals` );
 
 	}
 
@@ -709,7 +812,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 				const q = ( f ) => Math.max( 0, Math.min( 255, Math.round( Math.sqrt( Math.max( 0, f ) ) * 255 ) ) );
 				const ao = aoAt( x, y, z );
 				const M = TEXS[ SLOT[ v ] - 1 ];
-				const kind = WOOD[ v ] === 1 ? 0 : M && M.mode === 'leaf' ? 1 : ( ( M && M.mode === 'tint' ) || ( r >= 0 && isFlower( r, g, bb ) ) ? 2 : 1 );
+				const kind = WOOD[ v ] === 1 ? 0 : M && M.mode === 'atlas' ? ( r >= 0 && isFlower( r, g, bb ) ? 2 : 1 ) : ( ( M && M.mode === 'tint' ) || ( r >= 0 && isFlower( r, g, bb ) ) ? 2 : 1 );
 				col.push( r < 0 ? 0 : q( r ), r < 0 ? 0 : q( g ), r < 0 ? 0 : q( bb ), ( kind << 6 ) | Math.round( ao * 63 ), r < 0 ? 1 : 0 );
 
 			}
@@ -762,6 +865,6 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 
 	}
 
-	return { levels: vox.levels, info: vox.info, height: hi[ 1 ], lods, srcTris, cultivar, texs: TEXS };
+	return { levels: vox.levels, info: vox.info, height: hi[ 1 ], lods, srcTris, cultivar, texs: TEXS, atlases: ATLAS };
 
 }
