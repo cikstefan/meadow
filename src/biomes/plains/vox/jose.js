@@ -1,58 +1,128 @@
-// Plants from the jose specimen generator, voxelized offline (tools/jose-bake):
-// each species at three growth stages and two seeds. Drawn only by the voxel
-// rasterizer (no meshes), scattered over the plains in drifts.
+// Plants from the jose specimen generator (tools/jose-bake): 12 species, several cultivars
+// each (different flower colours, leaf forms), two growth stages. Each prototype has a voxel
+// pyramid (far) and up to three mesh LODs (near: the grown geometry, vertex colours from
+// jose's own shading). Voxels load first; meshes stream in per species afterwards.
 
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { vnoiseJS } from '../../../tsl/noise.js';
+import meta from '../../../assets/plains/vox/jose.json';
 
-// placement: share of the jose layer, drift scale (m), size jitter, permanent wind lean
+const FILES = import.meta.glob( '../../../assets/plains/vox/*.wasm', { query: '?url', import: 'default', eager: true } );
+const fileUrl = ( name ) => FILES[ `../../../assets/plains/vox/jose-${ name }.wasm` ];
+
+// placement: weight in the mix, drift scale (m: each species owns patches), wind lean
 export const JOSE_SPECIES = {
-	oleander: { w: 0, lean: 0.22 }, // replaces the firebush (notro) of the scrub
-	gypso: { w: 0.9, drift: 30, lean: 0.05 },
-	clero: { w: 0.6, drift: 40, lean: 0.12 },
-	stipa: { w: 2.2, drift: 55, lean: 0.1, grass: true },
-	hakone: { w: 1.2, drift: 45, lean: 0.08, grass: true },
-	festuca: { w: 1.8, drift: 50, lean: 0.06, grass: true },
-	benjamina: { w: 0.18, drift: 120, lean: 0.3 },
-	plumeria: { w: 0.15, drift: 140, lean: 0.25 },
-	cotinus: { w: 0.14, drift: 90, lean: 0.25 },
-	olive: { w: 0.22, drift: 160, lean: 0.35 },
-	echium: { w: 0.5, drift: 60, lean: 0.15 },
-	mugo: { w: 0.35, drift: 100, lean: 0.4 },
+	oleander: { w: 1.0, drift: 70, lean: 0.18 },
+	gypso: { w: 0.8, drift: 35, lean: 0.05 },
+	clero: { w: 0.55, drift: 45, lean: 0.1 },
+	stipa: { w: 1.6, drift: 60, lean: 0.08 },
+	hakone: { w: 0.9, drift: 50, lean: 0.06 },
+	festuca: { w: 1.3, drift: 55, lean: 0.05 },
+	benjamina: { w: 0.16, drift: 130, lean: 0.25 },
+	plumeria: { w: 0.14, drift: 150, lean: 0.2 },
+	cotinus: { w: 0.22, drift: 100, lean: 0.2 },
+	olive: { w: 0.2, drift: 170, lean: 0.3 },
+	echium: { w: 0.45, drift: 70, lean: 0.12 },
+	mugo: { w: 0.3, drift: 110, lean: 0.35 },
 };
+
+const fetchBuf = ( url ) => fetch( url ).then( ( r ) => r.arrayBuffer() ).then( ( b ) => new Uint8Array( b ) );
 
 export async function loadJose() {
 
-	const [ meta, bin ] = await Promise.all( [
-		fetch( new URL( '../../../assets/plains/vox/jose.json', import.meta.url ).href ).then( ( r ) => r.json() ),
-		// (raw u32 voxel words; the .wasm name only makes static hosts serve the bytes untouched)
-		fetch( new URL( '../../../assets/plains/vox/jose.voxels.wasm', import.meta.url ).href ).then( ( r ) => r.arrayBuffer() ),
-	] );
-	const words = new Uint32Array( bin );
-	let o = 0;
+	await MeshoptDecoder.ready;
+	const species = [ ...new Set( meta.map( ( m ) => m.sp ) ) ];
+	const vox = Object.fromEntries( await Promise.all( species.map( async ( sp ) => [ sp, await fetchBuf( fileUrl( sp + '.vox' ) ) ] ) ) );
 	const protos = meta.map( ( m ) => {
 
-		const levels = m.counts.map( ( c ) => {
+		const src = vox[ m.sp ].subarray( m.vox.off, m.vox.off + m.vox.len );
+		const words = new Uint32Array( m.vox.n * 3 );
+		MeshoptDecoder.decodeVertexBuffer( new Uint8Array( words.buffer ), m.vox.n, 12, src );
+		let o = 0;
+		const levels = m.vox.counts.map( ( c ) => {
 
 			const L = words.subarray( o, o + c * 3 );
 			o += c * 3;
 			return L;
 
 		} );
-		return { levels, info: { min: m.min, vsz: m.vsz, res: m.res }, near: 0, sp: m.sp, t: m.t, seed: m.seed, height: m.height };
+		return { levels, info: { min: m.vox.min, vsz: m.vox.vsz, res: m.vox.res }, height: m.height, sp: m.sp, t: m.t, seed: m.seed, cultivar: m.cultivar, meta: m, mesh: null };
 
 	} );
-	// prototype lists per species (index within this list)
 	const bySp = {};
 	protos.forEach( ( p, i ) => ( bySp[ p.sp ] = bySp[ p.sp ] || [] ).push( i ) );
-	return { protos, bySp };
+	return { protos, bySp, species };
+
+}
+
+// stream every species' meshes in the background; onReady( protoIndex ) per prototype
+export async function streamJoseMeshes( jose, onReady ) {
+
+	for ( const sp of jose.species ) {
+
+		let buf;
+		try {
+
+			buf = await fetchBuf( fileUrl( sp + '.mesh' ) );
+
+		} catch ( e ) {
+
+			console.warn( 'jose meshes', sp, e );
+			continue;
+
+		}
+
+		for ( const i of jose.bySp[ sp ] ) {
+
+			const p = jose.protos[ i ];
+			p.mesh = { buf, lods: p.meta.lods };
+			onReady( i );
+
+		}
+
+	}
+
+}
+
+// decode one mesh LOD into plain arrays (on first use)
+export function decodeLOD( p, l ) {
+
+	const L = p.mesh.lods[ l ];
+	if ( ! L ) return null;
+	if ( L.decoded ) return L.decoded;
+	const vb = new Uint8Array( L.verts * 12 );
+	MeshoptDecoder.decodeVertexBuffer( vb, L.verts, 12, p.mesh.buf.subarray( L.vOff, L.vOff + L.vLen ) );
+	const idx = new Uint32Array( L.tris * 3 );
+	MeshoptDecoder.decodeIndexBuffer( new Uint8Array( idx.buffer ), idx.length, 4, p.mesh.buf.subarray( L.iOff, L.iOff + L.iLen ) );
+	const dv = new DataView( vb.buffer ), pos = new Float32Array( L.verts * 3 ), nrm = new Float32Array( L.verts * 3 ), col = new Uint8Array( L.verts * 4 );
+	for ( let i = 0; i < L.verts; i ++ ) {
+
+		for ( let a = 0; a < 3; a ++ ) pos[ i * 3 + a ] = L.min[ a ] + dv.getUint16( i * 12 + a * 2, true ) / 65535 * L.size[ a ];
+		// octahedral normal
+		let x = vb[ i * 12 + 6 ] / 255 * 2 - 1, z = vb[ i * 12 + 7 ] / 255 * 2 - 1;
+		let y = 1 - Math.abs( x ) - Math.abs( z );
+		if ( y < 0 ) {
+
+			const ox = x;
+			x = ( 1 - Math.abs( z ) ) * Math.sign( ox || 1 ); z = ( 1 - Math.abs( ox ) ) * Math.sign( z || 1 );
+
+		}
+
+		const l2 = Math.hypot( x, y, z ) || 1;
+		nrm[ i * 3 ] = x / l2; nrm[ i * 3 + 1 ] = y / l2; nrm[ i * 3 + 2 ] = z / l2;
+		for ( let a = 0; a < 4; a ++ ) col[ i * 4 + a ] = vb[ i * 12 + 8 + a ];
+
+	}
+
+	L.decoded = { pos, nrm, col, idx };
+	return L.decoded;
 
 }
 
 // species picked by smooth drift fields (each species owns patches of the plain)
 export function pickJose( x, z, r, bySp ) {
 
-	let best = null, bw = 0;
-	let k = 0;
+	let best = null, bw = 0, k = 0;
 	for ( const [ sp, S ] of Object.entries( JOSE_SPECIES ) ) {
 
 		k ++;
@@ -67,6 +137,6 @@ export function pickJose( x, z, r, bySp ) {
 
 	}
 
-	return bw > 0.08 ? best : null;
+	return bw > 0.1 ? best : null;
 
 }

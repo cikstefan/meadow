@@ -213,7 +213,7 @@ async function start() {
 
 		flowers = new Flowers( { perAxis: q.flowers, area: q.area * 0.92, grassArea: q.area } );
 		flowers.u.heightScale.value = settings.grassHeight;
-		flowers.group.visible = settings.flowers;
+		flowers.group.visible = settings.flowers && ! BIOME.noGroundFlowers;
 		scene.add( flowers.group );
 
 		terrain = new Terrain( { grassRadius: q.area * 0.5 } );
@@ -284,7 +284,7 @@ async function start() {
 		}
 		// voxel foliage (compute-shader rasterizer, ?veg=raster): its colour wins
 		// wherever its depth is nearer than the scene's
-		const vr = extras && extras.scrub && extras.scrub.raster;
+		const vr = extras && extras.vox;
 		if ( vr ) {
 
 			const sc = screenCoordinate;
@@ -707,7 +707,7 @@ async function start() {
 		grass.update( renderer, camera, controls.pusher );
 		midGrass.update( renderer, camera, null );
 		farGrass.update( renderer, camera, null );
-		if ( settings.flowers ) flowers.update( renderer, camera, controls.pusher );
+		if ( settings.flowers && flowers.group.visible ) flowers.update( renderer, camera, controls.pusher );
 		pollen.update( camera, controls._groundY );
 
 		if ( Math.abs( camera.fov - ( baseFov + controls.fovKick ) ) > 0.01 ) {
@@ -794,9 +794,9 @@ async function start() {
 
 			}
 
-			const vxr = extras && extras.scrub && extras.scrub.raster;
+			const vxr = extras && extras.vox;
 			if ( vxr ) vxr.readStats( renderer );
-			hud.textContent = `${ stats.fps.toFixed( 0 ) } fps · ${ ( stats.blades / 1e6 ).toFixed( 2 ) }M blades · ${ settings.quality }${ gait }${ vxr && vxr.visible !== undefined ? ` · ${ ( vxr.visible / 1000 ).toFixed( 0 ) }k voxel bushes` : '' }`;
+			hud.textContent = `${ stats.fps.toFixed( 0 ) } fps · ${ ( stats.blades / 1e6 ).toFixed( 2 ) }M blades · ${ settings.quality }${ gait }${ vxr && vxr.visible !== undefined ? ` · ${ ( vxr.visible / 1000 ).toFixed( 0 ) }k voxel plants` : '' }`;
 
 		}
 

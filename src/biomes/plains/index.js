@@ -13,6 +13,7 @@ import { vnoise, vnoiseJS, hash2i, hash2i2 } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import { makeVolumetricClouds } from '../../tsl/clouds3d.js';
 import { scrubFieldsTSL } from './scrubfields.js';
+import { VEG_RASTER } from './vox/mode.js';
 import {
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS, mountainHeight, lakeDist,
 } from './terrain.js';
@@ -173,7 +174,7 @@ const groundAlbedo = Fn( ( [ xz, albedo, dist, toCanopy ] ) => {
 	const notroK = smoothstep( 0.5, 0.75, sf.notro ), silverK = smoothstep( 0.6, 0.8, sf.silver ), greenK = smoothstep( 0.55, 0.8, sf.green );
 	const scrubCol = mix( mix( mix( vec3( 0.035, 0.05, 0.02 ), vec3( 0.07, 0.11, 0.03 ), greenK ), vec3( 0.13, 0.14, 0.11 ), silverK ),
 		mix( vec3( 0.04, 0.055, 0.02 ), vec3( 0.52, 0.11, 0.03 ), smoothstep( 0.45, 0.7, vnoise( xz.mul( 2.7 ) ) ) ), notroK );
-	const canopyS = mix( canopyM, scrubCol, mound.mul( 0.9 ) );
+	const canopyS = mix( canopyM, scrubCol, mound.mul( VEG_RASTER ? 0.0 : 0.9 ) );
 	const a0 = mix( albedo, canopyS, toCanopy.mul( 0.85 ) );
 	const a = mix( a0, litter, litterK.mul( 0.85 ) ).toVar();
 	const soil = mix( vec3( 0.09, 0.075, 0.055 ), vec3( 0.15, 0.13, 0.1 ), n3 );
@@ -199,7 +200,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, nightExposure: 1.7, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 12, // clouds and their shadows drift and churn together, time-lapsed with the 12-minute day (~48 m/s aloft)
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, noGroundFlowers: VEG_RASTER, nightExposure: 1.7, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 12, // clouds and their shadows drift and churn together, time-lapsed with the 12-minute day (~48 m/s aloft)
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,
@@ -254,8 +255,8 @@ export const PLAINS = {
 		const f = gui.addFolder( 'Plains' );
 		const k = { scrub: 1, ghosts: 1 };
 		f.add( U.snow, 'value', 0, 1, 0.01 ).name( 'snow & ice' );
-		f.add( k, 'scrub', 0, 2, 0.05 ).name( 'scrub density' ).onFinishChange( ( v ) => extras.shrubs.setDensity( v ) );
-		f.add( k, 'ghosts', 0, 2, 0.05 ).name( 'ghost forest' ).onFinishChange( ( v ) => extras.trees.setDensity( v ) );
+		if ( extras.shrubs ) f.add( k, 'scrub', 0, 2, 0.05 ).name( 'scrub density' ).onFinishChange( ( v ) => extras.shrubs.setDensity( v ) );
+		if ( extras.trees ) f.add( k, 'ghosts', 0, 2, 0.05 ).name( 'ghost forest' ).onFinishChange( ( v ) => extras.trees.setDensity( v ) );
 		f.add( extras.caps.mesh, 'visible' ).name( 'summit clouds' );
 		f.add( extras.water, 'visible' ).name( 'lake' );
 
