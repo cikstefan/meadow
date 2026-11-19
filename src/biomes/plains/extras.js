@@ -7,7 +7,8 @@ import { DeadTrees } from './deadtrees.js';
 import { buildSummitClouds } from './summitclouds.js';
 import { Carpet } from './carpet.js';
 import { Rocks } from './rocks.js';
-import { Scrub } from './scrub.js';
+import { Scrub, VEG_RASTER } from './scrub.js';
+import { loadJose } from './vox/jose.js';
 import { cloudFieldJS, cloudShadowCompute, csCenter, CS_N, CS_EXT } from './index.js';
 import { U } from '../../tsl/uniforms.js';
 import { polar, FORWARD_AZ } from './layout.js';
@@ -29,7 +30,7 @@ export async function createPlainsExtras( { scene } ) {
 	scene.add( carpet.mesh );
 	const rocks = new Rocks();
 	scene.add( rocks.group );
-	const scrub = new Scrub( shrubs.atlas );
+	const scrub = new Scrub( shrubs.atlas, VEG_RASTER ? await loadJose().catch( ( e ) => ( console.warn( 'jose voxels', e ), null ) ) : null );
 	scene.add( scrub.group );
 	// first impression (once the sky has set the sun): start the drifting clouds so that the sun breaks through
 	// on the plain ahead while the surroundings stay dappled

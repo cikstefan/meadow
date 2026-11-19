@@ -40,6 +40,7 @@ const BARK = ( () => {
 } )();
 
 const range = ( r, a, b ) => a + ( b - a ) * r();
+const NO_NOTRO = ( new URLSearchParams( location.search ).get( 'veg' ) ?? import.meta.env.VITE_VEG ) === 'raster';
 const LOD_DIST = [ 15, 55, 260 ]; // m: hero (3D leaves + flowers) / detailed / mid / far
 const RADIUS = 1050; // scatter radius around the origin
 
@@ -78,6 +79,9 @@ function scatter( density = 1 ) {
 			k ++; acc += w[ k ] / total;
 
 		}
+
+		// voxel test mode (?veg=raster): jose oleanders stand in for the firebush
+		if ( k === 0 && NO_NOTRO ) continue;
 
 		const sp = SPECIES[ k ];
 		const hh = sp.h[ 0 ] + ( sp.h[ 1 ] - sp.h[ 0 ] ) * Math.pow( r(), 0.8 ) * ( 0.7 + dens * 0.5 );

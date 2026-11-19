@@ -132,7 +132,7 @@ export function packPrototypes( protos ) {
 
 	let n = 0;
 	for ( const p of protos ) for ( const L of p.levels ) n += L.length;
-	const voxels = new Uint32Array( n ), ranges = new Uint32Array( protos.length * MAXLV * 2 ), boxes = new Float32Array( protos.length * 8 );
+	const voxels = new Uint32Array( n ), ranges = new Uint32Array( protos.length * MAXLV * 2 ), boxes = new Float32Array( protos.length * 12 );
 	let o = 0;
 	protos.forEach( ( p, i ) => {
 
@@ -143,7 +143,8 @@ export function packPrototypes( protos ) {
 
 		} );
 		const b = p.info;
-		boxes.set( [ b.min[ 0 ], b.min[ 1 ], b.min[ 2 ], p.levels.length, b.vsz[ 0 ], b.vsz[ 1 ], b.vsz[ 2 ], Math.max( ...b.res ) ], i * 8 );
+		// (near: closer than this the prototype is drawn by meshes, not voxels)
+		boxes.set( [ b.min[ 0 ], b.min[ 1 ], b.min[ 2 ], p.levels.length, b.vsz[ 0 ], b.vsz[ 1 ], b.vsz[ 2 ], Math.max( ...b.res ), p.near ?? 0, 0, 0, 0 ], i * 12 );
 
 	} );
 	return { voxels, ranges, boxes, count: protos.length };

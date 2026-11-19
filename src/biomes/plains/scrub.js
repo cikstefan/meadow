@@ -27,11 +27,12 @@ import { TILE } from './atlas.js';
 import { rng, Builder } from './grow.js';
 import { bakeScrubVoxels } from './vox/bake.js';
 import { VoxelRaster } from './vox/raster.js';
+import { JOSE_SPECIES, pickJose } from './vox/jose.js';
 
 // ?veg=raster: past VOX_NEAR every bush is drawn as voxels by a compute-shader
 // rasterizer (vox/), out to VOX_FAR; the card meshes only keep the near field
-export const VEG_RASTER = new URLSearchParams( location.search ).get( 'veg' ) === 'raster';
-const VOX_NEAR = 50, VOX_FAR = 1000, TILE_CAP = 448;
+export const VEG_RASTER = ( new URLSearchParams( location.search ).get( 'veg' ) ?? import.meta.env.VITE_VEG ) === 'raster';
+const VOX_NEAR = 50, VOX_FAR = 1000, TILE_CAP = 640;
 
 const TILE_M = 32, RADIUS = VEG_RASTER ? VOX_FAR : 420, SPACING = 1.55;
 const LOD_DIST = VEG_RASTER ? [ 30, VOX_NEAR ] : [ 30, 100 ];
@@ -156,9 +157,9 @@ function flowerGeometry( seed, clusters ) {
 }
 
 // --- placement ---------------------------------------------------------------------
-function tileInstances( tx, tz ) {
+function tileInstances( tx, tz, jose ) {
 
-	const out = [];
+	const out = [], jo = [];
 	const r = rng( ( tx * 73856093 ) ^ ( tz * 19349663 ) ^ 0x5bd1e995 );
 	const n = Math.round( TILE_M / SPACING );
 	for ( let j = 0; j < n; j ++ ) for ( let i = 0; i < n; i ++ ) {
@@ -185,17 +186,54 @@ function tileInstances( tx, tz ) {
 		const sp = SCRUB[ k ];
 		const g = Math.pow( sz, 0.8 );
 		const rad = sp.r[ 0 ] + ( sp.r[ 1 ] - sp.r[ 0 ] ) * g, hh = sp.h[ 0 ] + ( sp.h[ 1 ] - sp.h[ 0 ] ) * g * ( 0.8 + 0.4 * r() );
+		if ( jose && k === 4 && jose.bySp.oleander ) {
+
+			// voxel test mode: a jose oleander where the firebush would grow
+			joseAt( jo, jose, 'oleander', x, z, yaw, seed, r, 0.75 + g * 0.5 );
+			continue;
+
+		}
+
 		out.push( x, terrainHeightJS( x, z ) - hh * 0.08, z, rad, hh, yaw, k, seed );
 
 	}
 
-	return new Float32Array( out );
+	// the rest of the jose layer: drifts of grasses, flowering shrubs, a few trees
+	if ( jose ) {
+
+		const m = 10;
+		for ( let j = 0; j < m; j ++ ) for ( let i = 0; i < m; i ++ ) {
+
+			const x = ( tx + ( i + r() ) / m ) * TILE_M, z = ( tz + ( j + r() ) / m ) * TILE_M;
+			const yaw = r() * 6.283, seed = r(), sz = r();
+			const sp = pickJose( x, z, r, jose.bySp );
+			if ( ! sp ) continue;
+			if ( trailDistJS( x, z ) < 2.2 || lakeDistJS( x, z ) < 5 || rockAtJS( x, z ) > 0.1 || mountainHeightJS( x, z ) > 160 ) continue;
+			joseAt( jo, jose, sp, x, z, yaw, seed, r, 0.75 + sz * 0.5 );
+
+		}
+
+	}
+
+	const res = new Float32Array( out );
+	res.jose = new Float32Array( jo );
+	return res;
+
+}
+
+// one jose plant: a random seed / growth stage of the species, wind-bent by its exposure
+function joseAt( jo, jose, sp, x, z, yaw, seed, r, size ) {
+
+	const list = jose.bySp[ sp ];
+	const p = list[ Math.floor( r() * list.length ) ];
+	const lean = JOSE_SPECIES[ sp ].lean * ( 0.4 + 1.2 * r() );
+	jo.push( x, terrainHeightJS( x, z ) - 0.03, z, size, size, yaw, jose.base + p, Math.min( 0.999, seed ) + Math.floor( lean * 100 ) );
 
 }
 
 export class Scrub {
 
-	constructor( atlas ) {
+	constructor( atlas, jose = null ) {
 
 		this.atlas = atlas;
 		this.tiles = new Map();
@@ -205,7 +243,16 @@ export class Scrub {
 			this.freeSlots = [];
 			for ( let i = slots - 1; i >= 0; i -- ) this.freeSlots.push( i );
 			this.tileSlot = new Map();
-			this.raster = new VoxelRaster( bakeScrubVoxels( atlas ), slots * TILE_CAP, { near: VOX_NEAR, far: VOX_FAR } );
+			const protos = bakeScrubVoxels( atlas );
+			if ( jose ) {
+
+				jose.base = protos.length;
+				for ( const p of jose.protos ) protos.push( p );
+				this.jose = jose;
+
+			}
+
+			this.raster = new VoxelRaster( protos, slots * TILE_CAP, { near: VOX_NEAR, far: VOX_FAR } );
 			this.empty = new Float32Array( TILE_CAP * 8 );
 
 		}
@@ -378,7 +425,7 @@ export class Scrub {
 			for ( const [ , tx, tz, key ] of todo ) {
 
 				if ( built && performance.now() - t0 > budget ) break;
-				const d = tileInstances( tx, tz );
+				const d = tileInstances( tx, tz, this.jose );
 				d.cx = ( tx + 0.5 ) * TILE_M; d.cz = ( tz + 0.5 ) * TILE_M;
 				this.tiles.set( key, d );
 				if ( this.raster ) {
@@ -387,6 +434,10 @@ export class Scrub {
 					this.tileSlot.set( key, slot );
 					const buf = new Float32Array( TILE_CAP * 8 );
 					buf.set( d.subarray( 0, Math.min( d.length, TILE_CAP * 8 ) ) );
+					// species -> voxel prototype (two variants each)
+					for ( let i = 6; i < buf.length; i += 8 ) if ( buf[ i - 3 ] > 0 ) buf[ i ] = buf[ i ] * 2 + ( buf[ i + 1 ] < 0.5 ? 0 : 1 );
+					const ns = Math.min( d.length, TILE_CAP * 8 );
+					if ( d.jose ) buf.set( d.jose.subarray( 0, Math.max( 0, Math.min( d.jose.length, TILE_CAP * 8 - ns ) ) ), ns );
 					this.raster.writeSlots( slot * TILE_CAP, buf );
 
 				}
