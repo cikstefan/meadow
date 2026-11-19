@@ -18,7 +18,7 @@ const ORDER = Object.keys( STAGES );
 const el = document.getElementById( 'loading' );
 const active = !! ( el && el.classList.contains( 'pl' ) );
 const frac = Object.fromEntries( ORDER.map( ( k ) => [ k, 0 ] ) );
-let current = null, shown = 0, started = 0, finished = false;
+let current = null, shown = 0, started = 0, finished = false, last = 0, finishAt = 0, finishFrom = 0;
 
 function target() {
 
@@ -72,6 +72,7 @@ function setup() {
 
 function paint( p ) {
 
+	if ( ! document.getElementById( 'ldPct' ) ) return; // loader already gone
 	el.style.setProperty( '--p', p.toFixed( 4 ) );
 	el.setAttribute( 'aria-valuenow', Math.round( p * 100 ) );
 	document.getElementById( 'ldPct' ).textContent = Math.floor( p * 100 );
@@ -88,16 +89,27 @@ function paint( p ) {
 
 }
 
-function tick() {
+function tick( now = performance.now() ) {
 
-	if ( ! active ) return;
+	if ( ! active || ! document.getElementById( 'ldPct' ) ) return;
+	const dt = Math.min( 0.25, ( now - ( last || now ) ) / 1000 );
+	last = now;
 	// the running stage creeps toward (never reaching) its end while it works
-	if ( current && frac[ current ] < 0.92 ) frac[ current ] += ( 0.92 - frac[ current ] ) * 0.012;
-	const t = finished ? 1 : target();
-	shown += ( t - shown ) * ( finished ? 0.18 : 0.08 );
-	if ( t - shown < 0.0005 ) shown = t;
+	if ( current && frac[ current ] < 0.92 ) frac[ current ] += ( 0.92 - frac[ current ] ) * ( 1 - Math.exp( - dt * 0.7 ) );
+	if ( finished ) {
+
+		// the last stretch to 100 % in a fixed, short time, however slow the frames are
+		const k = Math.min( 1, ( now - finishAt ) / 650 );
+		shown = finishFrom + ( 1 - finishFrom ) * ( 1 - Math.pow( 1 - k, 3 ) );
+
+	} else {
+
+		shown += ( target() - shown ) * ( 1 - Math.exp( - dt * 5 ) );
+
+	}
+
 	paint( shown );
-	if ( ! ( finished && shown >= 0.999 ) ) requestAnimationFrame( tick );
+	if ( ! ( finished && shown >= 1 ) ) requestAnimationFrame( tick );
 
 }
 
@@ -138,14 +150,15 @@ export const Loader = {
 		if ( ! active ) return Promise.resolve();
 		for ( const k of ORDER ) frac[ k ] = 1;
 		finished = true;
+		finishAt = performance.now(); finishFrom = shown;
 		const m = document.getElementById( 'ldMsg' );
 		if ( m ) m.textContent = 'first light';
-		return new Promise( ( r ) => {
+		return new Promise( ( r ) => setTimeout( () => {
 
-			const wait = () => ( shown >= 0.999 ? setTimeout( r, 380 ) : requestAnimationFrame( wait ) );
-			wait();
+			paint( 1 );
+			r();
 
-		} );
+		}, 750 ) );
 
 	},
 

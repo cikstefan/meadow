@@ -38,6 +38,7 @@ const STAGES = [ 1.0, 0.62 ];
 // near-field mesh budgets (triangles) per LOD
 const LOD_TRIS = [ 160000, 36000, 8000 ];
 
+if ( process.env.ONLY_SEED ) for ( const k of Object.keys( PLANTS ) ) PLANTS[ k ].seeds = PLANTS[ k ].seeds.filter( ( x ) => x === process.env.ONLY_SEED );
 const url = process.argv[ 2 ], outDir = process.argv[ 3 ], only = process.argv[ 4 ] ? process.argv[ 4 ].split( ',' ) : null;
 const b64 = ( s, T ) => {
 
@@ -103,8 +104,8 @@ const b64 = ( s, T ) => {
 				if ( H1 === null ) H1 = r.height; // the mature plant sets the scale of its younger stage
 				const scale = cfg.h / H1;
 				const name = `${ sp }_${ seed }_${ Math.round( t * 100 ) }`;
-				const lods = r.lods.map( ( L ) => ( { pos: b64( L.pos, Float32Array ), nrm: b64( L.nrm, Float32Array ), col: b64( L.col, Uint8Array ), idx: b64( L.idx, Uint32Array ) } ) );
-				const meta = { sp, seed, t, scale, cultivar: r.cultivar, info: r.info, height: r.height, counts: r.levels.map( ( l ) => l.length / 3 ), lods: lods.map( ( L ) => ( { verts: L.pos.length / 3, tris: L.idx.length / 3 } ) ) };
+				const lods = r.lods.map( ( L ) => ( { pos: b64( L.pos, Float32Array ), nrm: b64( L.nrm, Float32Array ), col: b64( L.col, Uint8Array ), idx: b64( L.idx, Uint32Array ), uv: b64( L.uv, Float32Array ), slot: b64( L.slot, Uint8Array ) } ) );
+				const meta = { sp, seed, t, scale, cultivar: r.cultivar, texs: r.texs, info: r.info, height: r.height, counts: r.levels.map( ( l ) => l.length / 3 ), lods: lods.map( ( L ) => ( { verts: L.pos.length / 3, tris: L.idx.length / 3 } ) ) };
 				fs.writeFileSync( path.join( outDir, name + '.json' ), JSON.stringify( meta ) );
 				// raw payload: voxel words, then per LOD: pos f32, nrm f32, col u8 (padded to 4), idx u32
 				const parts = [ Buffer.from( new Uint32Array( r.levels.flat() ).buffer ) ];
@@ -114,6 +115,9 @@ const b64 = ( s, T ) => {
 					const c = Buffer.alloc( Math.ceil( L.col.length / 4 ) * 4 );
 					Buffer.from( L.col.buffer, L.col.byteOffset, L.col.byteLength ).copy( c );
 					parts.push( c, Buffer.from( L.idx.buffer, L.idx.byteOffset, L.idx.byteLength ) );
+					const sb = Buffer.alloc( Math.ceil( L.slot.length / 4 ) * 4 );
+					Buffer.from( L.slot.buffer, L.slot.byteOffset, L.slot.byteLength ).copy( sb );
+					parts.push( Buffer.from( L.uv.buffer, L.uv.byteOffset, L.uv.byteLength ), sb );
 
 				}
 
@@ -136,6 +140,33 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 	const D = window.__dbg, THREE = D.THREE, R = D.renderer, sh = D.shared;
 	const pl = D.SPECIES[ sp ].build( seed );
 	pl.update( 1 ); pl.update( t );
+	// jose loads each material's photo scan in the background: wait until they settle
+	{
+
+		const loaded = () => {
+
+			let n = 0;
+			pl.root.traverse( ( o ) => {
+
+				const U = o.material && o.material.uniforms;
+				if ( U && U.uTexMean && U.uTexMean.value.w > 0 ) n ++;
+
+			} );
+			return n;
+
+		};
+		let last = - 1, stable = 0;
+		for ( let i = 0; i < 80 && stable < 12; i ++ ) {
+
+			await new Promise( ( r ) => setTimeout( r, 100 ) );
+			const n = loaded();
+			stable = n === last ? stable + 1 : 0;
+			last = n;
+
+		}
+
+	}
+
 	// still air, no shadows, white light from the eye, a little fill: the colour seen ≈ albedo
 	sh.uGWind.value.set( 0, 0, 1, 0 ); sh.uTime.value = 0;
 	sh.uShadowMat.value = new THREE.Matrix4().makeTranslation( 10, 10, 0 );
@@ -292,7 +323,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 		if ( vis ) meshes.push( o );
 
 	} );
-	const P = [], NN = [], WOOD = [], IDX = [];
+	const P = [], NN = [], WOOD = [], IDX = [], UV = [], SLOT = [], TEXS = [];
 	let srcTris = 0;
 	const cs = new THREE.Scene(), ccam = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
 	for ( const o of meshes ) {
@@ -306,7 +337,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 		const mat = new THREE.ShaderMaterial( {
 			uniforms: Object.assign( {}, m0.uniforms, { uCapW: { value: W }, uCapH: { value: H }, uCapN: { value: nv }, uMode: { value: 0 } } ),
 			vertexShader: vs2, defines: Object.assign( {}, m0.defines ), depthTest: false, depthWrite: false,
-			fragmentShader: 'uniform float uMode; varying vec3 vW; varying vec3 vN; void main(){ gl_FragColor = uMode < .5 ? vec4( vW, 1. ) : vec4( normalize( vN ), 1. ); }',
+			fragmentShader: 'uniform float uMode; varying vec3 vW; varying vec3 vN; varying vec2 vUv; void main(){ gl_FragColor = uMode < .5 ? vec4( vW, 1. ) : uMode < 1.5 ? vec4( normalize( vN ), 1. ) : vec4( vUv, 0., 1. ); }',
 		} );
 		let pts;
 		if ( o.isInstancedMesh ) {
@@ -326,6 +357,28 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 		mat.uniforms.uMode.value = 1;
 		R.clear(); R.render( cs, ccam );
 		R.readRenderTargetPixels( crt, 0, 0, W, H, nrm );
+		const uvb = new Float32Array( W * H * 4 );
+		mat.uniforms.uMode.value = 2;
+		R.clear(); R.render( cs, ccam );
+		R.readRenderTargetPixels( crt, 0, 0, W, H, uvb );
+		// the photo scan this material uses (jose: tissue() -> scanTexture), its strength and tiling
+		const U0 = m0.uniforms, tv = U0.uTex && U0.uTex.value, src = tv && ( ( tv.image && tv.image.src ) || ( tv.source && tv.source.data && tv.source.data.src ) ) || '';
+		const tm = src.match( /tex\/([a-z_0-9]+)\.webp/i );
+		const texName = tm && U0.uTexMean && U0.uTexMean.value.w > 0 ? tm[ 1 ] : null;
+		let slot = 0;
+		if ( texName ) {
+
+			slot = TEXS.findIndex( ( t ) => t.name === texName ) + 1;
+			if ( ! slot ) {
+
+				TEXS.push( { name: texName, amt: U0.uTexMean.value.w, mean: [ U0.uTexMean.value.x, U0.uTexMean.value.y, U0.uTexMean.value.z ] } );
+				slot = TEXS.length;
+
+			}
+
+		}
+
+		const uvScale = U0.uScale ? U0.uScale.value : 1;
 		cs.remove( pts ); crt.dispose(); mat.dispose();
 
 		const wood = /attribute float aB;/.test( vs ) ? 1 : 0;
@@ -334,6 +387,8 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 
 			P.push( pos[ i * 4 ], pos[ i * 4 + 1 ] - ground, pos[ i * 4 + 2 ] );
 			NN.push( nrm[ i * 4 ], nrm[ i * 4 + 1 ], nrm[ i * 4 + 2 ] );
+			UV.push( uvb[ i * 4 ] * uvScale, uvb[ i * 4 + 1 ] * uvScale );
+			SLOT.push( slot );
 			WOOD.push( pos[ i * 4 + 3 ] > 0.5 ? wood : 255 ); // 255: never written
 
 		}
@@ -392,6 +447,8 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 			P.push( P[ a * 3 ] * w + P[ b * 3 ] * u + P[ c * 3 ] * v, P[ a * 3 + 1 ] * w + P[ b * 3 + 1 ] * u + P[ c * 3 + 1 ] * v, P[ a * 3 + 2 ] * w + P[ b * 3 + 2 ] * u + P[ c * 3 + 2 ] * v );
 			NN.push( NN[ a * 3 ] * w + NN[ b * 3 ] * u + NN[ c * 3 ] * v, NN[ a * 3 + 1 ] * w + NN[ b * 3 + 1 ] * u + NN[ c * 3 + 1 ] * v, NN[ a * 3 + 2 ] * w + NN[ b * 3 + 2 ] * u + NN[ c * 3 + 2 ] * v );
 			WOOD.push( WOOD[ a ] );
+			UV.push( UV[ a * 2 ] * w + UV[ b * 2 ] * u + UV[ c * 2 ] * v, UV[ a * 2 + 1 ] * w + UV[ b * 2 + 1 ] * u + UV[ c * 2 + 1 ] * v );
+			SLOT.push( SLOT[ a ] );
 			return P.length / 3 - 1;
 
 		};
@@ -487,7 +544,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 
 		prev = idx;
 		// compact
-		const remap = new Map(), pos = [], nrm = [], col = [];
+		const remap = new Map(), pos = [], nrm = [], col = [], uv = [], sl = [];
 		const out = new Uint32Array( idx.length );
 		for ( let i = 0; i < idx.length; i ++ ) {
 
@@ -496,7 +553,7 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 
 				n = remap.size; remap.set( idx[ i ], n );
 				const v = idx[ i ], x = Pf[ v * 3 ], y = Pf[ v * 3 + 1 ], z = Pf[ v * 3 + 2 ];
-				pos.push( x, y, z ); nrm.push( NN[ v * 3 ], NN[ v * 3 + 1 ], NN[ v * 3 + 2 ] );
+				pos.push( x, y, z ); nrm.push( NN[ v * 3 ], NN[ v * 3 + 1 ], NN[ v * 3 + 2 ] ); uv.push( UV[ v * 2 ], UV[ v * 2 + 1 ] ); sl.push( SLOT[ v ] );
 				// colour: the views that see this vertex (depth test), weighted toward facing views
 				let r = 0, g = 0, bb = 0, w = 0;
 				for ( const V of views ) {
@@ -577,10 +634,10 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS } ) {
 			return btoa( s );
 
 		};
-		lods.push( { pos: enc( new Float32Array( pos ) ), nrm: enc( new Float32Array( nrm ) ), col: enc( C ), idx: enc( out ) } );
+		lods.push( { pos: enc( new Float32Array( pos ) ), nrm: enc( new Float32Array( nrm ) ), col: enc( C ), idx: enc( out ), uv: enc( new Float32Array( uv ) ), slot: enc( new Uint8Array( sl ) ) } );
 
 	}
 
-	return { levels: vox.levels, info: vox.info, height: hi[ 1 ], lods, srcTris, cultivar };
+	return { levels: vox.levels, info: vox.info, height: hi[ 1 ], lods, srcTris, cultivar, texs: TEXS };
 
 }

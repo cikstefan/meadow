@@ -9,7 +9,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec3, vec4, attribute, varying, cameraPosition, faceDirection, normalize, length, mix, smoothstep, select, floor,
-	screenCoordinate, Discard, If, dot, max, sin, cos
+	Discard, If, dot, max, sin, cos, texture, uv, uniform, uint, clamp
 } from 'three/tsl';
 import { vnoiseJS } from '../../../tsl/noise.js';
 import { U, shadeFoliage } from '../../../tsl/world.js';
@@ -17,13 +17,16 @@ import { rng } from '../grow.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS } from '../terrain.js';
 import { rockAtJS } from '../rockmask.js';
 import { cloudShadowGround } from '../index.js';
-import { VoxelRaster, ign } from './raster.js';
+import { VoxelRaster, cellHash, FADE_PX } from './raster.js';
 import { plantWind } from './wind.js';
-import { JOSE_SPECIES, pickJose, streamJoseMeshes, decodeLOD } from './jose.js';
+import { JOSE_SPECIES, pickJose, streamJoseMeshes, decodeLOD, scanInfo } from './jose.js';
 
 const TILE_M = 32, FAR = 1000, CAP = 96; // plants per tile (max)
-const FADE = [ 30, 38 ]; // meshes -> voxels cross-fade (m)
-const LOD_D = [ 9, 20 ]; // mesh LOD0 / LOD1 / LOD2 distances
+const LOD_D = [ 9, 22 ]; // mesh LOD0 / LOD1 / LOD2 distances (LOD2 out to the voxel hand-over)
+const FADE_W = 1.3; // the dissolve runs from d0 to d0 * FADE_W
+// meshes hand over to voxels where a level-0 voxel is about FADE_PX pixels: a plant's
+// own distance, from its voxel size and the screen (Nanite switches at ~1 px too)
+const fadeStart = ( vsz, s, focal ) => THREE.MathUtils.clamp( vsz * s * focal / FADE_PX, 22, 140 );
 const GRID = 7; // candidate points per tile side
 
 function tilePlants( tx, tz, jose ) {
@@ -63,10 +66,10 @@ export class Flora {
 		const slots = Math.ceil( Math.PI * ( ( FAR + TILE_M * 2 ) / TILE_M + 1 ) ** 2 );
 		this.freeSlots = [];
 		for ( let i = slots - 1; i >= 0; i -- ) this.freeSlots.push( i );
-		this.raster = new VoxelRaster( jose.protos, slots * CAP, { far: FAR, fade: FADE } );
+		this.raster = new VoxelRaster( jose.protos, slots * CAP, { far: FAR } );
 		this.empty = new Float32Array( CAP * 8 );
-		this.material = this.makeMaterial();
-		this.meshes = new Map(); // proto * 3 + lod -> InstancedMesh-like
+		this.materials = new Map(); // photo scan -> material
+		this.meshes = new Map(); // proto * 3 + lod -> instanced mesh (one group per scan)
 		streamJoseMeshes( jose, ( i ) => {
 
 			this.raster.setMeshReady( i );
@@ -76,11 +79,18 @@ export class Flora {
 
 	}
 
-	makeMaterial() {
+	// one material per photo scan: the captured vertex colour carries the plant's colour
+	// (jose's own shading), the scan adds its real detail around its mean (bark fissures,
+	// leaf veins, petal grain), the way jose applies them
+	material( scan ) {
 
-		const mat = new THREE.MeshBasicNodeMaterial( { side: THREE.DoubleSide } );
+		const key = scan || '';
+		let mat = this.materials.get( key );
+		if ( mat ) return mat;
+		mat = new THREE.MeshBasicNodeMaterial( { side: THREE.DoubleSide } );
 		mat.fog = false;
-		const vW = varying( vec3( 0 ), 'vFlW' ), vN = varying( vec3( 0 ), 'vFlN' ), vC = varying( vec4( 0 ), 'vFlC' ), vI = varying( vec4( 0 ), 'vFlI' );
+		const focal = this.raster.u.focal;
+		const vW = varying( vec3( 0 ), 'vFlW' ), vN = varying( vec3( 0 ), 'vFlN' ), vC = varying( vec4( 0 ), 'vFlC' ), vI = varying( vec4( 0 ), 'vFlI' ), vL = varying( vec3( 0 ), 'vFlL' );
 		mat.positionNode = Fn( () => {
 
 			const A = attribute( 'iA', 'vec4' ), B = attribute( 'iB', 'vec4' ); // x y z sxz | sy yaw height seed+lean
@@ -96,22 +106,47 @@ export class Flora {
 			vW.assign( w );
 			vN.assign( normalize( rot( n ) ) );
 			vC.assign( attribute( 'color', 'vec4' ) );
-			vI.assign( vec4( cloudShadowGround( A.xz ), length( A.xyz.sub( cameraPosition ) ), seed, 0 ) );
+			vL.assign( p );
+			vI.assign( vec4( cloudShadowGround( A.xz ), length( A.xyz.sub( cameraPosition ) ), seed, A.w ) );
 			return w;
 
 		} )();
+		const S = scan ? scanInfo( scan ) : null;
+		const tex = S ? new THREE.TextureLoader().load( S.url ) : null;
+		if ( tex ) {
+
+			tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.anisotropy = 8;
+
+		}
+
 		mat.colorNode = Fn( () => {
 
-			// cross-fade to the voxels: complementary dither (raster.js draws the other pixels)
-			const sc = floor( screenCoordinate );
-			If( ign( sc.x, sc.y ).greaterThanEqual( float( 1.0 ).sub( smoothstep( FADE[ 0 ], FADE[ 1 ], vI.y ) ) ), () => {
+			// hand-over to the voxels: a dissolve keyed to the plant's own level-0 voxel cells
+			// (raster.js keeps exactly the complementary cells), so the plant comes apart into
+			// its voxels and back with no screen-door pattern and nothing doubled
+			const C = attribute( 'iC', 'vec4' ); // box min (proto space) | level-0 voxel size
+			const d0 = clamp( C.w.mul( vI.w ).mul( focal ).div( FADE_PX ), 22.0, 140.0 );
+			const keep = float( 1.0 ).sub( smoothstep( d0, d0.mul( FADE_W ), vI.y ) );
+			const g = vL.sub( C.xyz ).div( C.w ).floor();
+			If( cellHash( g, vI.z ).greaterThanEqual( keep ), () => {
 
 				Discard();
 
 			} );
 			const a = floor( vC.w.mul( 255.0 ).add( 0.5 ) );
 			const kind = floor( a.div( 64.0 ) ), ao = a.sub( kind.mul( 64.0 ) ).div( 63.0 );
-			const albedo = vC.xyz.mul( vC.xyz ).mul( mix( 0.9, 1.08, vI.z ) );
+			let albedo = vC.xyz.mul( vC.xyz ).mul( mix( 0.9, 1.08, vI.z ) );
+			if ( tex ) {
+
+				// light, shade and relief from the scan, never its colour (as jose uses them):
+				// the captured colour stays exact, the scan adds its fissures, veins and grain
+				const lumW = vec3( 0.2126, 0.7152, 0.0722 );
+				const meanL = Math.max( 0.01, 0.2126 * S.mean[ 0 ] + 0.7152 * S.mean[ 1 ] + 0.0722 * S.mean[ 2 ] );
+				const detail = dot( texture( tex, uv() ).rgb, lumW ).div( meanL ).clamp( 0.25, 2.2 );
+				albedo = albedo.mul( mix( float( 1.0 ), detail, S.amt ?? 0.8 ) );
+
+			}
+
 			const N = normalize( vN ).mul( faceDirection );
 			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( 0.55 ), float( 0.75 ) ) );
 			// night: flowers glow in their own colour
@@ -121,6 +156,7 @@ export class Flora {
 			return shadeFoliage( albedo, N, vW, mix( 0.35, 1.0, ao ), vI.x, transmit, float( 0.12 ), float( 0.4 ), emit );
 
 		} )();
+		this.materials.set( key, mat );
 		return mat;
 
 	}
@@ -138,15 +174,24 @@ export class Flora {
 		g.setAttribute( 'position', new THREE.BufferAttribute( D.pos, 3 ) );
 		g.setAttribute( 'normal', new THREE.BufferAttribute( D.nrm, 3 ) );
 		g.setAttribute( 'color', new THREE.BufferAttribute( D.col, 4, true ) );
+		g.setAttribute( 'uv', new THREE.BufferAttribute( D.uv, 2 ) );
 		g.setIndex( new THREE.BufferAttribute( D.idx, 1 ) );
+		const mats = [];
+		for ( const G of D.groups ) {
+
+			g.addGroup( G.start, G.count, mats.length );
+			mats.push( this.material( G.tex ) );
+
+		}
 		const cap = 64;
 		g.setAttribute( 'iA', new THREE.InstancedBufferAttribute( new Float32Array( cap * 4 ), 4 ).setUsage( THREE.DynamicDrawUsage ) );
 		g.setAttribute( 'iB', new THREE.InstancedBufferAttribute( new Float32Array( cap * 4 ), 4 ).setUsage( THREE.DynamicDrawUsage ) );
+		g.setAttribute( 'iC', new THREE.InstancedBufferAttribute( new Float32Array( cap * 4 ), 4 ).setUsage( THREE.DynamicDrawUsage ) );
 		g.instanceCount = 0;
-		m = new THREE.Mesh( g, this.material );
+		m = new THREE.Mesh( g, mats );
 		m.frustumCulled = false;
 		m.renderOrder = 7;
-		m.userData = { cap, n: 0, A: [], B: [] };
+		m.userData = { cap, n: 0, A: [], B: [], C: [ ...p.info.min, p.info.vsz[ 0 ] ] };
 		this.group.add( m );
 		this.meshes.set( key, m );
 		return m;
@@ -211,10 +256,11 @@ export class Flora {
 		this.lastPos.copy( cp ); this.lastFwd.copy( fwd );
 		this.meshDirty = false;
 		for ( const m of this.meshes.values() ) m.userData.n = 0;
-		const R2 = ( FADE[ 1 ] + 6 ) ** 2, cosCut = Math.cos( THREE.MathUtils.degToRad( camera.fov * camera.aspect * 0.5 + 25 ) );
+		const focal = this.raster.u.focal.value, maxEnd = 140 * FADE_W;
+		const R2 = maxEnd ** 2, cosCut = Math.cos( THREE.MathUtils.degToRad( camera.fov * camera.aspect * 0.5 + 25 ) );
 		for ( const T of this.tiles.values() ) {
 
-			if ( ( T.cx - cp.x ) ** 2 + ( T.cz - cp.z ) ** 2 > ( FADE[ 1 ] + TILE_M ) ** 2 ) continue;
+			if ( ( T.cx - cp.x ) ** 2 + ( T.cz - cp.z ) ** 2 > ( maxEnd + TILE_M ) ** 2 ) continue;
 			const d = T.data;
 			for ( let i = 0; i < d.length; i += 8 ) {
 
@@ -224,14 +270,15 @@ export class Flora {
 				if ( r > 6 && ( dx * fwd.x + dz * fwd.z ) / r < cosCut ) continue; // outside the view
 				const pi = d[ i + 6 ], p = jose.protos[ pi ];
 				if ( ! p.mesh ) continue; // still streaming: the voxels draw it
+				if ( r > fadeStart( p.info.vsz[ 0 ], d[ i + 3 ], focal ) * FADE_W ) continue; // the voxels have it
 				let l = r < LOD_D[ 0 ] ? 0 : r < LOD_D[ 1 ] ? 1 : 2;
 				if ( ! p.mesh.lods[ l ] ) l = 1;
 				const m = this.meshFor( pi, l );
 				if ( ! m ) continue;
 				const U2 = m.userData;
-				U2.A.length = U2.n * 4 + 4; U2.B.length = U2.n * 4 + 4;
-				U2.A.splice( U2.n * 4, 4, d[ i ], d[ i + 1 ], d[ i + 2 ], d[ i + 3 ] );
-				U2.B.splice( U2.n * 4, 4, d[ i + 4 ], d[ i + 5 ], p.height, d[ i + 7 ] );
+				const k4 = U2.n * 4;
+				U2.A[ k4 ] = d[ i ]; U2.A[ k4 + 1 ] = d[ i + 1 ]; U2.A[ k4 + 2 ] = d[ i + 2 ]; U2.A[ k4 + 3 ] = d[ i + 3 ];
+				U2.B[ k4 ] = d[ i + 4 ]; U2.B[ k4 + 1 ] = d[ i + 5 ]; U2.B[ k4 + 2 ] = p.height; U2.B[ k4 + 3 ] = d[ i + 7 ];
 				U2.n ++;
 
 			}
@@ -246,12 +293,15 @@ export class Flora {
 				U2.cap = Math.ceil( U2.n * 1.5 );
 				g.setAttribute( 'iA', new THREE.InstancedBufferAttribute( new Float32Array( U2.cap * 4 ), 4 ).setUsage( THREE.DynamicDrawUsage ) );
 				g.setAttribute( 'iB', new THREE.InstancedBufferAttribute( new Float32Array( U2.cap * 4 ), 4 ).setUsage( THREE.DynamicDrawUsage ) );
+				g.setAttribute( 'iC', new THREE.InstancedBufferAttribute( new Float32Array( U2.cap * 4 ), 4 ).setUsage( THREE.DynamicDrawUsage ) );
 
 			}
 
 			g.attributes.iA.array.set( U2.A.slice( 0, U2.n * 4 ) );
 			g.attributes.iB.array.set( U2.B.slice( 0, U2.n * 4 ) );
-			g.attributes.iA.needsUpdate = true; g.attributes.iB.needsUpdate = true;
+			const ca = g.attributes.iC.array;
+			for ( let k = 0; k < U2.n; k ++ ) ca.set( U2.C, k * 4 );
+			g.attributes.iA.needsUpdate = true; g.attributes.iB.needsUpdate = true; g.attributes.iC.needsUpdate = true;
 			g.instanceCount = U2.n;
 			m.visible = U2.n > 0;
 

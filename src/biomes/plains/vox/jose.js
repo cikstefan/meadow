@@ -5,7 +5,12 @@
 
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { vnoiseJS } from '../../../tsl/noise.js';
-import meta from '../../../assets/plains/vox/jose.json';
+import pack from '../../../assets/plains/vox/jose.json';
+
+const meta = pack.protos;
+// photo scans (jose's tex/, CC0) used by the meshes: url + linear mean colour + strength
+const SCANS = import.meta.glob( '../../../assets/plains/vox/tex/*.webp', { query: '?url', import: 'default', eager: true } );
+export const scanInfo = ( name ) => ( { url: SCANS[ `../../../assets/plains/vox/tex/${ name }.webp` ], ...pack.textures[ name ] } );
 
 const FILES = import.meta.glob( '../../../assets/plains/vox/*.wasm', { query: '?url', import: 'default', eager: true } );
 const fileUrl = ( name ) => FILES[ `../../../assets/plains/vox/jose-${ name }.wasm` ];
@@ -129,16 +134,18 @@ export function decodeLOD( p, l ) {
 	const L = p.mesh.lods[ l ];
 	if ( ! L ) return null;
 	if ( L.decoded ) return L.decoded;
-	const vb = new Uint8Array( L.verts * 12 );
-	MeshoptDecoder.decodeVertexBuffer( vb, L.verts, 12, p.mesh.buf.subarray( L.vOff, L.vOff + L.vLen ) );
+	const S = 16;
+	const vb = new Uint8Array( L.verts * S );
+	MeshoptDecoder.decodeVertexBuffer( vb, L.verts, S, p.mesh.buf.subarray( L.vOff, L.vOff + L.vLen ) );
 	const idx = new Uint32Array( L.tris * 3 );
 	MeshoptDecoder.decodeIndexBuffer( new Uint8Array( idx.buffer ), idx.length, 4, p.mesh.buf.subarray( L.iOff, L.iOff + L.iLen ) );
-	const dv = new DataView( vb.buffer ), pos = new Float32Array( L.verts * 3 ), nrm = new Float32Array( L.verts * 3 ), col = new Uint8Array( L.verts * 4 );
+	const dv = new DataView( vb.buffer ), pos = new Float32Array( L.verts * 3 ), nrm = new Float32Array( L.verts * 3 ), col = new Uint8Array( L.verts * 4 ), uv = new Float32Array( L.verts * 2 );
 	for ( let i = 0; i < L.verts; i ++ ) {
 
-		for ( let a = 0; a < 3; a ++ ) pos[ i * 3 + a ] = L.min[ a ] + dv.getUint16( i * 12 + a * 2, true ) / 65535 * L.size[ a ];
+		for ( let a = 0; a < 3; a ++ ) pos[ i * 3 + a ] = L.min[ a ] + dv.getUint16( i * S + a * 2, true ) / 65535 * L.size[ a ];
+		for ( let a = 0; a < 2; a ++ ) uv[ i * 2 + a ] = L.uvMin[ a ] + dv.getUint16( i * S + 12 + a * 2, true ) / 65535 * L.uvSize[ a ];
 		// octahedral normal
-		let x = vb[ i * 12 + 6 ] / 255 * 2 - 1, z = vb[ i * 12 + 7 ] / 255 * 2 - 1;
+		let x = vb[ i * S + 6 ] / 255 * 2 - 1, z = vb[ i * S + 7 ] / 255 * 2 - 1;
 		let y = 1 - Math.abs( x ) - Math.abs( z );
 		if ( y < 0 ) {
 
@@ -149,11 +156,11 @@ export function decodeLOD( p, l ) {
 
 		const l2 = Math.hypot( x, y, z ) || 1;
 		nrm[ i * 3 ] = x / l2; nrm[ i * 3 + 1 ] = y / l2; nrm[ i * 3 + 2 ] = z / l2;
-		for ( let a = 0; a < 4; a ++ ) col[ i * 4 + a ] = vb[ i * 12 + 8 + a ];
+		for ( let a = 0; a < 4; a ++ ) col[ i * 4 + a ] = vb[ i * S + 8 + a ];
 
 	}
 
-	L.decoded = { pos, nrm, col, idx };
+	L.decoded = { pos, nrm, col, idx, uv, groups: L.groups };
 	return L.decoded;
 
 }

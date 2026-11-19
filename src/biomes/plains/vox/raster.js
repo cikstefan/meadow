@@ -12,13 +12,12 @@
 // no 64-bit atomics, so depth and payload can't be packed into one atomicMax: the
 // two-pass depth-then-colour resolve is the standard workaround.
 //
-// Plants whose meshes are loaded hand over to them up close: between fade.x and fade.y
-// metres both draw, with complementary per-pixel dither (no pop, no double image).
+// Plants whose meshes are loaded hand over to them up close (see FADE_PX below).
 
 import * as THREE from 'three/webgpu';
 import {
 	Fn, storage, uniform, float, uint, vec2, vec3, vec4, If, Loop, instanceIndex, atomicAdd, atomicMax, atomicStore,
-	bitcast, max, min, clamp, floor, ceil, log2, dot, normalize, length, mix, smoothstep, sin, cos, pow, select, fract
+	bitcast, max, min, clamp, floor, ceil, log2, dot, normalize, length, mix, smoothstep, sin, cos, pow, select, fract, int
 } from 'three/tsl';
 import { pcg } from '../../../tsl/noise.js';
 import { U, applyFogFrom } from '../../../tsl/world.js';
@@ -28,8 +27,14 @@ import { plantWind } from './wind.js';
 
 const WG = 64, GROUPS = 8192, MAXVIS = 1 << 19;
 
-// interleaved gradient noise per pixel: the shared dither of the mesh / voxel cross-fade
-export const ign = ( x, y ) => fract( fract( x.mul( 0.06711056 ).add( y.mul( 0.00583715 ) ) ).mul( 52.9829189 ) );
+// mesh <-> voxel hand-over: where a plant's level-0 voxel is about FADE_PX pixels wide
+// (like Nanite, which switches to voxels at about a pixel), dissolving over FADE_W x that
+// distance. The dissolve is keyed to the plant's own level-0 voxel cells: a cell is either
+// mesh or voxel, never both and never neither, and the pattern is fixed to the plant (no
+// screen-door crawl as the camera moves).
+export const FADE_PX = 1.15, FADE_W = 1.3;
+export const cellHash = ( g, seed ) => pcg( uint( int( g.x ) ).mul( uint( 73856093 ) ).bitXor( uint( int( g.y ) ).mul( uint( 19349663 ) ) )
+	.bitXor( uint( int( g.z ) ).mul( uint( 83492791 ) ) ).add( uint( seed.mul( 65535.0 ) ) ) );
 
 export class VoxelRaster {
 
@@ -39,7 +44,7 @@ export class VoxelRaster {
 	 *   x y z sxz | sy yaw prototype (seed + 100 * lean)
 	 *   (sxz, sy scale the prototype; lean: permanent downwind shear, per metre of height)
 	 */
-	constructor( protos, slots, { far = 1000, fade = [ 30, 38 ] } = {} ) {
+	constructor( protos, slots, { far = 1000 } = {} ) {
 
 		const baked = packPrototypes( protos );
 		protos.forEach( ( p, i ) => {
@@ -77,7 +82,6 @@ export class VoxelRaster {
 		this.u = {
 			viewProj: uniform( new THREE.Matrix4() ), eye: uniform( new THREE.Vector3() ),
 			size: uniform( new THREE.Vector2( 1, 1 ) ), focal: uniform( 1000 ), far: uniform( far ),
-			fade: uniform( new THREE.Vector2( ...fade ) ),
 		};
 		this.build();
 
@@ -127,8 +131,8 @@ export class VoxelRaster {
 					const c = A.xyz.add( vec3( 0, b0.y.mul( B.x ).add( ext.y.mul( 0.5 ) ), 0 ) );
 					const d = length( c.sub( u.eye ) );
 					const rr = max( ext.x, max( ext.y, ext.z ) ).mul( 0.75 );
-					// meshes draw it closer than fade.x
-					const near = select( b2.x.greaterThan( 0.5 ), u.fade.x, float( 0.0 ) );
+					// meshes draw it closer than its hand-over distance
+					const near = select( b2.x.greaterThan( 0.5 ), clamp( b1.x.mul( A.w ).mul( u.focal ).div( FADE_PX ), 22.0, 140.0 ), float( 0.0 ) );
 					If( d.greaterThan( near ).and( d.lessThan( u.far ) ), () => {
 
 						const clip = u.viewProj.mul( vec4( c, 1.0 ) );
@@ -176,9 +180,11 @@ export class VoxelRaster {
 				const rot = ( v ) => vec3( v.x.mul( cs ).sub( v.z.mul( sn ) ), v.y, v.x.mul( sn ).add( v.z.mul( cs ) ) );
 				const W0 = vec3( 0.96, 0, - 0.28 ); // the prevailing westerly: permanent lean
 				const pxScale = max( vsz.x.mul( A.w ), vsz.y.mul( B.x ) ).mul( u.focal );
-				// cross-fade with the meshes: those pixels are theirs
+				// hand-over with the meshes: the cells they keep are theirs
 				const dI = length( A.xyz.sub( u.eye ) );
-				const meshK = select( b2.x.greaterThan( 0.5 ), float( 1.0 ).sub( smoothstep( u.fade.x, u.fade.y, dI ) ), float( 0.0 ) ).toVar();
+				const d0 = clamp( b1.x.mul( A.w ).mul( u.focal ).div( FADE_PX ), 22.0, 140.0 );
+				const meshK = select( b2.x.greaterThan( 0.5 ), float( 1.0 ).sub( smoothstep( d0, d0.mul( FADE_W ), dI ) ), float( 0.0 ) ).toVar();
+				const lvS = float( uint( 1 ).shiftLeft( lv ) );
 				const shadow = shadePass ? cloudShadowGround( A.xz ).toVar() : null;
 
 				Loop( { start: lid, end: count, type: 'uint', condition: '<', update: uint( WG ) }, ( { i: vi } ) => {
@@ -192,12 +198,13 @@ export class VoxelRaster {
 
 						const g = vec3( float( w0.bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 8 ) ).bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 16 ) ).bitAnd( uint( 255 ) ) ) );
 						const lp = boxMin.add( g.add( 0.5 ).mul( vsz ) );
+						const mine = cellHash( g.mul( lvS ).add( lvS.mul( 0.5 ).floor() ), seed ).greaterThanEqual( meshK );
 						const hgt = lp.y.mul( B.x ).max( 0.0 );
 						const lw = rot( vec3( lp.x.mul( A.w ), hgt, lp.z.mul( A.w ) ) ).toVar();
 						const P = A.xyz.add( lw ).add( plantWind( lw, Hh, A.xz, seed ) )
 							.add( W0.mul( lean.mul( hgt ).mul( hgt.div( Hh ) ) ) ).toVar();
 						const clip = u.viewProj.mul( vec4( P, 1.0 ) );
-						If( clip.w.greaterThan( 0.05 ), () => {
+						If( clip.w.greaterThan( 0.05 ).and( mine ), () => {
 
 							const dist = length( P.sub( u.eye ) );
 							const key = bitcast( float( 1.0 ).div( dist ), 'uint' );
@@ -211,7 +218,7 @@ export class VoxelRaster {
 
 									const x = x0.add( float( ox ) ), y = y0.add( float( oy ) );
 									If( x.greaterThanEqual( 0.0 ).and( y.greaterThanEqual( 0.0 ) ).and( x.lessThan( W ) ).and( y.lessThan( H ) )
-										.and( ign( x, y ).greaterThanEqual( meshK ) ), () => {
+										, () => {
 
 										body( uint( y ).mul( uint( W ) ).add( uint( x ) ) );
 
