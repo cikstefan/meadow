@@ -11,16 +11,19 @@ import { Scrub } from './scrub.js';
 import { VEG_RASTER } from './vox/mode.js';
 import { loadJose } from './vox/jose.js';
 import { Flora } from './vox/flora.js';
+import { Loader } from '../../ui/loader.js';
 import { cloudFieldJS, cloudShadowCompute, csCenter, CS_N, CS_EXT } from './index.js';
 import { U } from '../../tsl/uniforms.js';
 import { polar, FORWARD_AZ } from './layout.js';
 
 export async function createPlainsExtras( { scene } ) {
 
+	await Loader.stage( 'mountains' );
 	const backdrop = buildBackdrop();
 	const water = buildWater();
 	scene.add( backdrop, water );
 
+	await Loader.stage( 'plants', VEG_RASTER ? 'growing oleanders and olives' : 'growing the scrub' );
 	// voxel mode: the jose flora replaces the original plants (bushes, ghost trees, scrub)
 	const shrubs = VEG_RASTER ? null : await Shrubs.create();
 	if ( shrubs ) scene.add( shrubs.group );
@@ -35,7 +38,9 @@ export async function createPlainsExtras( { scene } ) {
 	scene.add( rocks.group );
 	const scrub = VEG_RASTER ? null : new Scrub( shrubs.atlas );
 	if ( scrub ) scene.add( scrub.group );
-	const flora = VEG_RASTER ? new Flora( await loadJose() ) : null;
+	const jose = VEG_RASTER ? await loadJose( ( f ) => Loader.progress( f ) ) : null;
+	await Loader.stage( 'scene' );
+	const flora = jose ? new Flora( jose ) : null;
 	if ( flora ) scene.add( flora.group );
 	// first impression (once the sky has set the sun): start the drifting clouds so that the sun breaks through
 	// on the plain ahead while the surroundings stay dappled

@@ -28,11 +28,50 @@ export const JOSE_SPECIES = {
 
 const fetchBuf = ( url ) => fetch( url ).then( ( r ) => r.arrayBuffer() ).then( ( b ) => new Uint8Array( b ) );
 
-export async function loadJose() {
+// fetch several files, reporting the fraction of all their bytes received
+async function fetchAll( urls, onProgress ) {
+
+	const got = urls.map( () => 0 ), size = urls.map( () => 0 );
+	const report = () => {
+
+		const total = size.reduce( ( a, b ) => a + b, 0 );
+		if ( onProgress && total ) onProgress( got.reduce( ( a, b ) => a + b, 0 ) / total * ( size.every( Boolean ) ? 1 : 0.9 ) );
+
+	};
+	return Promise.all( urls.map( async ( url, i ) => {
+
+		const r = await fetch( url );
+		size[ i ] = + r.headers.get( 'content-length' ) || 0;
+		if ( ! r.body || ! size[ i ] ) {
+
+			const b = new Uint8Array( await r.arrayBuffer() );
+			got[ i ] = size[ i ] = b.length; report();
+			return b;
+
+		}
+
+		const out = new Uint8Array( size[ i ] ), reader = r.body.getReader();
+		for ( ;; ) {
+
+			const { done, value } = await reader.read();
+			if ( done ) break;
+			out.set( value, got[ i ] );
+			got[ i ] += value.length; report();
+
+		}
+
+		return got[ i ] === size[ i ] ? out : out.subarray( 0, got[ i ] );
+
+	} ) );
+
+}
+
+export async function loadJose( onProgress ) {
 
 	await MeshoptDecoder.ready;
 	const species = [ ...new Set( meta.map( ( m ) => m.sp ) ) ];
-	const vox = Object.fromEntries( await Promise.all( species.map( async ( sp ) => [ sp, await fetchBuf( fileUrl( sp + '.vox' ) ) ] ) ) );
+	const bufs = await fetchAll( species.map( ( sp ) => fileUrl( sp + '.vox' ) ), onProgress );
+	const vox = Object.fromEntries( species.map( ( sp, i ) => [ sp, bufs[ i ] ] ) );
 	const protos = meta.map( ( m ) => {
 
 		const src = vox[ m.sp ].subarray( m.vox.off, m.vox.off + m.vox.len );

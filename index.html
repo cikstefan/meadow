@@ -24,6 +24,46 @@
 		@keyframes eq { 0%, 100% { height: 3px; } 50% { height: 12px; } }
 		#loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0d0a; transition: opacity 1.1s ease; z-index: 5; letter-spacing: .3em; text-transform: uppercase; font-size: 11px; }
 		#loading.done { opacity: 0; pointer-events: none; }
+
+		/* ---- plains loader: sunrise on the Paine massif ------------------------------- */
+		#loading.pl { display: block; letter-spacing: normal; text-transform: none; font-size: 13px; overflow: hidden; --p: 0;
+			background: linear-gradient( #03060f 0%, #0a1426 48%, #131b2c 70%, #0b0d0a 100% ); transition: opacity 1.4s ease, filter 1.4s ease; }
+		#loading.pl.done { opacity: 0; filter: brightness( 1.6 ); }
+		#loading.pl .dawn { position: absolute; inset: 0; opacity: var( --p );
+			background: linear-gradient( #1d2a52 0%, #5a4f7d 30%, #c77d6c 52%, #f2b680 62%, #2a2420 64%, #0b0d0a 100% ); }
+		#loading.pl .sun { position: absolute; left: 50%; top: 62%; width: 70vmax; height: 70vmax; transform: translate( -50%, -50% ); border-radius: 50%;
+			background: radial-gradient( closest-side, #ffdcae55, #ff9f6a22 40%, transparent 70% ); opacity: calc( var( --p ) * var( --p ) ); }
+		#loading.pl .stars { position: absolute; inset: 0 0 40% 0; opacity: calc( 1 - var( --p ) * 1.2 ); }
+		#loading.pl .stars i { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #fff; animation: tw 3s ease-in-out infinite; }
+		@keyframes tw { 0%, 100% { opacity: .25; transform: scale( .7 ); } 50% { opacity: 1; transform: scale( 1.15 ); } }
+		#loading.pl svg.mtn { position: absolute; left: 0; width: 100%; bottom: 36%; height: 40%; overflow: visible; }
+		#loading.pl svg.mtn.refl { bottom: auto; top: 64%; height: 26%; transform: scaleY( -1 ); transform-origin: top; opacity: .32; filter: blur( 1.5px );
+			-webkit-mask-image: linear-gradient( #000, transparent 85% ); mask-image: linear-gradient( #000, transparent 85% ); }
+		#loading.pl .lake { position: absolute; left: 0; right: 0; top: 64%; height: 36%; overflow: hidden; }
+		#loading.pl .lake i { position: absolute; left: -10%; right: -10%; height: 1px; background: linear-gradient( 90deg, transparent, #ffd6a855, transparent );
+			opacity: calc( .15 + var( --p ) * .6 ); animation: ripple 5s ease-in-out infinite; }
+		@keyframes ripple { 0%, 100% { transform: translateX( -4% ) scaleX( .8 ); } 50% { transform: translateX( 4% ) scaleX( 1.1 ); } }
+		#loading.pl .shore { position: absolute; left: 0; right: 0; top: calc( 64% - 3px ); height: 6vh; transform: translateY( -100% ); }
+		#loading.pl .shore span { position: absolute; bottom: 0; width: 0; height: 100%; transform-origin: bottom; animation: sway 3.6s ease-in-out infinite; }
+		@keyframes sway { 0%, 100% { transform: rotate( -3deg ); } 50% { transform: rotate( 4deg ); } }
+		#loading.pl .shore b { position: absolute; bottom: 0; left: -1px; width: 1.5px; border-radius: 2px 2px 0 0; transform-origin: bottom; background: #0b0d0a;
+			transform: scaleY( var( --g, 0 ) ); transition: transform .9s cubic-bezier( .2, .9, .3, 1.3 ); }
+		#loading.pl .shore b::after { content: ''; position: absolute; top: -4px; left: -3px; width: 8px; height: 8px; border-radius: 50%;
+			background: var( --c ); opacity: var( --g, 0 ); box-shadow: 0 0 10px var( --c ); transform: scale( var( --g, 0 ) ); transition: transform 1.2s .3s cubic-bezier( .2, 1.4, .4, 1 ), opacity .8s .3s; }
+		#loading.pl .condor { position: absolute; top: 24%; left: 0; width: 46px; height: 14px; animation: glide 26s linear infinite; opacity: .75; }
+		#loading.pl .condor svg { width: 100%; height: 100%; animation: soar 4.2s ease-in-out infinite; }
+		@keyframes glide { from { transform: translateX( -8vw ) translateY( 0 ); } 50% { transform: translateX( 50vw ) translateY( -5vh ); } to { transform: translateX( 108vw ) translateY( 2vh ); } }
+		@keyframes soar { 0%, 100% { transform: rotate( -4deg ); } 50% { transform: rotate( 5deg ) translateY( 4px ); } }
+		#loading.pl .ui { position: absolute; left: 0; right: 0; top: 70%; text-align: center; }
+		#loading.pl .pct { font: 200 clamp( 44px, 9vmin, 92px ) / 1 ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif; letter-spacing: -.02em;
+			font-variant-numeric: tabular-nums; color: #fff4e6; text-shadow: 0 0 30px #ffb07a55; }
+		#loading.pl .pct small { font-size: .38em; margin-left: .08em; opacity: .7; }
+		#loading.pl .bar { width: min( 320px, 60vw ); height: 1px; margin: 16px auto 14px; background: #ffffff1f; overflow: hidden; }
+		#loading.pl .bar i { display: block; height: 100%; width: 100%; transform-origin: left; transform: scaleX( var( --p ) );
+			background: linear-gradient( 90deg, #ff8a5c, #ffd59e ); box-shadow: 0 0 12px #ffb07a; }
+		#loading.pl .msg { letter-spacing: .28em; text-transform: uppercase; font-size: 10.5px; opacity: .7; min-height: 1.4em; transition: opacity .4s; }
+		#loading.pl .place { position: absolute; left: 0; right: 0; top: 9%; text-align: center; letter-spacing: .5em; text-transform: uppercase; font-size: 11px; opacity: .55; }
+		@media ( prefers-reduced-motion: reduce ) { #loading.pl * { animation: none !important; } }
 		#nogpu { position: fixed; inset: 0; display: grid; place-items: center; z-index: 6; background: #0b0d0a; }
 		#nogpu[hidden] { display: none; }
 		#nogpu p { max-width: 46ch; text-align: center; opacity: .85; padding: 0 24px; }
@@ -32,7 +72,30 @@
 	</style>
 </head>
 <body>
-	<div id="loading">growing the meadow…</div>
+	<div id="loading" class="pl" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Loading">
+		<div class="dawn"></div><div class="sun"></div><div class="stars"></div>
+		<div class="place">Torres del Paine</div>
+		<div class="condor" aria-hidden="true"><svg viewBox="0 0 46 14"><path d="M0 9 C8 2 15 3 21 8 L23 9 L25 8 C31 3 38 2 46 9 C38 6 31 7 25 11 L23 12 L21 11 C15 7 8 6 0 9 Z" fill="#05070c"/></svg></div>
+		<svg class="mtn" viewBox="0 0 1000 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+			<defs>
+				<linearGradient id="ldGlow" gradientUnits="userSpaceOnUse" x1="0" y1="30" x2="0" y2="330"><stop offset="0" stop-color="#ffe6b8"/><stop offset=".18" stop-color="#ffab6a"/><stop offset=".45" stop-color="#d9563f"/><stop offset=".8" stop-color="#5a2433"/><stop offset="1" stop-color="#1c1626"/></linearGradient><linearGradient id="ldFar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d6a9a"/><stop offset="1" stop-color="#1a2240"/></linearGradient>
+				<linearGradient id="ldFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset=".72" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient><mask id="ldClip" maskUnits="userSpaceOnUse" x="0" y="-50" width="1000" height="500"><rect id="ldRise" x="0" y="0" width="1000" height="0" fill="url(#ldFade)"/></mask>
+			</defs>
+			<path d="M0 400 L0 250 C60 236 110 214 160 222 C220 232 260 196 330 204 C400 212 450 180 520 196 C600 214 660 186 740 200 C820 214 880 190 940 206 L1000 214 L1000 400 Z" fill="url(#ldFar)" style="opacity:calc(.25 + var(--p) * .35)"/>
+			<path d="M0 400 L0 292 L70 268 L130 236 L178 192 L214 158 L236 150 L262 162 L298 124 L322 118 L344 140 L372 170 L392 160 L410 128 L424 112 L436 132 L452 104 L468 120 L486 150 L516 186 L556 206 L590 186 L622 152 L640 128 L650 72 L660 58 L668 64 L674 118 L684 88 L692 44 L700 36 L710 40 L716 108 L728 98 L738 78 L748 74 L756 84 L766 140 L800 176 L846 204 L908 232 L1000 252 L1000 400 Z" fill="#0e1320"/>
+			<path d="M0 400 L0 292 L70 268 L130 236 L178 192 L214 158 L236 150 L262 162 L298 124 L322 118 L344 140 L372 170 L392 160 L410 128 L424 112 L436 132 L452 104 L468 120 L486 150 L516 186 L556 206 L590 186 L622 152 L640 128 L650 72 L660 58 L668 64 L674 118 L684 88 L692 44 L700 36 L710 40 L716 108 L728 98 L738 78 L748 74 L756 84 L766 140 L800 176 L846 204 L908 232 L1000 252 L1000 400 Z" fill="url(#ldGlow)" mask="url(#ldClip)" opacity=".92"/>
+			<path d="M262 162 L298 124 L322 118 L344 140 L330 142 L312 136 L296 150 Z M424 112 L436 132 L452 104 L468 120 L452 126 L438 140 Z" fill="#05070c" opacity=".55"/>
+			<path id="ldLine" d="M0 292 L70 268 L130 236 L178 192 L214 158 L236 150 L262 162 L298 124 L322 118 L344 140 L372 170 L392 160 L410 128 L424 112 L436 132 L452 104 L468 120 L486 150 L516 186 L556 206 L590 186 L622 152 L640 128 L650 72 L660 58 L668 64 L674 118 L684 88 L692 44 L700 36 L710 40 L716 108 L728 98 L738 78 L748 74 L756 84 L766 140 L800 176 L846 204 L908 232 L1000 252" fill="none" stroke="#ffd7a0" stroke-width="1.3" stroke-linejoin="round" opacity=".85"/>
+		</svg>
+		<div class="lake"><i style="top:8%"></i><i style="top:22%;animation-delay:-1.3s"></i><i style="top:41%;animation-delay:-2.6s"></i><i style="top:63%;animation-delay:-3.9s"></i></div>
+		<svg class="mtn refl" viewBox="0 0 1000 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><path d="M0 400 L0 292 L70 268 L130 236 L178 192 L214 158 L236 150 L262 162 L298 124 L322 118 L344 140 L372 170 L392 160 L410 128 L424 112 L436 132 L452 104 L468 120 L486 150 L516 186 L556 206 L590 186 L622 152 L640 128 L650 72 L660 58 L668 64 L674 118 L684 88 L692 44 L700 36 L710 40 L716 108 L728 98 L738 78 L748 74 L756 84 L766 140 L800 176 L846 204 L908 232 L1000 252 L1000 400 Z" fill="#0e1320"/><path d="M0 400 L0 292 L70 268 L130 236 L178 192 L214 158 L236 150 L262 162 L298 124 L322 118 L344 140 L372 170 L392 160 L410 128 L424 112 L436 132 L452 104 L468 120 L486 150 L516 186 L556 206 L590 186 L622 152 L640 128 L650 72 L660 58 L668 64 L674 118 L684 88 L692 44 L700 36 L710 40 L716 108 L728 98 L738 78 L748 74 L756 84 L766 140 L800 176 L846 204 L908 232 L1000 252 L1000 400 Z" fill="url(#ldGlow)" mask="url(#ldClip)" opacity=".7"/></svg>
+		<div class="shore"></div>
+		<div class="ui"><div class="pct"><span id="ldPct">0</span><small>%</small></div><div class="bar"><i></i></div><div class="msg" id="ldMsg">walking in from Italiano</div></div>
+	</div>
+	<script>
+		// the meadow keeps its plain loader; the plains (default) get the sunrise
+		if ( new URLSearchParams( location.search ).get( 'world' ) === 'meadow' ) { const l = document.getElementById( 'loading' ); l.className = ''; l.removeAttribute( 'role' ); l.textContent = 'growing the meadow…'; }
+	</script>
 	<div id="nogpu" hidden><p></p></div>
 	<div id="help">
 		<span class="desk"><b>drag</b> look · <b>WASD</b> move · <b>shift</b> run (<b>R</b> toggle) · <b>space</b> jaguar sprint / jump · <b>F</b> attack · <b>G</b> roar · <b>wheel / Q E</b> height / distance · <b>V</b> switch view: you / jaguar / raptor · <b>M</b> sound</span>

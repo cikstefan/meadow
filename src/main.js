@@ -18,6 +18,7 @@ import { makeRaptor, makeHuman } from './characters.js';
 import { DeerHerd } from './deer.js';
 import { WindSpirits } from './spirits.js';
 import { BIOME, BIOMES } from './biomes/index.js';
+import { Loader } from './ui/loader.js';
 // the plains' own look (night grade, bloom, exposure) never touches the meadow
 const PLAINS = BIOME.id === 'plains';
 import { mountWorldSwitch } from './ui/worldswitch.js';
@@ -73,7 +74,8 @@ const fail = ( msg ) => {
 
 async function start() {
 
-	if ( BIOME.loading ) document.getElementById( 'loading' ).textContent = BIOME.loading;
+	if ( BIOME.loading && ! Loader.active ) document.getElementById( 'loading' ).textContent = BIOME.loading;
+	await Loader.stage( 'boot' );
 	if ( BIOME.title ) document.title = BIOME.title;
 
 	if ( ! navigator.gpu ) return fail( 'This meadow is rendered entirely on the GPU with <b>WebGPU</b> compute shaders and indirect drawing. Your browser does not expose WebGPU. Try a recent Chrome, Edge, Safari 26+ or Firefox 141+.' );
@@ -97,8 +99,10 @@ async function start() {
 	// capable desktop GPUs start at ultra; adaptive quality steps down if it struggles
 	if ( ! params.has( 'q' ) && ! isMobile && ( requiredLimits.maxStorageBufferBindingSize || 0 ) >= 512 * 1024 * 1024 ) settings.quality = 'ultra';
 	await renderer.init();
+	await Loader.stage( 'terrain' );
 	// biome data that must exist before anything samples the terrain (real elevation)
 	if ( BIOME.preload ) await BIOME.preload();
+	await Loader.stage( 'world' );
 	if ( ! renderer.backend.isWebGPUBackend ) return fail( 'WebGPU adapter unavailable (fell back to WebGL). Compute + indirect draw need a WebGPU device.' );
 
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -166,6 +170,7 @@ async function start() {
 
 	// biome-specific systems (plains: mountains, lake, shrubs, ghost forest)
 	const extras = BIOME.createExtras ? await BIOME.createExtras( { scene, renderer, camera, settings } ) : null;
+	await Loader.stage( 'shaders' );
 
 	let grass = null, midGrass = null, farGrass = null, flowers = null, terrain = null;
 	const grassRings = () => [ grass, midGrass, farGrass ].filter( Boolean );
@@ -770,8 +775,13 @@ async function start() {
 
 			firstFrame = false;
 			const l = document.getElementById( 'loading' );
-			l.classList.add( 'done' );
-			setTimeout( () => l.remove(), 1200 );
+			// (the sunrise loader runs up to 100 % first, then fades in a flash of light)
+			Loader.finish().then( () => {
+
+				l.classList.add( 'done' );
+				setTimeout( () => l.remove(), 1500 );
+
+			} );
 
 		}
 
