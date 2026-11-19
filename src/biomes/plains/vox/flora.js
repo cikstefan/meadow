@@ -163,7 +163,16 @@ export class Flora {
 
 				} );
 				const base = vec3( ...M.base ), edge = vec3( ...M.edge ), outer = vec3( ...M.outer );
-				if ( mode === 'tint' ) {
+				if ( mode === 'leaf' ) {
+
+					// a photographed leaf (sprig) on jose's leaf: the photo's veins, serration and
+					// light, around the colour jose's render gave this leaf; paler underneath
+					const tl = pow( T.rgb, vec3( 2.2 ) ).div( vec3( ...S.mean.map( ( m ) => Math.max( m, 0.01 ) ) ) );
+					const lr = dot( tl, vec3( 0.3, 0.55, 0.15 ) );
+					const under = select( front, vec3( 1.0 ), vec3( 1.12, 1.14, 0.92 ) );
+					albedo = vC.xyz.mul( vC.xyz ).mul( mix( vec3( lr ), tl, 0.55 ) ).mul( under );
+
+				} else if ( mode === 'tint' ) {
 
 					// a drawn floret: R light and shade, G the main colour's mask, B the eye
 					albedo = T.r.mul( T.r ).mul( base.mul( T.g ).add( edge.mul( T.b ) ).add( vec3( float( 1.0 ).sub( T.g ).sub( T.b ).max( 0.0 ) ) ) ).mul( select( front, float( 1.0 ), float( 0.8 ) ) );
@@ -181,7 +190,8 @@ export class Flora {
 			}
 
 			const N = normalize( vN ).mul( faceDirection );
-			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( 0.55 ), float( 0.75 ) ) );
+			// (thin photo leaves glow yellow-green when the sun is behind them)
+			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( mode === 'leaf' ? 0.95 : 0.55 ), float( 0.75 ) ) );
 			// night: some flowers of some plants glow in their own colour, each its own strength
 			const emit = flowerGlow( albedo, kind.greaterThan( 1.5 ), vL, vI.z ).mul( U.night.mul( U.glow ) );
 			return shadeFoliage( albedo, N, vW, mix( 0.35, 1.0, ao ), vI.x, transmit, float( 0.12 ), float( 0.4 ), emit );
