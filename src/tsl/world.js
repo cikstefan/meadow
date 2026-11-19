@@ -158,9 +158,10 @@ export const mistColor = Fn( ( [ dir ] ) => {
 
 // Aerial perspective: blend toward the sky colour seen in that direction,
 // then integrate an exponential height fog (valley mist / inversion layer).
-export const applyFog = Fn( ( [ color, worldPos ] ) => {
+// (eye given explicitly: compute passes have no camera of their own)
+export const applyFogFrom = Fn( ( [ color, worldPos, eye ] ) => {
 
-	const d = worldPos.sub( cameraPosition );
+	const d = worldPos.sub( eye );
 	const dist = length( d );
 	const dir = d.div( max( dist, 0.001 ) );
 	const fogDir = normalize( vec3( dir.x, max( dir.y, 0.0 ).mul( 0.35 ).add( 0.015 ), dir.z ) );
@@ -173,7 +174,7 @@ export const applyFog = Fn( ( [ color, worldPos ] ) => {
 	const b = 0.42;
 	const base = float( - 1.0 );
 	const a = U.mist.mul( 0.05 );
-	const e0 = exp( max( cameraPosition.y.sub( base ), - 1.5 ).mul( - b ) );
+	const e0 = exp( max( eye.y.sub( base ), - 1.5 ).mul( - b ) );
 	const k = dir.y.mul( dist ).mul( b );
 	const term = select( abs( k ).greaterThan( 1e-3 ), float( 1.0 ).sub( exp( k.negate() ) ).div( k ), float( 1.0 ).sub( k.mul( 0.5 ) ) ).mul( dist );
 	// drifting patchiness
@@ -182,6 +183,8 @@ export const applyFog = Fn( ( [ color, worldPos ] ) => {
 	return mix( fogged, mistColor( dir ), clamp( mistAmt, 0.0, 0.97 ) );
 
 } );
+
+export const applyFog = Fn( ( [ color, worldPos ] ) => applyFogFrom( color, worldPos, cameraPosition ) );
 
 // ---------------------------------------------------------------- lighting
 

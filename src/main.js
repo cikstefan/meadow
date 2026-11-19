@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize } from 'three/tsl';
+import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize, screenCoordinate, uint, floor, bitcast } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
@@ -282,6 +282,26 @@ async function start() {
 			color = vec4( color.rgb.mul( v.a ).add( v.rgb ), 1.0 );
 
 		}
+		// voxel foliage (compute-shader rasterizer, ?veg=raster): its colour wins
+		// wherever its depth is nearer than the scene's
+		const vr = extras && extras.scrub && extras.scrub.raster;
+		if ( vr ) {
+
+			const sc = screenCoordinate;
+			const idx = uint( floor( sc.y ) ).mul( uint( vr.u.size.x ) ).add( uint( floor( sc.x ) ) );
+			const bits = vr.depthRead.element( idx );
+			const vd = float( 1.0 ).div( bitcast( bits, 'float' ) );
+			const d = scenePass.getTextureNode( 'depth' ).sample( uv() ).x;
+			const nx = uv().x.mul( 2.0 ).sub( 1.0 ), ny = float( 1.0 ).sub( uv().y.mul( 2.0 ) );
+			const vv = post.invProj.mul( vec4( nx, ny, d, 1.0 ) );
+			const wp = post.camWorld.mul( vec4( vv.xyz.div( vv.w ), 1.0 ) ).xyz;
+			const sceneD = length( wp.sub( post.camPos ) );
+			const isSky = reversedDepth ? d.lessThan( 1e-7 ) : d.greaterThan( 0.9999999 );
+			const win = bits.greaterThan( uint( 0 ) ).and( isSky.or( vd.lessThan( sceneD ) ) );
+			color = select( win, vec4( vr.colorRead.element( idx ).rgb, 1.0 ), color );
+
+		}
+
 
 		let col = color.rgb;
 		const glow = bloom( color, 0.22, 0.55, 1.1 );
@@ -774,7 +794,9 @@ async function start() {
 
 			}
 
-			hud.textContent = `${ stats.fps.toFixed( 0 ) } fps · ${ ( stats.blades / 1e6 ).toFixed( 2 ) }M blades · ${ settings.quality }${ gait }`;
+			const vxr = extras && extras.scrub && extras.scrub.raster;
+			if ( vxr ) vxr.readStats( renderer );
+			hud.textContent = `${ stats.fps.toFixed( 0 ) } fps · ${ ( stats.blades / 1e6 ).toFixed( 2 ) }M blades · ${ settings.quality }${ gait }${ vxr && vxr.visible !== undefined ? ` · ${ ( vxr.visible / 1000 ).toFixed( 0 ) }k voxel bushes` : '' }`;
 
 		}
 

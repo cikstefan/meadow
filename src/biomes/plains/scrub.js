@@ -25,9 +25,17 @@ import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS, gravelPatch
 import { cloudShadowGround } from './index.js';
 import { TILE } from './atlas.js';
 import { rng, Builder } from './grow.js';
+import { bakeScrubVoxels } from './vox/bake.js';
+import { VoxelRaster } from './vox/raster.js';
 
-const TILE_M = 32, RADIUS = 420, SPACING = 1.55;
-const LOD_DIST = [ 30, 100 ];
+// ?veg=raster: past VOX_NEAR every bush is drawn as voxels by a compute-shader
+// rasterizer (vox/), out to VOX_FAR; the card meshes only keep the near field
+export const VEG_RASTER = new URLSearchParams( location.search ).get( 'veg' ) === 'raster';
+const VOX_NEAR = 50, VOX_FAR = 1000, TILE_CAP = 448;
+
+const TILE_M = 32, RADIUS = VEG_RASTER ? VOX_FAR : 420, SPACING = 1.55;
+const LOD_DIST = VEG_RASTER ? [ 30, VOX_NEAR ] : [ 30, 100 ];
+const MESH_RADIUS = VEG_RASTER ? VOX_NEAR : RADIUS;
 
 // species: leaf tile, flower tile (-1 none), body colour, card tint
 export const SCRUB = [
@@ -43,7 +51,7 @@ export { scrubFieldsTSL };
 
 // --- geometry ------------------------------------------------------------------
 // lumpy dome (unit radius / height) + leafy cards on its surface
-function moundGeometry( seed, detail, cards, core ) {
+export function moundGeometry( seed, detail, cards, core ) {
 
 	const r = rng( seed );
 	const ico = new THREE.IcosahedronGeometry( 1, detail );
@@ -191,6 +199,17 @@ export class Scrub {
 
 		this.atlas = atlas;
 		this.tiles = new Map();
+		if ( VEG_RASTER ) {
+
+			const slots = Math.ceil( Math.PI * ( ( RADIUS + TILE_M * 2 ) / TILE_M + 1 ) ** 2 );
+			this.freeSlots = [];
+			for ( let i = slots - 1; i >= 0; i -- ) this.freeSlots.push( i );
+			this.tileSlot = new Map();
+			this.raster = new VoxelRaster( bakeScrubVoxels( atlas ), slots * TILE_CAP, { near: VOX_NEAR, far: VOX_FAR } );
+			this.empty = new Float32Array( TILE_CAP * 8 );
+
+		}
+
 		this.group = new THREE.Group();
 		this.lastPos = new THREE.Vector3( 1e9, 0, 0 );
 		this.lastTilePos = new THREE.Vector3( 1e9, 0, 0 );
@@ -321,32 +340,67 @@ export class Scrub {
 	update( renderer, camera ) {
 
 		const cp = camera.position;
-		if ( cp.distanceToSquared( this.lastTilePos ) > 16 * 16 ) {
+		if ( cp.distanceToSquared( this.lastTilePos ) > 16 * 16 || this.pending ) {
 
-			this.lastTilePos.copy( cp );
+			if ( cp.distanceToSquared( this.lastTilePos ) > 16 * 16 ) this.lastTilePos.copy( cp );
 			const ctx = Math.floor( cp.x / TILE_M ), ctz = Math.floor( cp.z / TILE_M ), R = Math.ceil( RADIUS / TILE_M );
-			const keep = new Set();
-			let built = 0;
+			const keep = new Set(), todo = [];
 			for ( let j = - R; j <= R; j ++ ) for ( let i = - R; i <= R; i ++ ) {
 
 				const tx = ctx + i, tz = ctz + j;
 				const cxm = ( tx + 0.5 ) * TILE_M - cp.x, czm = ( tz + 0.5 ) * TILE_M - cp.z;
-				if ( cxm * cxm + czm * czm > ( RADIUS + TILE_M ) ** 2 ) continue;
+				const d2 = cxm * cxm + czm * czm;
+				if ( d2 > ( RADIUS + TILE_M ) ** 2 ) continue;
 				const key = tx + ',' + tz;
 				keep.add( key );
-				if ( ! this.tiles.has( key ) ) {
+				if ( ! this.tiles.has( key ) ) todo.push( [ d2, tx, tz, key ] );
 
-					this.tiles.set( key, tileInstances( tx, tz ) );
-					built ++;
+			}
+
+			for ( const k of this.tiles.keys() ) if ( ! keep.has( k ) ) {
+
+				this.tiles.delete( k );
+				if ( this.raster ) {
+
+					const slot = this.tileSlot.get( k );
+					this.raster.writeSlots( slot * TILE_CAP, this.empty );
+					this.tileSlot.delete( k );
+					this.freeSlots.push( slot );
 
 				}
 
 			}
 
-			for ( const k of this.tiles.keys() ) if ( ! keep.has( k ) ) this.tiles.delete( k );
+			// nearest tiles first, within a time budget per frame (the far field fills in)
+			todo.sort( ( a, b ) => a[ 0 ] - b[ 0 ] );
+			const t0 = performance.now(), budget = this.raster ? ( this.tiles.size ? 5 : 40 ) : 1e9;
+			let built = 0;
+			for ( const [ , tx, tz, key ] of todo ) {
+
+				if ( built && performance.now() - t0 > budget ) break;
+				const d = tileInstances( tx, tz );
+				d.cx = ( tx + 0.5 ) * TILE_M; d.cz = ( tz + 0.5 ) * TILE_M;
+				this.tiles.set( key, d );
+				if ( this.raster ) {
+
+					const slot = this.freeSlots.pop();
+					this.tileSlot.set( key, slot );
+					const buf = new Float32Array( TILE_CAP * 8 );
+					buf.set( d.subarray( 0, Math.min( d.length, TILE_CAP * 8 ) ) );
+					this.raster.writeSlots( slot * TILE_CAP, buf );
+
+				}
+
+				built ++;
+
+			}
+
+			this.pending = built < todo.length;
 			if ( built ) this.lastPos.set( 1e9, 0, 0 );
 
 		}
+
+		if ( this.raster ) this.raster.render( renderer, camera );
 
 		// re-bucket when the camera moved or turned (instances behind the view are skipped)
 		const fwd = new THREE.Vector3( 0, 0, - 1 ).applyQuaternion( camera.quaternion );
@@ -355,10 +409,14 @@ export class Scrub {
 		if ( cp.distanceToSquared( this.lastPos ) < 4 && fwd.dot( this.lastFwd ) > 0.97 ) return;
 		this.lastPos.copy( cp ); this.lastFwd.copy( fwd );
 		const cosCut = Math.cos( 78 * Math.PI / 180 );
-		const L0 = LOD_DIST[ 0 ] ** 2, L1 = LOD_DIST[ 1 ] ** 2, R2 = RADIUS * RADIUS;
+		const L0 = LOD_DIST[ 0 ] ** 2, L1 = LOD_DIST[ 1 ] ** 2, R2 = MESH_RADIUS * MESH_RADIUS;
+		const TR2 = ( MESH_RADIUS + TILE_M ) ** 2;
 		const A = this.meshes.map( ( m ) => m.geometry.attributes.iA.array ), B = this.meshes.map( ( m ) => m.geometry.attributes.iB.array );
 		const n = [ 0, 0, 0 ];
-		for ( const d of this.tiles.values() ) for ( let i = 0; i < d.length; i += 8 ) {
+		for ( const d of this.tiles.values() ) {
+
+			if ( ( d.cx - cp.x ) ** 2 + ( d.cz - cp.z ) ** 2 > TR2 ) continue;
+			for ( let i = 0; i < d.length; i += 8 ) {
 
 			const dx = d[ i ] - cp.x, dz = d[ i + 2 ] - cp.z, r2 = dx * dx + dz * dz;
 			if ( r2 > R2 ) continue;
@@ -368,6 +426,8 @@ export class Scrub {
 			const k = ( n[ l ] ++ ) * 4;
 			A[ l ][ k ] = d[ i ]; A[ l ][ k + 1 ] = d[ i + 1 ]; A[ l ][ k + 2 ] = d[ i + 2 ]; A[ l ][ k + 3 ] = d[ i + 3 ];
 			B[ l ][ k ] = d[ i + 4 ]; B[ l ][ k + 1 ] = d[ i + 5 ]; B[ l ][ k + 2 ] = d[ i + 6 ]; B[ l ][ k + 3 ] = d[ i + 7 ];
+
+			}
 
 		}
 
