@@ -76,6 +76,21 @@ const b64 = ( s, T ) => {
 			let H1 = null;
 			for ( const t of STAGES ) {
 
+				const done = path.join( outDir, `${ sp }_${ seed }_${ Math.round( t * 100 ) }.json` );
+				if ( fs.existsSync( done ) ) {
+
+					// resume: keep what is baked (the mature stage's height sets the scale)
+					if ( H1 === null ) {
+
+						const m = JSON.parse( fs.readFileSync( done ) );
+						H1 = m.height;
+
+					}
+
+					continue;
+
+				}
+
 				const t0 = Date.now();
 				const r = await p.evaluate( capture, { sp, seed, t, RES0: cfg.res, N: 512, LOD_TRIS } ).catch( ( e ) => ( { error: e.message } ) );
 				if ( r.error ) {
