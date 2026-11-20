@@ -20,6 +20,7 @@ import { rockAtJS } from '../rockmask.js';
 import { cloudShadowGround } from '../index.js';
 import { VoxelRaster, cellHash, FADE_PX, flowerGlow } from './raster.js';
 import { plantWind } from './wind.js';
+import { sunShadowAt } from './sunshadow.js';
 import { JOSE_SPECIES, pickJose, streamJoseMeshes, decodeLOD, scanInfo } from './jose.js';
 
 const TILE_M = 32, FAR = 1000, CAP = 96; // plants per tile (max)
@@ -201,7 +202,7 @@ export class Flora {
 			const emit = flowerGlow( albedo, kind.greaterThan( 1.5 ), vL, vI.z ).mul( U.night.mul( U.glow ) );
 			// self-shadowing inside the crown: leaves the capture found hidden deep inside get
 			// little direct sun as well as little sky (rich shade under the outer shell)
-			const sunOcc = mix( 0.18, 1.0, ao.pow( 1.5 ) );
+			const sunOcc = mix( 0.45, 1.0, ao ).mul( sunShadowAt( vW.add( N.mul( 0.04 ) ).add( U.sunDir.mul( 0.03 ) ) ) );
 			return shadeFoliage( albedo, N, vW, mix( 0.3, 1.0, ao ), vI.x.mul( sunOcc ), transmit, float( 0.12 ), float( 0.4 ), emit );
 
 		} )();

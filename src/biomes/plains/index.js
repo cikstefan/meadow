@@ -14,6 +14,7 @@ import { U } from '../../tsl/uniforms.js';
 import { makeVolumetricClouds } from '../../tsl/clouds3d.js';
 import { scrubFieldsTSL } from './scrubfields.js';
 import { VEG_RASTER } from './vox/mode.js';
+import { sunShadowAt } from './vox/sunshadow.js';
 import {
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS, mountainHeight, lakeDist,
 } from './terrain.js';
@@ -83,7 +84,8 @@ export const cloudShadowCompute = Fn( () => {
 } )().compute( CS_N * CS_N );
 export const cloudShadowGround = ( xz ) => texture( csTex, xz.sub( csCenter ).div( CS_EXT * 2 ).add( 0.5 ) ).level( 0 ).r;
 
-const cloudShadow = Fn( ( [ xz ] ) => cloudShadowGround( xz ) );
+// clouds, and the plants' sun shadows on the ground (vox/sunshadow.js; 1 without them)
+const cloudShadow = Fn( ( [ xz ] ) => cloudShadowGround( xz ).mul( sunShadowAt( vec3( xz.x, terrainHeight( xz ).add( 0.06 ), xz.y ) ) ) );
 
 // CPU mirror of the weather map (0..1, high = clear), sampled where the sun ray meets the deck
 export function cloudFieldJS( x, z, y, offset ) {

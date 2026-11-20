@@ -24,8 +24,9 @@ import { U, applyFogFrom } from '../../../tsl/world.js';
 import { cloudShadowGround } from '../index.js';
 import { MAXLV, packPrototypes } from './voxelize.js';
 import { plantWind } from './wind.js';
+import { SH_N, SH_EXT, shadowAtomic, sunViewProj, shadowOn, updateSunCamera, sunShadowAt } from './sunshadow.js';
 
-const WG = 64, GROUPS = 8192, MAXVIS = 1 << 19;
+const WG = 64, GROUPS = 8192, MAXVIS = 1 << 19, MAXVIS_SH = 1 << 18, GROUPS_SH = 4096;
 
 // mesh <-> voxel hand-over: where a plant's level-0 voxel is about FADE_PX pixels wide
 // (like Nanite, which switches to voxels at about a pixel), dissolving over FADE_W x that
@@ -79,8 +80,15 @@ export class VoxelRaster {
 
 		this.instAttr = new THREE.StorageBufferAttribute( new Float32Array( slots * 8 ), 4 );
 		this.inst = storage( this.instAttr, 'vec4', slots * 2 ).toReadOnly();
-		this.vox = storage( new THREE.StorageBufferAttribute( baked.voxels, 1 ), 'uint', baked.voxels.length ).toReadOnly();
-		this.table = storage( new THREE.StorageBufferAttribute( baked.ranges, 1 ), 'uint', baked.ranges.length ).toReadOnly();
+		// one buffer: the per-level ranges first, then the voxels (keeps the passes within
+		// WebGPU's 8 storage buffers per stage)
+		const RO = Math.ceil( baked.ranges.length / 3 ) * 3; // (voxels are 3 words: keep them aligned)
+		const all = new Uint32Array( RO + baked.voxels.length );
+		all.set( baked.ranges ); all.set( baked.voxels, RO );
+		for ( let i = 0; i < baked.ranges.length; i += 2 ) all[ i ] += RO / 3; // voxel offsets past the table (in voxels of 3 words)
+		this.RO = RO;
+		this.vox = storage( new THREE.StorageBufferAttribute( all, 1 ), 'uint', all.length ).toReadOnly();
+		this.table = this.vox;
 		this.boxAttr = new THREE.StorageBufferAttribute( baked.boxes, 4 );
 		this.boxes = storage( this.boxAttr, 'vec4', baked.boxes.length / 4 ).toReadOnly();
 		this.vis = storage( new THREE.StorageBufferAttribute( new Uint32Array( MAXVIS ), 1 ), 'uint', MAXVIS );
@@ -100,7 +108,133 @@ export class VoxelRaster {
 			viewProj: uniform( new THREE.Matrix4() ), eye: uniform( new THREE.Vector3() ),
 			size: uniform( new THREE.Vector2( 1, 1 ) ), focal: uniform( 1000 ), far: uniform( far ),
 		};
+		this.shCntAttr = new THREE.StorageBufferAttribute( new Uint32Array( 4 ), 1 );
+		this.shCnt = storage( this.shCntAttr, 'uint', 4 ).toAtomic();
+		this.shCntRead = storage( this.shCntAttr, 'uint', 4 ).toReadOnly();
+		this.shVis = storage( new THREE.StorageBufferAttribute( new Uint32Array( MAXVIS_SH ), 1 ), 'uint', MAXVIS_SH );
 		this.build();
+		this.buildShadow();
+
+	}
+
+	// sun shadow passes: every plant (near ones too) splatted into the sun-view depth map
+	buildShadow() {
+
+		const { inst, vox, table, boxes, shVis, shCnt, shCntRead } = this;
+		const texel = SH_EXT * 2 / SH_N;
+		const box = ( proto ) => [ boxes.element( proto.mul( 3 ) ), boxes.element( proto.mul( 3 ).add( 1 ) ), boxes.element( proto.mul( 3 ).add( 2 ) ) ];
+		this.shClear = Fn( () => {
+
+			atomicStore( shadowAtomic.element( instanceIndex ), uint( 0 ) );
+			If( instanceIndex.equal( uint( 0 ) ), () => {
+
+				atomicStore( shCnt.element( 0 ), uint( 0 ) );
+
+			} );
+
+		} )().compute( SH_N * SH_N, [ 256 ] );
+		this.shCull = Fn( () => {
+
+			const s = instanceIndex;
+			If( s.lessThan( uint( this.slots ) ), () => {
+
+				const A = inst.element( s.mul( 2 ) ), B = inst.element( s.mul( 2 ).add( 1 ) );
+				If( A.w.greaterThan( 0.0 ), () => {
+
+					const [ b0, b1 ] = box( uint( B.z ) );
+					const ext = b1.xyz.mul( b1.w ).mul( vec3( A.w, B.x, A.w ) );
+					const c = A.xyz.add( vec3( 0, b0.y.mul( B.x ).add( ext.y.mul( 0.5 ) ), 0 ) );
+					const clip = sunViewProj.mul( vec4( c, 1.0 ) );
+					const m = max( ext.x, max( ext.y, ext.z ) ).div( SH_EXT );
+					If( clip.x.abs().lessThan( m.add( 1.0 ) ).and( clip.y.abs().lessThan( m.add( 1.0 ) ) ), () => {
+
+						// voxels about one shadow texel
+						const px = max( ext.x, ext.y ).div( texel );
+						const lv = clamp( log2( b1.w ).sub( ceil( log2( max( px, 1.0 ) ) ) ), 0.0, b0.w.sub( 1.0 ) );
+						const k = atomicAdd( shCnt.element( 0 ), uint( 1 ) );
+						If( k.lessThan( uint( MAXVIS_SH ) ), () => {
+
+							shVis.element( k ).assign( s.bitOr( uint( lv ).shiftLeft( uint( 28 ) ) ) );
+
+						} );
+
+					} );
+
+				} );
+
+			} );
+
+		} )().compute( this.slots, [ 256 ] );
+		this.shWalk = Fn( () => {
+
+			const wg = instanceIndex.div( WG ), lid = instanceIndex.mod( WG );
+			const n = min( shCntRead.element( 0 ), uint( MAXVIS_SH ) );
+			Loop( { start: wg, end: n, type: 'uint', condition: '<', update: uint( GROUPS_SH ) }, ( { i: item } ) => {
+
+				const e = shVis.element( item );
+				const s = e.bitAnd( uint( 0x0fffffff ) ), lv = e.shiftRight( uint( 28 ) );
+				const A = inst.element( s.mul( 2 ) ), B = inst.element( s.mul( 2 ).add( 1 ) );
+				const proto = uint( B.z );
+				const row = proto.mul( MAXLV ).add( lv );
+				const off = table.element( row.mul( 2 ) ), count = table.element( row.mul( 2 ).add( 1 ) );
+				const [ b0, b1, b2 ] = box( proto );
+				const vsz = b1.xyz.mul( float( uint( 1 ).shiftLeft( lv ) ) );
+				const seed = B.w.fract(), lean = B.w.floor().mul( 0.01 );
+				const Hh = b2.y.mul( B.x ).max( 0.05 );
+				const cs = cos( B.y ), sn = sin( B.y );
+				const rot = ( v ) => vec3( v.x.mul( cs ).sub( v.z.mul( sn ) ), v.y, v.x.mul( sn ).add( v.z.mul( cs ) ) );
+				const W0 = vec3( 0.96, 0, - 0.28 );
+				const foot = clamp( ceil( max( vsz.x.mul( A.w ), vsz.y.mul( B.x ) ).div( texel ).sub( 0.2 ) ), 1.0, 4.0 );
+				const fi = uint( foot );
+				Loop( { start: lid, end: count, type: 'uint', condition: '<', update: uint( WG ) }, ( { i: vi } ) => {
+
+					const base = off.add( vi ).mul( 3 );
+					const w0 = vox.element( base ), w1 = vox.element( base.add( 1 ) );
+					const cov = float( w1.shiftRight( uint( 24 ) ) ).div( 255.0 );
+					const h = pcg( s.mul( uint( 2654435761 ) ).bitXor( vi.mul( uint( 40503 ) ) ).add( lv ) );
+					If( h.lessThan( cov ), () => {
+
+						const g = vec3( float( w0.bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 8 ) ).bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 16 ) ).bitAnd( uint( 255 ) ) ) );
+						const lp = b0.xyz.add( g.add( 0.5 ).mul( vsz ) );
+						const hgt = lp.y.mul( B.x ).max( 0.0 );
+						const lw = rot( vec3( lp.x.mul( A.w ), hgt, lp.z.mul( A.w ) ) ).toVar();
+						const P = A.xyz.add( lw ).add( plantWind( lw, Hh, A.xz, seed ) ).add( W0.mul( lean.mul( hgt ).mul( hgt.div( Hh ) ) ) ).toVar();
+						const clip = sunViewProj.mul( vec4( P, 1.0 ) );
+						const key = bitcast( float( 1.0 ).sub( clip.z ), 'uint' );
+						const sx = clip.x.mul( 0.5 ).add( 0.5 ).mul( SH_N ), sy = float( 0.5 ).sub( clip.y.mul( 0.5 ) ).mul( SH_N );
+						const x0 = floor( sx.sub( foot.sub( 1.0 ).mul( 0.5 ) ) ), y0 = floor( sy.sub( foot.sub( 1.0 ).mul( 0.5 ) ) );
+						Loop( { start: uint( 0 ), end: fi, type: 'uint', condition: '<', name: 'oy' }, ( { oy } ) => {
+
+							Loop( { start: uint( 0 ), end: fi, type: 'uint', condition: '<', name: 'ox' }, ( { ox } ) => {
+
+								const x = x0.add( float( ox ) ), y = y0.add( float( oy ) );
+								If( x.greaterThanEqual( 0.0 ).and( y.greaterThanEqual( 0.0 ) ).and( x.lessThan( SH_N ) ).and( y.lessThan( SH_N ) ), () => {
+
+									atomicMax( shadowAtomic.element( uint( y ).mul( uint( SH_N ) ).add( uint( x ) ) ), key );
+
+								} );
+
+							} );
+
+						} );
+
+					} );
+
+				} );
+
+			} );
+
+		} )().compute( GROUPS_SH * WG, [ WG ] );
+
+	}
+
+	renderShadow( renderer, camera ) {
+
+		updateSunCamera( camera, U.sunDir.value );
+		renderer.compute( this.shClear );
+		renderer.compute( this.shCull );
+		renderer.compute( this.shWalk );
+		shadowOn.value = U.sunDir.value.y > - 0.02 ? 1 : 0;
 
 	}
 
@@ -280,7 +414,7 @@ export class VoxelRaster {
 								const V = normalize( u.eye.sub( P ) );
 								const NdL = dot( N, L );
 								const aoM = mix( 0.3, 1.0, ao );
-								const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) ).mul( mix( 0.18, 1.0, ao.pow( 1.5 ) ) );
+								const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) ).mul( sunShadowAt( P.add( L.mul( 0.06 ) ) ) ).mul( mix( 0.45, 1.0, ao ) );
 								const near = smoothstep( 160.0, 35.0, dist );
 								const diff = clamp( NdL.add( 0.4 ).div( 1.4 ), 0.0, 1.0 );
 								const ambient = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( aoM );
@@ -354,6 +488,7 @@ export class VoxelRaster {
 		camera.updateMatrixWorld();
 		this.u.viewProj.value.multiplyMatrices( camera.projectionMatrix, camera.matrixWorldInverse );
 		this.u.eye.value.copy( camera.position );
+		this.renderShadow( renderer, camera ); // first: this frame's voxels receive it too
 		renderer.compute( this.clear );
 		renderer.compute( this.cull );
 		renderer.compute( this.depthPass );

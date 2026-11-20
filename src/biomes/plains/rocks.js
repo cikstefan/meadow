@@ -13,6 +13,7 @@ import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U, applyFog } from '../../tsl/world.js';
 import { landHeightJS, trailDistJS, lakeDistJS, gravelPatchJS, mountainHeightJS } from './terrain.js';
 import { cloudShadowGround } from './index.js';
+import { sunShadowAt } from './vox/sunshadow.js';
 import { rng } from './grow.js';
 import { stampRock, rockMaskDone } from './rockmask.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -174,7 +175,7 @@ export class Rocks {
 			alb.mulAssign( mix( vec3( 1.0 ), vec3( 1.08, 0.94, 0.82 ), smoothstep( 0.88, 0.92, vI.x ) ) );
 			alb.mulAssign( mix( 0.55, 1.0, smoothstep( 0.0, 0.25, P.y.sub( vI.y ) ) ) );
 			const L = U.sunDir;
-			const diff = clamp( dot( N, L ).add( 0.1 ).div( 1.1 ), 0.0, 1.0 ).mul( vI.z ).mul( smoothstep( - 0.04, 0.06, L.y ) );
+			const diff = clamp( dot( N, L ), 0.0, 1.0 ).mul( vI.z ).mul( smoothstep( - 0.04, 0.06, L.y ) ).mul( sunShadowAt( P.add( N.mul( 0.05 ) ) ) );
 			const amb = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( 1.1 );
 			return applyFog( alb.mul( U.sunColor.mul( diff ).add( amb ) ), P );
 
