@@ -44,7 +44,7 @@ const QUALITY = {
 const params = new URLSearchParams( location.search );
 // the plains render the scene at a fraction of the screen's resolution and rebuild full
 // resolution over frames (temporal upscaling); ?rs=1 renders at native resolution
-const RS = PLAINS ? Math.min( 1, Math.max( 0.4, parseFloat( params.get( 'rs' ) ?? '0.7' ) || 0.7 ) ) : 1;
+const RS = PLAINS ? Math.min( 1, Math.max( 0.4, parseFloat( params.get( 'rs' ) ?? '0.75' ) || 0.75 ) ) : 1;
 const isMobile = /Android|iPhone|iPad|iPod/i.test( navigator.userAgent ) || ( navigator.maxTouchPoints > 1 && window.innerWidth < 1100 );
 
 const D = BIOME.defaults;
@@ -218,13 +218,13 @@ async function start() {
 			lods: PLAINS ? [ { segments: 12, maxDistance: 6.5 * L }, { segments: 5, maxDistance: 15 * L }, { segments: 2, maxDistance: Infinity } ] : null } );
 		midGrass = new Grass( {
 			bladesPerAxis: q.mid, area: q.midArea, renderOrder: 3, fadeIn: bandN, fadeOut: bandM,
-			widthScale: Math.sqrt( ( q.midArea / q.mid ) / nearSp ) * 1.6, aoMin: 0.32, groundBlend: 0.1,
+			widthScale: Math.sqrt( ( q.midArea / q.mid ) / nearSp ) * 1.6, aoMin: PLAINS ? 0.45 : 0.32, groundBlend: PLAINS ? 0.25 : 0.1,
 			lods: PLAINS ? [ { segments: 3, maxDistance: Rn * 1.1 }, { segments: 2, maxDistance: Rm * 0.75 }, { segments: 1, maxDistance: Infinity } ]
 				: [ { segments: 4, maxDistance: Rn * 1.4 }, { segments: 2, maxDistance: Infinity } ],
 		} );
 		farGrass = new Grass( {
 			bladesPerAxis: q.far, area: q.farArea, renderOrder: 5, fadeIn: bandM, fadeOut: [ Rf * 0.7, Rf * 0.97 ],
-			widthScale: Math.sqrt( ( q.farArea / q.far ) / nearSp ) * ( PLAINS ? 2.1 : 1.7 ), aoMin: 0.45, groundBlend: 0.2,
+			widthScale: Math.sqrt( ( q.farArea / q.far ) / nearSp ) * ( PLAINS ? 2.1 : 1.7 ), aoMin: PLAINS ? 0.6 : 0.45, groundBlend: PLAINS ? 0.4 : 0.2,
 			lods: PLAINS ? [ { segments: 1, maxDistance: Infinity } ]
 				: [ { segments: 2, maxDistance: Rm * 1.3 }, { segments: 1, maxDistance: Infinity } ],
 		} );
@@ -381,7 +381,7 @@ async function start() {
 			const up = taau( low, depthTex, scenePass.getTextureNode( 'velocity' ), camera );
 			post.taau = up;
 			if ( vr ) vr.jitter = () => { const h = HALTON[ up._jitterIndex % HALTON.length ]; return [ h[ 0 ] - 0.5, h[ 1 ] - 0.5 ]; }; // the voxels jitter with the scene (this frame's offset)
-			color = RS < 0.99 ? sharpen( up, 0.75 ) : up;
+			color = up;
 			// distance softening: real air smears what is far (and the haze takes its colour),
 			// so the far plain and ridges are not razor-sharp
 			const dD = depthTex.sample( uv() ).x;
@@ -399,7 +399,7 @@ async function start() {
 
 			// by day only a faint halo round the brightest glints (sun on glossy leaves, sunlit
 			// cloud rims); nothing at night
-			const sheen = bloom( color, 0.1, 0.35, 1.5 );
+			const sheen = bloom( color, 0.06, 0.3, 2.2 );
 			post.dayBloom = sheen;
 			col = col.add( sheen.rgb );
 
@@ -864,7 +864,7 @@ async function start() {
 
 		// camera for the screen-space cloud pass
 		post.night.value = U.night.value;
-		if ( post.dayBloom ) post.dayBloom.strength.value = 0.1 * ( 1 - U.night.value );
+		if ( post.dayBloom ) post.dayBloom.strength.value = 0.05 * ( 1 - U.night.value );
 		post.cloudy.value = THREE.MathUtils.smoothstep( settings.clouds, 0.3, 0.8 );
 		// at night the glowing flowers bloom: a lower threshold and a stronger, wider halo
 		if ( post.bloom && PLAINS ) {

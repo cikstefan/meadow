@@ -106,6 +106,8 @@ export class VoxelRaster {
 		this.table = this.vox;
 		this.boxAttr = new THREE.StorageBufferAttribute( baked.boxes, 4 );
 		this.boxes = storage( this.boxAttr, 'vec4', baked.boxes.length / 4 ).toReadOnly();
+		// frames each plant has been fully hidden behind other geometry (occlusion hysteresis)
+		this.occAge = storage( new THREE.StorageBufferAttribute( new Uint32Array( slots ), 1 ), 'uint', slots );
 		this.vis = storage( new THREE.StorageBufferAttribute( new Uint32Array( MAXVIS ), 1 ), 'uint', MAXVIS );
 		this.cntAttr = new THREE.StorageBufferAttribute( new Uint32Array( 4 ), 1 );
 		this.cnt = storage( this.cntAttr, 'uint', 4 ).toAtomic();
@@ -139,7 +141,7 @@ export class VoxelRaster {
 	// there is skipped
 	buildCull( occ = null ) {
 
-		const { inst, boxes, vis, cnt, u } = this;
+		const { inst, boxes, vis, cnt, u, occAge } = this;
 		const box = ( proto ) => [ boxes.element( proto.mul( 3 ) ), boxes.element( proto.mul( 3 ).add( 1 ) ), boxes.element( proto.mul( 3 ).add( 2 ) ) ];
 		const W = u.size.x, H = u.size.y;
 		const hidden = ( p ) => {
@@ -175,10 +177,30 @@ export class VoxelRaster {
 						const m = rr.mul( 2.0 );
 						If( clip.w.greaterThan( rr.negate() ).and( clip.x.abs().lessThan( clip.w.add( m ) ) ).and( clip.y.abs().lessThan( clip.w.add( m ) ) ), () => {
 
-							// occlusion against last frame's depth (crown top and its two sides)
-							const top = vec3( c.x, A.y.add( ext.y.mul( 0.95 ) ), c.z );
-							const sideV = vec3( u.viewProj.element( 0 ).x, 0, u.viewProj.element( 2 ).x ).normalize().mul( ext.x.mul( 0.45 ) );
-							const occluded = occ ? hidden( top ).and( hidden( c.add( sideV ) ) ).and( hidden( c.sub( sideV ) ) ) : null;
+							// occlusion against last frame's depth: a 4x4 grid over the plant's outline,
+							// tested at its nearest depth. Alpha-cut leaves of nearer plants are in that
+							// depth too, so a plant counts as hidden only when every sample is covered, and
+							// only after staying covered for a while (hysteresis): seen through a swaying
+							// bush it never blinks out; it reappears the first frame any sample is clear.
+							let occluded = null;
+							if ( occ ) {
+
+								const toEye = u.eye.sub( c ).normalize().mul( rr );
+								const sideV = vec3( u.viewProj.element( 0 ).x, 0, u.viewProj.element( 2 ).x ).normalize().mul( ext.x.mul( 0.5 ) );
+								let all = null;
+								for ( let j = 0; j < 4; j ++ ) for ( let i = 0; i < 4; i ++ ) {
+
+									const p = vec3( c.x, A.y.add( ext.y.mul( 0.12 + 0.27 * j ) ), c.z ).add( sideV.mul( - 0.9 + 0.6 * i ) ).add( toEye );
+									const h = hidden( p );
+									all = all ? all.and( h ) : h;
+
+								}
+
+								const age = select( all, occAge.element( s ).add( uint( 1 ) ).min( uint( 1000 ) ), uint( 0 ) );
+								occAge.element( s ).assign( age );
+								occluded = age.greaterThan( uint( 45 ) );
+
+							}
 							const pushIt = () => {
 
 							// the level whose voxels project to ~1 pixel
@@ -245,9 +267,9 @@ export class VoxelRaster {
 					const m = max( ext.x, max( ext.y, ext.z ) ).div( SH_EXT );
 					If( clip.x.abs().lessThan( m.add( 1.0 ) ).and( clip.y.abs().lessThan( m.add( 1.0 ) ) ), () => {
 
-						// voxels about two shadow texels, splatted conservatively (below): as the
+						// voxels about one shadow texel, splatted conservatively (below): as the
 						// leaves sway, the map's coverage stays solid instead of sparkling
-						const px = max( ext.x, ext.y ).div( texel * 2 );
+						const px = max( ext.x, ext.y ).div( texel * 1.2 );
 						const lv = clamp( log2( b1.w ).sub( ceil( log2( max( px, 1.0 ) ) ) ), 0.0, b0.w.sub( 1.0 ) );
 						const k = atomicAdd( shCnt.element( 0 ), uint( 1 ) );
 						If( k.lessThan( uint( MAXVIS_SH ) ), () => {
@@ -485,7 +507,9 @@ export class VoxelRaster {
 								const ambient = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( aoM );
 								const back = pow( clamp( dot( V.negate(), L ), 0.0, 1.0 ), 3.0 );
 								const thru = back.mul( mix( 0.35, 1.4, near ) ).add( clamp( NdL.negate(), 0.0, 1.0 ).mul( 0.35 ) );
-								const trans = albedo.mul( vec3( 1.25, 1.3, 0.55 ) ).mul( U.sunColor ).mul( thru ).mul( 0.55 ).mul( sunVis );
+								// (light petals and flowers transmit less than leaves: a white crown must not flare)
+								const tK = mix( 0.6, 0.35, smoothstep( 0.25, 0.6, albedo.g ) );
+								const trans = albedo.mul( vec3( 1.25, 1.3, 0.55 ) ).mul( U.sunColor ).mul( thru ).mul( tK ).mul( sunVis );
 								const glow = w0.shiftRight( uint( 24 ) );
 								const emit = flowerGlow( albedo, glow.equal( uint( 3 ) ), lp, seed ).mul( U.night.mul( U.glow ) );
 								const sunL = U.sunColor.mul( diff ).mul( sunVis );

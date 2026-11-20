@@ -21,25 +21,22 @@ const path = require( 'path' );
 
 // species: mature height (m), voxel resolution, seeds (each a different cultivar where the species has them)
 const PLANTS = {
-	oleander: { h: 2.6, res: 96, seeds: [ 'oleander-0', 'oleander-1', 'oleander-2', 'oleander-5' ] }, // pink, red, salmon, white
-	gypso: { h: 0.8, res: 64, seeds: [ 'gypso-0', 'gypso-6' ] }, // white, pink 'Flamingo'
-	clero: { h: 1.6, res: 80, seeds: [ 'clero-0', 'clero-7' ] },
-	stipa: { h: 0.65, res: 64, seeds: [ 'stipa-0', 'stipa-4' ] },
-	hakone: { h: 0.45, res: 48, seeds: [ 'hakone-0', 'hakone-2' ] },
-	festuca: { h: 0.6, res: 48, seeds: [ 'festuca-0', 'festuca-3' ] },
-	benjamina: { h: 3.6, res: 96, seeds: [ 'benjamina-0', 'benjamina-4', 'benjamina-10' ] },
-	plumeria: { h: 4.2, res: 96, seeds: [ 'plumeria-0', 'plumeria-1', 'plumeria-2', 'plumeria-6' ] },
-	cotinus: { h: 3.0, res: 96, seeds: [ 'cotinus-0', 'cotinus-5' ] },
-	olive: { h: 5.0, res: 96, seeds: [ 'olive-0', 'olive-22' ] },
-	echium: { h: 1.8, res: 80, seeds: [ 'echium-0', 'echium-1' ] },
-	mugo: { h: 2.2, res: 96, seeds: [ 'mugo-0', 'mugo-4' ] },
+	// Torres del Paine species from jose's Patagonia library (wind-shaped growth: each leans
+	// toward local +x, windDir 0; the runtime turns it downwind of the plains' westerly)
+	notro: { h: 3.2, res: 96, seeds: [ 'notro-0', 'notro-1', 'notro-3', 'notro-5' ] },
+	calafate: { h: 1.6, res: 80, seeds: [ 'calafate-0', 'calafate-2', 'calafate-4' ] },
+	matanegra: { h: 1.1, res: 80, seeds: [ 'matanegra-0', 'matanegra-3' ] },
+	chaura: { h: 0.7, res: 64, seeds: [ 'chaura-0', 'chaura-2' ] },
+	coiron: { h: 0.55, res: 48, seeds: [ 'coiron-0', 'coiron-3' ] },
+	sisyrinchium: { h: 0.32, res: 48, seeds: [ 'sisyrinchium-0', 'sisyrinchium-2' ] },
+	echium: { h: 1.8, res: 80, seeds: [ 'echium-0', 'echium-1' ] }, // pride of Madeira (kept)
 };
 const STAGES = [ 1.0, 0.62 ];
 // near-field leaves and petals as cards carrying jose's own look: for each species /
 // cultivar the bake isolates a few typical leaves (and flat petals), renders each face-on
 // with jose's own shaders into that plant's atlas, and puts a card on every leaf's frame.
 // Grasses (curved blades) and species already drawn with jose's photo cards are left as they are.
-const ATLAS_SPECIES = [ 'oleander', 'olive', 'echium', 'benjamina', 'plumeria', 'gypso' ];
+const ATLAS_SPECIES = [ 'echium', 'notro', 'calafate', 'chaura', 'sisyrinchium' ];
 const ATLAS_KINDS = [ 7, 0 ]; // leaf, petal
 // near-field mesh budgets (triangles) per LOD
 const LOD_TRIS = [ 150000, 40000, 10000 ];

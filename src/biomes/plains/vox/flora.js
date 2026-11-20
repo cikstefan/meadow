@@ -229,7 +229,7 @@ export class Flora {
 			}
 
 			// (thin photo leaves glow yellow-green when the sun is behind them)
-			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( mode === 'leaf' || mode === 'atlas' ? 0.9 : 0.55 ), float( 0.75 ) ) );
+			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( mode === 'leaf' || mode === 'atlas' ? 0.7 : 0.55 ), float( 0.4 ) ) );
 			// night: some flowers of some plants glow in their own colour, each its own strength
 			const emit = flowerGlow( albedo, kind.greaterThan( 1.5 ), vL, vI.z ).mul( U.night.mul( U.glow ) );
 			// self-shadowing inside the crown: leaves the capture found hidden deep inside get
@@ -240,7 +240,8 @@ export class Flora {
 			const isWood = kind.lessThan( 0.5 );
 			const Vv = normalize( cameraPosition.sub( vW ) );
 			const fres = float( 1.0 ).sub( dot( N, Vv ).abs() ).pow( 4.0 );
-			const specK = select( isWood, float( 0.04 ), float( mode === 'solid' ? 0.18 : 0.28 ).mul( fres.mul( 2.5 ).add( 0.35 ) ) ).mul( mix( 0.3, 1.0, relief ) );
+			// (kept modest: a leaf is glossy in spots, the whole crown never turns into a white mirror)
+			const specK = select( isWood, float( 0.03 ), float( mode === 'solid' ? 0.08 : 0.12 ).mul( fres.mul( 1.2 ).add( 0.3 ) ) ).mul( mix( 0.2, 1.0, relief ) );
 			return shadeFoliage( albedo, N, vW, mix( 0.3, 1.0, ao ), vI.x.mul( sunOcc ), transmit, specK, select( isWood, float( 0.0 ), float( 0.3 ) ), emit );
 
 		} )();

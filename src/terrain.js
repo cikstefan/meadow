@@ -94,7 +94,7 @@ export class Terrain {
 
 			// far: treat the canopy as a rough volume lit from above
 			const Nf = normalize( mix( N, vec3( 0, 1, 0 ), toCanopy.mul( 0.25 ) ) );
-			return shadeFoliage( albedo, Nf, P, ao, cloudShadow( xz ).mul( mix( 0.4, 1.0, toCanopy ) ), toCanopy.mul( mix( 0.75, 0.35, steep ) ), toCanopy.mul( 0.06 ).mul( sheen ), float( 0.4 ), emit );
+			return shadeFoliage( albedo, Nf, P, ao, ( BIOME.cloudShadowFrag ? BIOME.cloudShadowFrag( P ) : cloudShadow( xz ) ).mul( mix( 0.4, 1.0, toCanopy ) ), toCanopy.mul( mix( 0.75, 0.35, steep ) ), toCanopy.mul( 0.06 ).mul( sheen ), float( 0.4 ), emit );
 
 		} )();
 

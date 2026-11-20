@@ -69,13 +69,13 @@ export const shadowSunDir = uniform( new THREE.Vector3( 0, 1, 0 ) );
 export function syncShadowDir() { shadowSunDir.value.copy( Ls ); }
 
 // 0 (shadowed) .. 1 (lit) at a world position: a soft percentage-closer filter over a
-// rotated 12-tap Poisson disc ~2.5 texels (~18 cm) across, so leaf shadows have soft,
+// rotated 12-tap Poisson disc ~3 texels (~23 cm) in radius, so leaf shadows have soft,
 // smooth edges instead of stair-stepped texels. The disc's rotation comes from `rot`
 // (0..1): screen-space receivers pass a per-pixel noise that changes every frame (the
 // temporal upscaler averages it into a clean blur); others get a fixed per-place rotation.
 const DISC = [ [ - 0.326, - 0.406 ], [ - 0.840, - 0.074 ], [ - 0.696, 0.457 ], [ - 0.203, 0.621 ], [ 0.962, - 0.195 ], [ 0.473, - 0.480 ],
 	[ 0.519, 0.767 ], [ 0.185, - 0.893 ], [ 0.507, 0.064 ], [ 0.896, 0.412 ], [ - 0.322, - 0.933 ], [ - 0.792, - 0.598 ] ];
-const RADIUS = 2.5;
+const RADIUS = 3.2;
 export const shadowFrame = uniform( 0 );
 const shadowFn = Fn( ( [ P, rot ] ) => {
 

@@ -14,7 +14,7 @@ import { U } from '../../tsl/uniforms.js';
 import { makeVolumetricClouds } from '../../tsl/clouds3d.js';
 import { scrubFieldsTSL } from './scrubfields.js';
 import { VEG_RASTER } from './vox/mode.js';
-import { sunShadowAt } from './vox/sunshadow.js';
+import { sunShadowAt, frameRot } from './vox/sunshadow.js';
 import {
 	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, trailDist, gravelPatch, trailPointJS, mountainHeight, lakeDist,
 } from './terrain.js';
@@ -86,6 +86,9 @@ export const cloudShadowGround = ( xz ) => texture( csTex, xz.sub( csCenter ).di
 
 // clouds, and the plants' sun shadows on the ground (vox/sunshadow.js; 1 without them)
 const cloudShadow = Fn( ( [ xz ] ) => cloudShadowGround( xz ).mul( sunShadowAt( vec3( xz.x, terrainHeight( xz ).add( 0.06 ), xz.y ) ) ) );
+// (the ground's own pixels: the real position, and a shadow filter that turns every frame so the
+// temporal upscaler resolves it into a smooth soft edge)
+const cloudShadowFrag = Fn( ( [ P ] ) => cloudShadowGround( P.xz ).mul( sunShadowAt( P.add( vec3( 0, 0.06, 0 ) ), frameRot() ) ) );
 
 // CPU mirror of the weather map (0..1, high = clear), sampled where the sun ray meets the deck
 export function cloudFieldJS( x, z, y, offset ) {
@@ -202,7 +205,7 @@ export const PLAINS = {
 	name: 'Torres del Paine',
 	title: 'Torres del Paine — procedural WebGPU plains',
 	loading: 'walking in from Italiano…',
-	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, noGroundFlowers: VEG_RASTER, nightExposure: 1.25, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 12, // clouds and their shadows drift and churn together, time-lapsed with the 12-minute day (~48 m/s aloft)
+	terrainHeight, terrainHeightJS, fieldTall, fieldDry, fieldFlowers, fieldsJS, grassMask, cloudShadow, cloudShadowFrag, groundAlbedo, clouds: CLOUDS, postClouds: true, flowerGlowOwnColour: true, noGroundFlowers: VEG_RASTER, nightExposure: 1.25, cloudCoverage: cloudCoverageAt, cloudShadowAt, cloudTimeScale: 12, // clouds and their shadows drift and churn together, time-lapsed with the 12-minute day (~48 m/s aloft)
 	animals: false,
 	// the sun sets over the low south-western hills (not behind Paine Grande)
 	sunAzOffset: - 24,
