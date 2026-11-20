@@ -20,7 +20,7 @@ import { rockAtJS } from '../rockmask.js';
 import { cloudShadowGround } from '../index.js';
 import { VoxelRaster, cellHash, FADE_PX, flowerGlow } from './raster.js';
 import { plantWind } from './wind.js';
-import { sunShadowAt } from './sunshadow.js';
+import { sunShadowAt, frameRot } from './sunshadow.js';
 import { JOSE_SPECIES, pickJose, streamJoseMeshes, decodeLOD, scanInfo } from './jose.js';
 
 const TILE_M = 32, FAR = 1000, CAP = 96; // plants per tile (max)
@@ -199,23 +199,30 @@ export class Flora {
 			// plasticity: the scan's relief as bump (screen-space derivatives), cards cupped
 			// across their width; leaf veins and bark fissures catch the light
 			let N = N0;
+			// relief and cupping fade out with distance: beyond ~15 m they only alias into
+			// glints that crawl from frame to frame
+			const relief = smoothstep( 14.0, 3.0, length( cameraPosition.sub( vW ) ) );
 			if ( tex ) {
 
-				const T2 = texture( tex, uv() );
+				// (height from a blurrier mip: pixel-scale fissure detail differentiated per pixel
+				// turned into black/white zebra stripes that crawl as you move)
+				const T2 = texture( tex, uv() ).bias( 2.0 );
 				const hgt = mode === 'solid' ? T2.a : dot( T2.rgb, vec3( 0.3, 0.55, 0.15 ) );
 				const dPdx = dFdx( vW ), dPdy = dFdy( vW );
 				const R1 = cross( dPdy, N0 ), R2 = cross( N0, dPdx );
 				const det = dot( dPdx, R1 );
-				const k = mode === 'solid' ? 0.035 : 0.012;
-				const grad = R1.mul( dFdx( hgt ) ).add( R2.mul( dFdy( hgt ) ) ).mul( select( det.lessThan( 0.0 ), float( - 1.0 ), float( 1.0 ) ) ).mul( k );
-				N = normalize( N0.mul( det.abs() ).sub( grad ) );
+				const k = mode === 'solid' ? 0.008 : 0.006;
+				const grad = R1.mul( dFdx( hgt ) ).add( R2.mul( dFdy( hgt ) ) ).mul( select( det.lessThan( 0.0 ), float( - 1.0 ), float( 1.0 ) ) ).mul( k ).mul( relief );
+				// (tilt capped at ~35 deg: relief shades, it never flips a face away from the sun)
+				const gl = length( grad ).max( 1e-12 ), cap = det.abs().mul( 0.7 );
+				N = normalize( N0.mul( det.abs() ).sub( grad.mul( cap.div( gl ).min( 1.0 ) ) ) );
 				if ( mode !== 'solid' ) {
 
 					// tangent along u, then tilt the normal outward toward the card's edges
 					const duvx = dFdx( uv() ), duvy = dFdy( uv() );
 					const Tg = normalize( dPdx.mul( duvy.y ).sub( dPdy.mul( duvx.y ) ).add( 1e-6 ) );
 					const cu = fract( uv().x.mul( 4.0 ) ).sub( 0.5 );
-					N = normalize( N.add( Tg.mul( cu.mul( 0.9 ) ) ) );
+					N = normalize( N.add( Tg.mul( cu.mul( 0.9 ).mul( relief ) ) ) );
 
 				}
 
@@ -227,13 +234,13 @@ export class Flora {
 			const emit = flowerGlow( albedo, kind.greaterThan( 1.5 ), vL, vI.z ).mul( U.night.mul( U.glow ) );
 			// self-shadowing inside the crown: leaves the capture found hidden deep inside get
 			// little direct sun as well as little sky (rich shade under the outer shell)
-			const sunOcc = mix( 0.45, 1.0, ao ).mul( sunShadowAt( vW.add( N.mul( 0.04 ) ).add( U.sunDir.mul( 0.03 ) ) ) );
+			const sunOcc = mix( 0.45, 1.0, ao ).mul( sunShadowAt( vW.add( N.mul( 0.04 ) ).add( U.sunDir.mul( 0.03 ) ), frameRot() ) );
 			// wood: plain Lambert (round trunks, a real terminator); leaves: soft wrap, a glossy
 			// sun-coloured sheen strongest at grazing angles (Fresnel)
 			const isWood = kind.lessThan( 0.5 );
 			const Vv = normalize( cameraPosition.sub( vW ) );
 			const fres = float( 1.0 ).sub( dot( N, Vv ).abs() ).pow( 4.0 );
-			const specK = select( isWood, float( 0.04 ), float( mode === 'solid' ? 0.18 : 0.28 ).mul( fres.mul( 2.5 ).add( 0.35 ) ) );
+			const specK = select( isWood, float( 0.04 ), float( mode === 'solid' ? 0.18 : 0.28 ).mul( fres.mul( 2.5 ).add( 0.35 ) ) ).mul( mix( 0.3, 1.0, relief ) );
 			return shadeFoliage( albedo, N, vW, mix( 0.3, 1.0, ao ), vI.x.mul( sunOcc ), transmit, specK, select( isWood, float( 0.0 ), float( 0.3 ) ), emit );
 
 		} )();

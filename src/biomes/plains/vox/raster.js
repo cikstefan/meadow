@@ -24,7 +24,7 @@ import { U, applyFogFrom } from '../../../tsl/world.js';
 import { cloudShadowGround } from '../index.js';
 import { MAXLV, packPrototypes } from './voxelize.js';
 import { plantWind } from './wind.js';
-import { SH_N, SH_EXT, shadowAtomic, sunViewProj, shadowOn, updateSunCamera, sunShadowAt } from './sunshadow.js';
+import { SH_N, SH_EXT, shadowAtomic, sunViewProj, shadowOn, updateSunCamera, sunShadowAt, shadowFrame } from './sunshadow.js';
 
 const WG = 64, GROUPS = 8192, MAXVIS = 1 << 19, MAXVIS_SH = 1 << 18, GROUPS_SH = 4096;
 
@@ -337,6 +337,7 @@ export class VoxelRaster {
 		renderer.compute( this.shCull );
 		renderer.compute( this.shWalk );
 		shadowOn.value = U.sunDir.value.y > - 0.02 ? 1 : 0;
+		shadowFrame.value ++;
 
 	}
 

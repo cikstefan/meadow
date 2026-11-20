@@ -358,7 +358,7 @@ export class Grass {
 			const Wp = vec3( U.windDir.y.negate(), 0, U.windDir.x );
 
 			// sway: a travelling phase (moves with the gust field) + per-blade flutter
-			const phase = dot( root.xz, U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( seed.mul( 1.5 ) );
+			const phase = dot( root.xz, BIOME.id === 'plains' ? U.waveDir : U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( seed.mul( 1.5 ) );
 			const flutter = sin( U.time.mul( mix( ( G.flutterHz || [ 2.2, 4.2 ] )[ 0 ], ( G.flutterHz || [ 2.2, 4.2 ] )[ 1 ], seedF ) ).add( seedF.mul( 61.0 ) ) );
 			const wAmt = wind.mul( float( 1.0 ).add( sin( phase ).mul( 0.35 ) ) );
 			const wh = wAmt.mul( h );

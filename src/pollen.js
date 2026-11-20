@@ -20,6 +20,7 @@ export class Pollen {
 			right: uniform( new THREE.Vector3( 1, 0, 0 ) ),
 			up: uniform( new THREE.Vector3( 0, 1, 0 ) ),
 			ground: uniform( 0 ),
+			pxK: uniform( 0 ), // world size of one pixel per metre of distance (0: off)
 		};
 
 		const box = 22.0;
@@ -53,12 +54,16 @@ export class Pollen {
 			// only a fraction of the specks is shown (auto-weather varies it)
 			const shown = select( pcg( i.add( 3571 ) ).lessThan( U.particles ), float( 1.0 ), float( 0.0 ) );
 			const size = mix( 0.005, 0.013, pow( seed, 3.0 ) ).mul( shown );
-			const world = p.add( this.u.right.mul( positionLocal.x.mul( size ) ) ).add( this.u.up.mul( positionLocal.y.mul( size ) ) );
-
 			const d = length( p.sub( cameraPosition ) );
+			// (the plains: a speck smaller than a pixel would blink on and off as it drifts and the
+			// image jitters; it is drawn at least ~1.3 px wide instead, dimmed so its light is the same)
+			const sizeEff = BIOME.id === 'plains' ? size.max( this.u.pxK.mul( d ).mul( 0.65 ).mul( shown ) ) : size;
+			const energy = BIOME.id === 'plains' ? size.div( sizeEff.max( 1e-6 ) ).pow( 2.0 ) : float( 1.0 );
+			const world = p.add( this.u.right.mul( positionLocal.x.mul( sizeEff ) ) ).add( this.u.up.mul( positionLocal.y.mul( sizeEff ) ) );
+
 			const edge = clamp( float( 1.0 ).sub( length( rel.xz ).div( box * 0.5 ) ), 0, 1 );
 			// specks right in front of the lens would bloom into flashes: fade them out up close
-			vFade.assign( smoothstep( 0.0, 0.35, edge ).mul( ( BIOME.id === 'plains' ? smoothstep( 0.8, 2.2, d ) : smoothstep( 0.25, 0.9, d ) ) ) );
+			vFade.assign( energy.mul( smoothstep( 0.0, 0.35, edge ) ).mul( ( BIOME.id === 'plains' ? smoothstep( 0.8, 2.2, d ) : smoothstep( 0.25, 0.9, d ) ) ) );
 			vWorld.assign( p );
 			return world;
 

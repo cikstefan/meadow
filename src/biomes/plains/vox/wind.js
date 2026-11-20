@@ -27,7 +27,7 @@ export function plantWind( lp, H, xz, seed ) {
 	const t = U.time;
 	const grass = smoothstep( 1.2, 0.4, H ).toVar(); // 1 for grasses
 	// trunk / whole crown: slow lean on the travelling gusts
-	const gust = dot( xz, U.windDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( seed.mul( 6.0 ) );
+	const gust = dot( xz, U.waveDir ).mul( 0.42 ).sub( U.windPhase.mul( 0.42 ) ).add( seed.mul( 6.0 ) );
 	const lean = sin( gust ).mul( 0.35 ).add( sin( gust.mul( 0.37 ).add( 1.3 ) ).mul( 0.2 ) ).add( 0.55 );
 	const prim = wind.mul( lean ).mul( H ).mul( mix( 0.03, 0.16, grass ) ).mul( hn.mul( hn ) ).toVar();
 	// limbs: regional phase, stiffer near the trunk axis and low down

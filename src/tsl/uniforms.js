@@ -22,6 +22,7 @@ export const U = {
 	terrainFar: uniform( 560 ),
 
 	windDir: uniform( new THREE.Vector2( 1, 0.35 ).normalize() ),
+	waveDir: uniform( new THREE.Vector2( 1, 0.35 ).normalize() ), // heading of the travelling gust waves
 	windStrength: uniform( 0.55 ),
 	windSpeed: uniform( 3.2 ),
 	// integrated offsets (advanced on the CPU every frame) so wind / cloud speed

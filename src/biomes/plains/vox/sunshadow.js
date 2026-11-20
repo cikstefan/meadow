@@ -7,7 +7,7 @@
 // map keeps the caster nearest the sun.
 
 import * as THREE from 'three/webgpu';
-import { Fn, storage, uniform, float, vec2, vec4, uint, int, bitcast, clamp, smoothstep, max, min, select, If, Loop } from 'three/tsl';
+import { Fn, storage, uniform, float, vec2, vec4, uint, int, bitcast, clamp, smoothstep, max, min, select, If, Loop, cos, sin, fract, dot, floor, screenCoordinate } from 'three/tsl';
 
 export const SH_N = 2048, SH_EXT = 75; // texels, half extent (m) -> ~7 cm texels
 const attr = new THREE.StorageBufferAttribute( new Uint32Array( SH_N * SH_N ), 1 );
@@ -28,7 +28,7 @@ const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 //  - the map's centre moves in coarse steps of whole metres, not with every turn of the head;
 //  - the centre is snapped to whole texels in the sun's own frame (world-fixed grid).
 const Ls = new THREE.Vector3( 0, 1, 0 ), cs = new THREE.Vector3( 1e9, 0, 0 );
-const STEP_ANGLE = 0.005, STEP_CENTRE = 6; // radians (~0.3 deg), metres
+const STEP_ANGLE = 0, STEP_CENTRE = 6; // radians (0: the sun's direction follows smoothly), metres
 export const shadowMoved = { v: true }; // the map's frame changed this frame
 export function updateSunCamera( camera, sunDir ) {
 
@@ -68,9 +68,16 @@ export function updateSunCamera( camera, sunDir ) {
 export const shadowSunDir = uniform( new THREE.Vector3( 0, 1, 0 ) );
 export function syncShadowDir() { shadowSunDir.value.copy( Ls ); }
 
-// 0 (shadowed) .. 1 (lit) at a world position; soft 3x3 percentage-closer filter,
-// fading out toward the map's edges
-export const sunShadowAt = Fn( ( [ P ] ) => {
+// 0 (shadowed) .. 1 (lit) at a world position: a soft percentage-closer filter over a
+// rotated 12-tap Poisson disc ~2.5 texels (~18 cm) across, so leaf shadows have soft,
+// smooth edges instead of stair-stepped texels. The disc's rotation comes from `rot`
+// (0..1): screen-space receivers pass a per-pixel noise that changes every frame (the
+// temporal upscaler averages it into a clean blur); others get a fixed per-place rotation.
+const DISC = [ [ - 0.326, - 0.406 ], [ - 0.840, - 0.074 ], [ - 0.696, 0.457 ], [ - 0.203, 0.621 ], [ 0.962, - 0.195 ], [ 0.473, - 0.480 ],
+	[ 0.519, 0.767 ], [ 0.185, - 0.893 ], [ 0.507, 0.064 ], [ 0.896, 0.412 ], [ - 0.322, - 0.933 ], [ - 0.792, - 0.598 ] ];
+const RADIUS = 2.5;
+export const shadowFrame = uniform( 0 );
+const shadowFn = Fn( ( [ P, rot ] ) => {
 
 	const clip = sunViewProj.mul( vec4( P, 1.0 ) );
 	const uvp = clip.xy.mul( 0.5 ).add( 0.5 );
@@ -80,32 +87,32 @@ export const sunShadowAt = Fn( ( [ P ] ) => {
 	const lit = float( 1.0 ).toVar();
 	If( inside.and( shadowOn.greaterThan( 0.5 ) ), () => {
 
-		// 3x3-texel box filter convolved with the bilinear weights of the sample point
-		// (16 taps): the result varies smoothly as the receiver moves across texels, so
-		// shadow edges glide instead of stepping
-		const px = uvp.mul( SH_N ).sub( 0.5 );
-		const py = float( SH_N ).sub( uvp.y.mul( SH_N ) ).sub( 0.5 );
-		const fx = px.x.fract(), fy = py.fract();
-		const bx = px.x.floor(), by = py.floor();
+		const px = uvp.x.mul( SH_N ), py = float( SH_N ).sub( uvp.y.mul( SH_N ) );
+		const a = rot.mul( 6.2831853 );
+		const ca = cos( a ).mul( RADIUS ), sa = sin( a ).mul( RADIUS );
 		const bias = float( 0.00018 );
 		const acc = float( 0 ).toVar();
-		const wts = ( f ) => [ float( 1.0 ).sub( f ), float( 1.0 ), float( 1.0 ), f ];
-		const wx = wts( fx ), wy = wts( fy );
-		for ( let j = 0; j < 4; j ++ ) for ( let i = 0; i < 4; i ++ ) {
+		for ( const [ dx, dy ] of DISC ) {
 
-			const x = clamp( bx.add( i - 1 ), 0.0, SH_N - 1 ), y = clamp( by.add( j - 1 ), 0.0, SH_N - 1 );
+			const ox = ca.mul( dx ).sub( sa.mul( dy ) ), oy = sa.mul( dx ).add( ca.mul( dy ) );
+			const x = clamp( px.add( ox ).floor(), 0.0, SH_N - 1 ), y = clamp( py.add( oy ).floor(), 0.0, SH_N - 1 );
 			const s = bitcast( shadowRead.element( uint( y ).mul( uint( SH_N ) ).add( uint( x ) ) ), 'float' );
-			acc.addAssign( select( s.greaterThan( r.add( bias ) ), float( 0.0 ), wx[ i ].mul( wy[ j ] ) ) );
+			acc.addAssign( select( s.greaterThan( r.add( bias ) ), float( 0.0 ), float( 1.0 ) ) );
 
 		}
 
-		acc.divAssign( 9.0 );
 		const edge = smoothstep( 0.0, 0.08, min( min( uvp.x, uvp.y ), min( float( 1.0 ).sub( uvp.x ), float( 1.0 ).sub( uvp.y ) ) ) );
-		lit.assign( mix1( acc, edge ) );
+		lit.assign( mix1( acc.div( DISC.length ), edge ) );
 
 	} );
 	return lit;
 
 } );
+
+// a fixed rotation per ~3 cm of ground (stable: no temporal noise)
+const placeRot = ( P ) => fract( sin( dot( floor( P.xz.mul( 30.0 ) ), vec2( 12.9898, 78.233 ) ) ).mul( 43758.5453 ) );
+// per pixel, new every frame (fragment shaders only)
+export const frameRot = () => fract( fract( dot( screenCoordinate.xy.add( shadowFrame.mod( 64.0 ).mul( 5.588238 ) ), vec2( 0.06711056, 0.00583715 ) ) ).mul( 52.9829189 ) );
+export const sunShadowAt = ( P, rot = null ) => shadowFn( P, rot ?? placeRot( P ) );
 
 const mix1 = ( v, k ) => float( 1.0 ).sub( float( 1.0 ).sub( v ).mul( k ) );

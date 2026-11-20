@@ -1,11 +1,12 @@
 import * as THREE from 'three/webgpu';
-import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize, screenCoordinate, uint, floor, bitcast, mrt, output, velocity, min } from 'three/tsl';
+import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize, screenCoordinate, uint, ivec2, floor, bitcast, mrt, output, velocity, min } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { taau } from 'three/addons/tsl/display/TAAUNode.js';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import { computeHaltonOffsets } from 'three/addons/tsl/utils/TAAUtils.js';
 const HALTON = computeHaltonOffsets( 32 );
+const _dbs = new THREE.Vector2();
 import { unpackColor } from './biomes/plains/vox/raster.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
@@ -28,6 +29,7 @@ import { BIOME, BIOMES } from './biomes/index.js';
 import { Loader } from './ui/loader.js';
 // the plains' own look (night grade, bloom, exposure) never touches the meadow
 const PLAINS = BIOME.id === 'plains';
+const CLOUD_LOW = BIOME.clouds && BIOME.clouds.BASE !== undefined ? BIOME.clouds.BASE - 350 : 1e9; // below the cloud deck
 import { mountWorldSwitch } from './ui/worldswitch.js';
 
 const QUALITY = {
@@ -306,15 +308,42 @@ async function start() {
 				const wp = unproject( d );
 				const dir = normalize( unproject( float( 0.5 ) ).sub( post.camPos ) );
 				const dist = select( isSky, float( 1e9 ), length( wp.sub( post.camPos ) ) );
-				return BIOME.clouds.marchView( post.camPos, dir, dist );
+				if ( ! PLAINS ) return BIOME.clouds.marchView( post.camPos, dir, dist );
+				// (the plains: ground and plants below the deck can't be inside a cloud; such texels
+				// store what the sky behind them holds, flagged with alpha + 2, so neighbouring sky
+				// pixels can use them while the plants themselves get no cloud at all)
+				const low = isSky.not().and( wp.y.lessThan( CLOUD_LOW ) ).and( post.camPos.y.lessThan( CLOUD_LOW ) );
+				const m = BIOME.clouds.marchView( post.camPos, dir, select( low, float( 1e9 ), dist ) );
+				return select( low, vec4( m.rgb, m.a.add( 2.0 ) ), m );
 
 			} )(), null, null, { resolutionScale: 0.5 } );
 			// a small tent filter over the half-res march hides its per-pixel step jitter
 			const px = vec2( 1.5 ).div( screenSize );
 			const suv = uv();
-			const v = vol.sample( suv ).mul( 0.28 )
-				.add( vol.sample( suv.add( vec2( px.x, px.y ) ) ).mul( 0.18 ) ).add( vol.sample( suv.add( vec2( px.x.negate(), px.y ) ) ).mul( 0.18 ) )
-				.add( vol.sample( suv.add( vec2( px.x, px.y.negate() ) ) ).mul( 0.18 ) ).add( vol.sample( suv.sub( px ) ).mul( 0.18 ) );
+			// (point taps on the plains: a filtered tap would blend flagged and unflagged texels)
+			const tap = ( o ) => {
+
+				if ( ! PLAINS ) return vol.sample( suv.add( o ) );
+				const vs = vec2( vol.size() );
+				const t = vol.load( ivec2( suv.add( o ).mul( vs ).floor().clamp( vec2( 0 ), vs.sub( 1.0 ) ) ) );
+				return vec4( t.rgb, select( t.a.greaterThan( 1.5 ), t.a.sub( 2.0 ), t.a ) );
+
+			};
+			let v = tap( vec2( 0 ) ).mul( 0.28 )
+				.add( tap( vec2( px.x, px.y ) ).mul( 0.18 ) ).add( tap( vec2( px.x.negate(), px.y ) ).mul( 0.18 ) )
+				.add( tap( vec2( px.x, px.y.negate() ) ).mul( 0.18 ) ).add( tap( px.negate() ).mul( 0.18 ) );
+			if ( PLAINS ) {
+
+				// this pixel itself: plants and ground below the deck take no cloud (no half-res
+				// cloud colour bleeding onto leaf edges in front of the clouds)
+				const d0 = depthTex.sample( suv ).x;
+				const sky0 = reversedDepth ? d0.lessThan( 1e-7 ) : d0.greaterThan( 0.9999999 );
+				const q0 = post.invProj.mul( vec4( suv.x.mul( 2.0 ).sub( 1.0 ), float( 1.0 ).sub( suv.y.mul( 2.0 ) ), d0, 1.0 ) );
+				const w0 = post.camWorld.mul( vec4( q0.xyz.div( q0.w ), 1.0 ) ).xyz;
+				const low0 = sky0.not().and( w0.y.lessThan( CLOUD_LOW ) ).and( post.camPos.y.lessThan( CLOUD_LOW ) );
+				v = select( low0, vec4( 0, 0, 0, 1 ), v );
+
+			}
 			color = vec4( color.rgb.mul( v.a ).add( v.rgb ), 1.0 );
 
 		}
@@ -469,6 +498,9 @@ async function start() {
 		sky.az = az;
 		const wa = THREE.MathUtils.degToRad( settings.windAngle );
 		U.windDir.value.set( Math.cos( wa ), Math.sin( wa ) );
+		// (the travelling gust waves keep their heading while auto time turns the wind: turning
+		// them would swing every wave's phase by its distance from the world origin)
+		if ( ! ( PLAINS && settings.autoTime ) ) U.waveDir.value.copy( U.windDir.value );
 		U.windStrength.value = settings.wind;
 		U.windSpeed.value = 1.5 + settings.wind * 4;
 
@@ -803,6 +835,7 @@ async function start() {
 		farGrass.update( renderer, camera, null );
 		if ( settings.flowers && flowers.group.visible ) flowers.update( renderer, camera, controls.pusher );
 		pollen.update( camera, controls._groundY );
+		if ( PLAINS ) pollen.u.pxK.value = 2 * Math.tan( THREE.MathUtils.degToRad( camera.fov ) * 0.5 ) / Math.max( 1, renderer.getDrawingBufferSize( _dbs ).y * RS );
 
 		if ( Math.abs( camera.fov - ( baseFov + controls.fovKick ) ) > 0.01 ) {
 
