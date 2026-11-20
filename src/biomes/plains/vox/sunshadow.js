@@ -21,32 +21,52 @@ cam.coordinateSystem = THREE.WebGPUCoordinateSystem; // depth 0..1
 cam.updateProjectionMatrix();
 const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 
-// place the sun camera over the area in front of the viewer, snapped to whole texels
-// (a shadow that slides with the camera shimmers at its edges)
+// Place the sun camera over the area around and ahead of the viewer. Stability is what
+// matters (a shadow map that slides or turns by a fraction of a texel re-rasterizes every
+// leaf a little differently, and the shadows crawl and flicker):
+//  - the sun direction the map uses moves in small steps, not every frame;
+//  - the map's centre moves in coarse steps of whole metres, not with every turn of the head;
+//  - the centre is snapped to whole texels in the sun's own frame (world-fixed grid).
+const Ls = new THREE.Vector3( 0, 1, 0 ), cs = new THREE.Vector3( 1e9, 0, 0 );
+const STEP_ANGLE = 0.005, STEP_CENTRE = 6; // radians (~0.3 deg), metres
+export const shadowMoved = { v: true }; // the map's frame changed this frame
 export function updateSunCamera( camera, sunDir ) {
 
-	const fwd = tmp.set( 0, 0, - 1 ).applyQuaternion( camera.quaternion );
-	fwd.y = 0; fwd.normalize();
-	const c = tmp2.copy( camera.position ).addScaledVector( fwd, SH_EXT * 0.55 );
-	const L = sunDir.clone().normalize();
-	if ( L.y < 0.03 ) L.y = 0.03;
-	cam.position.copy( c ).addScaledVector( L, 800 );
-	cam.up.set( 0, 1, 0 );
-	if ( Math.abs( L.y ) > 0.99 ) cam.up.set( 0, 0, 1 );
-	cam.lookAt( c );
-	cam.updateMatrixWorld( true );
-	// snap: move the camera so the view-space origin lands on a texel
+	shadowMoved.v = false;
+	const L = tmp.copy( sunDir ).normalize();
+	if ( L.y < 0.03 ) { L.y = 0.03; L.normalize(); }
+	if ( L.angleTo( Ls ) > STEP_ANGLE ) { Ls.copy( L ); shadowMoved.v = true; }
+	const fwd = tmp2.set( 0, 0, - 1 ).applyQuaternion( camera.quaternion );
+	fwd.y = 0; if ( fwd.lengthSq() < 1e-6 ) fwd.set( 0, 0, - 1 ); fwd.normalize();
+	const want = camera.position.clone().addScaledVector( fwd, SH_EXT * 0.4 );
+	want.y = camera.position.y;
+	if ( Math.hypot( want.x - cs.x, want.z - cs.z ) > STEP_CENTRE || Math.abs( want.y - cs.y ) > STEP_CENTRE ) {
+
+		cs.set( Math.round( want.x / STEP_CENTRE ) * STEP_CENTRE, Math.round( want.y / STEP_CENTRE ) * STEP_CENTRE, Math.round( want.z / STEP_CENTRE ) * STEP_CENTRE );
+		shadowMoved.v = true;
+
+	}
+
+	// the sun's frame: right / up / back(L), built from the stepped direction only
+	const up0 = Math.abs( Ls.y ) > 0.99 ? new THREE.Vector3( 0, 0, 1 ) : new THREE.Vector3( 0, 1, 0 );
+	const right = new THREE.Vector3().crossVectors( up0, Ls ).normalize();
+	const up = new THREE.Vector3().crossVectors( Ls, right ).normalize();
+	// snap the centre to whole texels on a grid fixed in the sun's frame
 	const texel = SH_EXT * 2 / SH_N;
-	const v = c.clone().applyMatrix4( cam.matrixWorldInverse );
-	const dx = v.x - Math.round( v.x / texel ) * texel, dy = v.y - Math.round( v.y / texel ) * texel;
-	const right = new THREE.Vector3().setFromMatrixColumn( cam.matrixWorld, 0 ), up = new THREE.Vector3().setFromMatrixColumn( cam.matrixWorld, 1 );
-	cam.position.addScaledVector( right, dx ).addScaledVector( up, dy );
+	const cr = Math.round( cs.dot( right ) / texel ) * texel, cu = Math.round( cs.dot( up ) / texel ) * texel, cl = cs.dot( Ls );
+	const c = new THREE.Vector3().addScaledVector( right, cr ).addScaledVector( up, cu ).addScaledVector( Ls, cl );
+	cam.position.copy( c ).addScaledVector( Ls, 800 );
+	cam.quaternion.setFromRotationMatrix( new THREE.Matrix4().makeBasis( right, up, Ls ) );
 	cam.updateMatrixWorld( true );
 	cam.updateProjectionMatrix();
 	sunViewProj.value.multiplyMatrices( cam.projectionMatrix, cam.matrixWorldInverse );
 	return cam;
 
 }
+
+// the direction the map was made with (receivers offset along it)
+export const shadowSunDir = uniform( new THREE.Vector3( 0, 1, 0 ) );
+export function syncShadowDir() { shadowSunDir.value.copy( Ls ); }
 
 // 0 (shadowed) .. 1 (lit) at a world position; soft 3x3 percentage-closer filter,
 // fading out toward the map's edges
@@ -60,19 +80,28 @@ export const sunShadowAt = Fn( ( [ P ] ) => {
 	const lit = float( 1.0 ).toVar();
 	If( inside.and( shadowOn.greaterThan( 0.5 ) ), () => {
 
+		// 3x3-texel box filter convolved with the bilinear weights of the sample point
+		// (16 taps): the result varies smoothly as the receiver moves across texels, so
+		// shadow edges glide instead of stepping
 		const px = uvp.mul( SH_N ).sub( 0.5 );
+		const py = float( SH_N ).sub( uvp.y.mul( SH_N ) ).sub( 0.5 );
+		const fx = px.x.fract(), fy = py.fract();
+		const bx = px.x.floor(), by = py.floor();
 		const bias = float( 0.00018 );
 		const acc = float( 0 ).toVar();
-		for ( let j = - 1; j <= 1; j ++ ) for ( let i = - 1; i <= 1; i ++ ) {
+		const wts = ( f ) => [ float( 1.0 ).sub( f ), float( 1.0 ), float( 1.0 ), f ];
+		const wx = wts( fx ), wy = wts( fy );
+		for ( let j = 0; j < 4; j ++ ) for ( let i = 0; i < 4; i ++ ) {
 
-			const x = clamp( px.x.add( i ).round(), 0.0, SH_N - 1 ), y = clamp( float( SH_N - 1 ).sub( px.y.add( j ).round() ), 0.0, SH_N - 1 );
+			const x = clamp( bx.add( i - 1 ), 0.0, SH_N - 1 ), y = clamp( by.add( j - 1 ), 0.0, SH_N - 1 );
 			const s = bitcast( shadowRead.element( uint( y ).mul( uint( SH_N ) ).add( uint( x ) ) ), 'float' );
-			acc.addAssign( select( s.greaterThan( r.add( bias ) ), float( 0.0 ), float( 1.0 ) ) );
+			acc.addAssign( select( s.greaterThan( r.add( bias ) ), float( 0.0 ), wx[ i ].mul( wy[ j ] ) ) );
 
 		}
 
+		acc.divAssign( 9.0 );
 		const edge = smoothstep( 0.0, 0.08, min( min( uvp.x, uvp.y ), min( float( 1.0 ).sub( uvp.x ), float( 1.0 ).sub( uvp.y ) ) ) );
-		lit.assign( mix1( acc.div( 9.0 ), edge ) );
+		lit.assign( mix1( acc, edge ) );
 
 	} );
 	return lit;

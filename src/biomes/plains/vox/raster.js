@@ -90,6 +90,7 @@ export class VoxelRaster {
 		this.slots = slots;
 		// pixel buffers sized for the largest drawing buffer this screen can have
 		const dpr = Math.min( window.devicePixelRatio || 1, 2 );
+		this.resScale = 1; this.jitter = null; // set by the post pipeline (temporal upscaling)
 		this.maxPix = Math.ceil( Math.max( screen.width, window.innerWidth ) * dpr ) * Math.ceil( Math.max( screen.height, window.innerHeight ) * dpr );
 
 		this.instAttr = new THREE.StorageBufferAttribute( new Float32Array( slots * 8 ), 4 );
@@ -244,8 +245,9 @@ export class VoxelRaster {
 					const m = max( ext.x, max( ext.y, ext.z ) ).div( SH_EXT );
 					If( clip.x.abs().lessThan( m.add( 1.0 ) ).and( clip.y.abs().lessThan( m.add( 1.0 ) ) ), () => {
 
-						// voxels about one shadow texel
-						const px = max( ext.x, ext.y ).div( texel );
+						// voxels about two shadow texels, splatted conservatively (below): as the
+						// leaves sway, the map's coverage stays solid instead of sparkling
+						const px = max( ext.x, ext.y ).div( texel * 2 );
 						const lv = clamp( log2( b1.w ).sub( ceil( log2( max( px, 1.0 ) ) ) ), 0.0, b0.w.sub( 1.0 ) );
 						const k = atomicAdd( shCnt.element( 0 ), uint( 1 ) );
 						If( k.lessThan( uint( MAXVIS_SH ) ), () => {
@@ -280,14 +282,16 @@ export class VoxelRaster {
 				const cs = cos( B.y ), sn = sin( B.y );
 				const rot = ( v ) => vec3( v.x.mul( cs ).sub( v.z.mul( sn ) ), v.y, v.x.mul( sn ).add( v.z.mul( cs ) ) );
 				const W0 = vec3( 0.96, 0, - 0.28 );
-				const foot = clamp( ceil( max( vsz.x.mul( A.w ), vsz.y.mul( B.x ) ).div( texel ).sub( 0.2 ) ), 1.0, 4.0 );
-				const fi = uint( foot );
+				// a voxel's extent in texels; it covers every texel it overlaps by more than a
+				// quarter (at most 4x4)
+				const half = max( vsz.x.mul( A.w ), vsz.y.mul( B.x ) ).div( texel ).mul( 0.5 ).min( 2.0 ).toVar();
 				Loop( { start: lid, end: count, type: 'uint', condition: '<', update: uint( WG ) }, ( { i: vi } ) => {
 
 					const base = off.add( vi ).mul( 3 );
 					const w0 = vox.element( base ), w1 = vox.element( base.add( 1 ) );
 					const cov = float( w1.shiftRight( uint( 24 ) ) ).div( 255.0 );
-					const h = pcg( s.mul( uint( 2654435761 ) ).bitXor( vi.mul( uint( 40503 ) ) ).add( lv ) );
+					// (keyed to the plant's own seed, not its slot: the pattern survives tile streaming)
+					const h = pcg( uint( seed.mul( 16777216.0 ) ).mul( uint( 2654435761 ) ).bitXor( vi.mul( uint( 40503 ) ) ).add( lv ) );
 					If( h.lessThan( cov ), () => {
 
 						const g = vec3( float( w0.bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 8 ) ).bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 16 ) ).bitAnd( uint( 255 ) ) ) );
@@ -298,10 +302,12 @@ export class VoxelRaster {
 						const clip = sunViewProj.mul( vec4( P, 1.0 ) );
 						const key = bitcast( float( 1.0 ).sub( clip.z ), 'uint' );
 						const sx = clip.x.mul( 0.5 ).add( 0.5 ).mul( SH_N ), sy = float( 0.5 ).sub( clip.y.mul( 0.5 ) ).mul( SH_N );
-						const x0 = floor( sx.sub( foot.sub( 1.0 ).mul( 0.5 ) ) ), y0 = floor( sy.sub( foot.sub( 1.0 ).mul( 0.5 ) ) );
-						Loop( { start: uint( 0 ), end: fi, type: 'uint', condition: '<', name: 'oy' }, ( { oy } ) => {
+						const x0 = floor( sx.sub( half ).add( 0.25 ) ), y0 = floor( sy.sub( half ).add( 0.25 ) );
+						const nx = uint( clamp( floor( sx.add( half ).sub( 0.25 ) ).sub( x0 ).add( 1.0 ), 1.0, 4.0 ) );
+						const ny = uint( clamp( floor( sy.add( half ).sub( 0.25 ) ).sub( y0 ).add( 1.0 ), 1.0, 4.0 ) );
+						Loop( { start: uint( 0 ), end: ny, type: 'uint', condition: '<', name: 'oy' }, ( { oy } ) => {
 
-							Loop( { start: uint( 0 ), end: fi, type: 'uint', condition: '<', name: 'ox' }, ( { ox } ) => {
+							Loop( { start: uint( 0 ), end: nx, type: 'uint', condition: '<', name: 'ox' }, ( { ox } ) => {
 
 								const x = x0.add( float( ox ) ), y = y0.add( float( oy ) );
 								If( x.greaterThanEqual( 0.0 ).and( y.greaterThanEqual( 0.0 ) ).and( x.lessThan( SH_N ) ).and( y.lessThan( SH_N ) ), () => {
@@ -401,7 +407,8 @@ export class VoxelRaster {
 					const w0 = vox.element( base ), w1 = vox.element( base.add( 1 ) );
 					const cov = float( w1.shiftRight( uint( 24 ) ) ).div( 255.0 );
 					// partial coverage drawn stochastically (stable per plant and voxel)
-					const h = pcg( s.mul( uint( 2654435761 ) ).bitXor( vi.mul( uint( 40503 ) ) ).add( lv ) );
+					// (keyed to the plant's own seed, not its slot: the pattern survives tile streaming)
+					const h = pcg( uint( seed.mul( 16777216.0 ) ).mul( uint( 2654435761 ) ).bitXor( vi.mul( uint( 40503 ) ) ).add( lv ) );
 					If( h.lessThan( cov ), () => {
 
 						const g = vec3( float( w0.bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 8 ) ).bitAnd( uint( 255 ) ) ), float( w0.shiftRight( uint( 16 ) ).bitAnd( uint( 255 ) ) ) );
@@ -538,12 +545,18 @@ export class VoxelRaster {
 
 	render( renderer, camera ) {
 
+		// (at the scene pass's reduced resolution when the plains upscale temporally, and with
+		// the same sub-pixel jitter, so the upscaler accumulates the voxels like everything else)
 		const sz = renderer.getDrawingBufferSize( new THREE.Vector2() );
+		sz.set( Math.floor( sz.x * this.resScale ), Math.floor( sz.y * this.resScale ) );
 		if ( sz.x * sz.y > this.maxPix ) return false;
 		this.u.size.value.copy( sz );
 		this.u.focal.value = sz.y * 0.5 / Math.tan( THREE.MathUtils.degToRad( camera.fov ) * 0.5 );
 		camera.updateMatrixWorld();
+		const j = this.jitter ? this.jitter() : null;
+		if ( j ) camera.setViewOffset( sz.x, sz.y, j[ 0 ], j[ 1 ], sz.x, sz.y );
 		this.u.viewProj.value.multiplyMatrices( camera.projectionMatrix, camera.matrixWorldInverse );
+		if ( j ) camera.clearViewOffset();
 		this.u.eye.value.copy( camera.position );
 		this.renderShadow( renderer, camera ); // first: this frame's voxels receive it too
 		renderer.compute( this.clear );

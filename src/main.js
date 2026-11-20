@@ -2,7 +2,10 @@ import * as THREE from 'three/webgpu';
 import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize, screenCoordinate, uint, floor, bitcast, mrt, output, velocity, min } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
-import { traa } from 'three/addons/tsl/display/TRAANode.js';
+import { taau } from 'three/addons/tsl/display/TAAUNode.js';
+import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
+import { computeHaltonOffsets } from 'three/addons/tsl/utils/TAAUtils.js';
+const HALTON = computeHaltonOffsets( 32 );
 import { unpackColor } from './biomes/plains/vox/raster.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
@@ -32,11 +35,14 @@ const QUALITY = {
 	// blades/area = dense near field, mid/midArea, far/farArea out to the hills
 	low: { blades: 576, area: 56, mid: 512, midArea: 150, far: 384, farArea: 360, flowers: 224, dpr: 1, lod: 0.8 },
 	medium: { blades: 896, area: 76, mid: 704, midArea: 190, far: 512, farArea: 400, flowers: 304, dpr: 1.25, lod: 1 },
-	high: { blades: 1280, area: 96, mid: 896, midArea: 240, far: PLAINS ? 768 : 640, farArea: PLAINS ? 620 : 440, flowers: 384, dpr: 1.5, lod: 1.15 },
-	ultra: { blades: 1664, area: 120, mid: 1152, midArea: 300, far: PLAINS ? 960 : 768, farArea: PLAINS ? 760 : 500, flowers: 480, dpr: 2, lod: 1.4 },
+	high: { blades: 1280, area: 96, mid: PLAINS ? 800 : 896, midArea: 240, far: PLAINS ? 640 : 640, farArea: PLAINS ? 620 : 440, flowers: 384, dpr: 1.5, lod: 1.15 },
+	ultra: { blades: 1664, area: 120, mid: PLAINS ? 1024 : 1152, midArea: 300, far: PLAINS ? 800 : 768, farArea: PLAINS ? 760 : 500, flowers: 480, dpr: 2, lod: 1.4 },
 };
 
 const params = new URLSearchParams( location.search );
+// the plains render the scene at a fraction of the screen's resolution and rebuild full
+// resolution over frames (temporal upscaling); ?rs=1 renders at native resolution
+const RS = PLAINS ? Math.min( 1, Math.max( 0.4, parseFloat( params.get( 'rs' ) ?? '0.7' ) || 0.7 ) ) : 1;
 const isMobile = /Android|iPhone|iPad|iPod/i.test( navigator.userAgent ) || ( navigator.maxTouchPoints > 1 && window.innerWidth < 1100 );
 
 const D = BIOME.defaults;
@@ -203,16 +209,22 @@ async function start() {
 		const Rn = q.area * 0.5, Rm = q.midArea * 0.5, Rf = q.farArea * 0.5;
 		const bandN = [ Rn * 0.62, Rn * 0.96 ], bandM = [ Rm * 0.6, Rm * 0.96 ];
 		const nearSp = q.area / q.blades;
-		grass = new Grass( { bladesPerAxis: q.blades, area: q.area, lodScale: q.lod, fadeOut: bandN } );
+		// (the plains spend fewer triangles with distance: a blade 20 m away is a few pixels
+		// tall, so it gets fewer segments, and the far rings draw single wider blades)
+		const L = q.lod;
+		grass = new Grass( { bladesPerAxis: q.blades, area: q.area, lodScale: q.lod, fadeOut: bandN,
+			lods: PLAINS ? [ { segments: 12, maxDistance: 6.5 * L }, { segments: 5, maxDistance: 15 * L }, { segments: 2, maxDistance: Infinity } ] : null } );
 		midGrass = new Grass( {
 			bladesPerAxis: q.mid, area: q.midArea, renderOrder: 3, fadeIn: bandN, fadeOut: bandM,
 			widthScale: Math.sqrt( ( q.midArea / q.mid ) / nearSp ) * 1.6, aoMin: 0.32, groundBlend: 0.1,
-			lods: [ { segments: 4, maxDistance: Rn * 1.4 }, { segments: 2, maxDistance: Infinity } ],
+			lods: PLAINS ? [ { segments: 3, maxDistance: Rn * 1.1 }, { segments: 2, maxDistance: Rm * 0.75 }, { segments: 1, maxDistance: Infinity } ]
+				: [ { segments: 4, maxDistance: Rn * 1.4 }, { segments: 2, maxDistance: Infinity } ],
 		} );
 		farGrass = new Grass( {
 			bladesPerAxis: q.far, area: q.farArea, renderOrder: 5, fadeIn: bandM, fadeOut: [ Rf * 0.7, Rf * 0.97 ],
-			widthScale: Math.sqrt( ( q.farArea / q.far ) / nearSp ) * 1.7, aoMin: 0.45, groundBlend: 0.2,
-			lods: [ { segments: 2, maxDistance: Rm * 1.3 }, { segments: 1, maxDistance: Infinity } ],
+			widthScale: Math.sqrt( ( q.farArea / q.far ) / nearSp ) * ( PLAINS ? 2.1 : 1.7 ), aoMin: 0.45, groundBlend: 0.2,
+			lods: PLAINS ? [ { segments: 1, maxDistance: Infinity } ]
+				: [ { segments: 2, maxDistance: Rm * 1.3 }, { segments: 1, maxDistance: Infinity } ],
 		} );
 		for ( const g of grassRings() ) {
 
@@ -258,7 +270,7 @@ async function start() {
 		// (the plains resolve edges with TAA instead of MSAA: cheaper, and TAA needs single-sample depth)
 		const scenePass = PLAINS ? pass( scene, camera, { samples: 0 } ) : pass( scene, camera );
 		// the plains: a velocity buffer for temporal anti-aliasing
-		if ( PLAINS ) scenePass.setMRT( mrt( { output, velocity } ) );
+		if ( PLAINS ) { scenePass.setMRT( mrt( { output, velocity } ) ); scenePass.setResolutionScale( RS ); }
 		let color = scenePass.getTextureNode( 'output' );
 		if ( PLAINS ) {
 
@@ -310,6 +322,7 @@ async function start() {
 		// wherever its depth is nearer than the scene's
 		const vr = extras && extras.vox;
 		// (the voxel cull tests plants against this pass's depth from the frame before)
+		if ( vr ) vr.resScale = RS;
 		if ( vr && reversedDepth ) vr.setOcclusionDepth( scenePass.getTexture( 'depth' ) );
 		if ( vr ) {
 
@@ -331,18 +344,24 @@ async function start() {
 
 		if ( PLAINS ) {
 
+			// everything above is composed at the reduced resolution, then temporal upscaling
+			// (TAAU) accumulates the jittered frames into a full-resolution image — anti-aliasing
+			// and upscaling in one pass — and a light contrast-adaptive sharpen restores crispness
+			const low = rtt( color, null, null, { resolutionScale: RS } );
+			const depthTex = scenePass.getTextureNode( 'depth' );
+			const up = taau( low, depthTex, scenePass.getTextureNode( 'velocity' ), camera );
+			post.taau = up;
+			if ( vr ) vr.jitter = () => { const h = HALTON[ up._jitterIndex % HALTON.length ]; return [ h[ 0 ] - 0.5, h[ 1 ] - 0.5 ]; }; // the voxels jitter with the scene (this frame's offset)
+			color = RS < 0.99 ? sharpen( up, 0.75 ) : up;
 			// distance softening: real air smears what is far (and the haze takes its colour),
 			// so the far plain and ridges are not razor-sharp
-			const dD = scenePass.getTextureNode( 'depth' ).sample( uv() ).x;
+			const dD = depthTex.sample( uv() ).x;
 			const vv2 = post.invProj.mul( vec4( uv().x.mul( 2.0 ).sub( 1.0 ), float( 1.0 ).sub( uv().y.mul( 2.0 ) ), dD, 1.0 ) );
 			const dist2 = length( vv2.xyz.div( vv2.w ) );
-			const soft = gaussianBlur( color, 1, 2.0 );
+			const soft = gaussianBlur( up, 1, 2.0 );
 			soft.resolutionScale = 0.5;
 			const skyPx = reversedDepth ? dD.lessThan( 1e-7 ) : dD.greaterThan( 0.9999999 );
 			color = vec4( mix( color.rgb, soft.rgb, select( skyPx, float( 0.0 ), smoothstep( 900.0, 9000.0, dist2 ).mul( 0.5 ) ) ), 1.0 );
-			// temporal anti-aliasing: leaf and blade edges, voxel dither and specular glints resolve
-			// smoothly over frames
-			color = traa( color, scenePass.getTextureNode( 'depth' ), scenePass.getTextureNode( 'velocity' ), camera );
 
 		}
 
