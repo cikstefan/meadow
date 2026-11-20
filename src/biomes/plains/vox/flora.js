@@ -199,7 +199,10 @@ export class Flora {
 			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( mode === 'leaf' || mode === 'atlas' ? 0.9 : 0.55 ), float( 0.75 ) ) );
 			// night: some flowers of some plants glow in their own colour, each its own strength
 			const emit = flowerGlow( albedo, kind.greaterThan( 1.5 ), vL, vI.z ).mul( U.night.mul( U.glow ) );
-			return shadeFoliage( albedo, N, vW, mix( 0.35, 1.0, ao ), vI.x, transmit, float( 0.12 ), float( 0.4 ), emit );
+			// self-shadowing inside the crown: leaves the capture found hidden deep inside get
+			// little direct sun as well as little sky (rich shade under the outer shell)
+			const sunOcc = mix( 0.18, 1.0, ao.pow( 1.5 ) );
+			return shadeFoliage( albedo, N, vW, mix( 0.3, 1.0, ao ), vI.x.mul( sunOcc ), transmit, float( 0.12 ), float( 0.4 ), emit );
 
 		} )();
 		this.materials.set( key, mat );

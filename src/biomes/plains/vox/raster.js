@@ -279,8 +279,8 @@ export class VoxelRaster {
 								const L = U.sunDir;
 								const V = normalize( u.eye.sub( P ) );
 								const NdL = dot( N, L );
-								const aoM = mix( 0.35, 1.0, ao );
-								const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) );
+								const aoM = mix( 0.3, 1.0, ao );
+								const sunVis = shadow.mul( smoothstep( - 0.04, 0.06, L.y ) ).mul( mix( 0.18, 1.0, ao.pow( 1.5 ) ) );
 								const near = smoothstep( 160.0, 35.0, dist );
 								const diff = clamp( NdL.add( 0.4 ).div( 1.4 ), 0.0, 1.0 );
 								const ambient = mix( U.groundAmb, U.skyAmb, N.y.mul( 0.5 ).add( 0.5 ) ).mul( aoM );

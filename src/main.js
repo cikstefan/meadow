@@ -105,7 +105,8 @@ async function start() {
 	await Loader.stage( 'world' );
 	if ( ! renderer.backend.isWebGPUBackend ) return fail( 'WebGPU adapter unavailable (fell back to WebGL). Compute + indirect draw need a WebGPU device.' );
 
-	renderer.toneMapping = THREE.ACESFilmicToneMapping;
+	// (the plains: AgX, natural greens and a soft highlight roll-off; the meadow keeps ACES)
+	renderer.toneMapping = PLAINS ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
 	renderer.toneMappingExposure = settings.exposure;
 	renderer.setClearColor( 0x000000 );
 	document.body.appendChild( renderer.domElement );
@@ -334,6 +335,20 @@ async function start() {
 
 		if ( settings.painterly ) col = painterly( col );
 
+		// daylight grade (plains only): richer but natural greens, faintly cool shadows and
+		// warm highlights, a gentle S-curve (the look of a bright summer day photographed)
+		if ( PLAINS ) {
+
+			const day = float( 1.0 ).sub( post.night );
+			const l0 = dot( col, vec3( 0.2126, 0.7152, 0.0722 ) );
+			const sat = mix( vec3( l0 ), col, 1.32 ).max( 0.0 );
+			const tone = mix( vec3( 0.93, 1.0, 1.06 ), vec3( 1.04, 1.01, 0.95 ), smoothstep( 0.05, 0.6, l0 ) );
+			// S-curve around mid grey in log space: deeper shadows, brighter leaf tops
+			const curve = l0.add( 1e-4 ).div( 0.16 ).pow( 0.2 ).clamp( 0.45, 1.6 );
+			col = mix( col, sat.mul( tone ).mul( curve ), day.mul( 0.85 ) );
+
+		}
+
 		// night grade (plains only): moonlit midnight blue that stays vivid — colours are
 		// pushed toward blue rather than greyed, the glowing flowers keep their own hues,
 		// and under cloud the blacks are lifted (scattered light, more dynamic range)
@@ -376,7 +391,7 @@ async function start() {
 		// dusk and night keep their exposure (night is lifted for readability)
 		const day = THREE.MathUtils.smoothstep( el, 4, 16 );
 		// eyes adapt at night (more under cloud): the moonlit plains stay readable
-		renderer.toneMappingExposure = settings.exposure * ( 1 + U.night.value * ( PLAINS ? BIOME.nightExposure * ( 1 + settings.clouds * 0.6 ) : 0.7 ) ) * THREE.MathUtils.lerp( 1, 0.8, day );
+		renderer.toneMappingExposure = settings.exposure * ( PLAINS ? 1.18 : 1 ) * ( 1 + U.night.value * ( PLAINS ? BIOME.nightExposure * ( 1 + settings.clouds * 0.6 ) : 0.7 ) ) * THREE.MathUtils.lerp( 1, 0.8, day );
 		U.dry.value = settings.dryPatches;
 		U.glow.value = settings.flowerGlow;
 		U.mist.value = settings.mist;
