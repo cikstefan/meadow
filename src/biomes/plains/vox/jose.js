@@ -17,18 +17,16 @@ const fileUrl = ( name ) => FILES[ `../../../assets/plains/vox/jose-${ name }.wa
 
 // placement: weight in the mix, drift scale (m: each species owns patches), wind lean
 export const JOSE_SPECIES = {
-	oleander: { w: 1.0, drift: 70, lean: 0.18 },
-	gypso: { w: 0.8, drift: 35, lean: 0.05 },
-	clero: { w: 0.55, drift: 45, lean: 0.1 },
-	stipa: { w: 1.6, drift: 60, lean: 0.08 },
-	hakone: { w: 0.9, drift: 50, lean: 0.06 },
-	festuca: { w: 1.3, drift: 55, lean: 0.05 },
-	benjamina: { w: 0.16, drift: 130, lean: 0.25 },
-	plumeria: { w: 0.14, drift: 150, lean: 0.2 },
-	cotinus: { w: 0.22, drift: 100, lean: 0.2 },
-	olive: { w: 0.2, drift: 170, lean: 0.3 },
-	echium: { w: 0.45, drift: 70, lean: 0.12 },
-	mugo: { w: 0.3, drift: 110, lean: 0.35 },
+	// the Torres del Paine scrub and grassland (jose's Patagonia library). `windBaked`: the
+	// plant grew under jose's westerly (windLean), leaning toward its local +x; it is turned
+	// so that lean points downwind on the plains (PREVAILING_WIND), give or take a little
+	notro: { w: 0.55, drift: 95, lean: 0, windBaked: true },
+	calafate: { w: 0.9, drift: 60, lean: 0, windBaked: true },
+	matanegra: { w: 1.2, drift: 75, lean: 0, windBaked: true },
+	chaura: { w: 0.75, drift: 45, lean: 0, windBaked: true },
+	coiron: { w: 1.7, drift: 60, lean: 0, windBaked: true },
+	sisyrinchium: { w: 0.8, drift: 35, lean: 0.03 },
+	echium: { w: 0.35, drift: 80, lean: 0.12 }, // pride of Madeira
 };
 
 const fetchBuf = ( url ) => fetch( url ).then( ( r ) => r.arrayBuffer() ).then( ( b ) => new Uint8Array( b ) );
@@ -75,8 +73,11 @@ export async function loadJose( onProgress ) {
 
 	await MeshoptDecoder.ready;
 	const species = [ ...new Set( meta.map( ( m ) => m.sp ) ) ];
-	const bufs = await fetchAll( species.map( ( sp ) => fileUrl( sp + '.vox' ) ), onProgress );
+	// the voxels and the near-field meshes both load behind the loader (no voxel-only first
+	// seconds on the plain)
+	const bufs = await fetchAll( [ ...species.map( ( sp ) => fileUrl( sp + '.vox' ) ), ...species.map( ( sp ) => fileUrl( sp + '.mesh' ) ) ], onProgress );
 	const vox = Object.fromEntries( species.map( ( sp, i ) => [ sp, bufs[ i ] ] ) );
+	const meshBufs = Object.fromEntries( species.map( ( sp, i ) => [ sp, bufs[ species.length + i ] ] ) );
 	const protos = meta.map( ( m ) => {
 
 		const src = vox[ m.sp ].subarray( m.vox.off, m.vox.off + m.vox.len );
@@ -95,7 +96,7 @@ export async function loadJose( onProgress ) {
 	} );
 	const bySp = {};
 	protos.forEach( ( p, i ) => ( bySp[ p.sp ] = bySp[ p.sp ] || [] ).push( i ) );
-	return { protos, bySp, species };
+	return { protos, bySp, species, meshBufs };
 
 }
 
@@ -107,7 +108,7 @@ export async function streamJoseMeshes( jose, onReady ) {
 		let buf;
 		try {
 
-			buf = await fetchBuf( fileUrl( sp + '.mesh' ) );
+			buf = jose.meshBufs && jose.meshBufs[ sp ] ? jose.meshBufs[ sp ] : await fetchBuf( fileUrl( sp + '.mesh' ) );
 
 		} catch ( e ) {
 

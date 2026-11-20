@@ -17,6 +17,7 @@ import { U, shadeFoliage } from '../../../tsl/world.js';
 import { rng } from '../grow.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS } from '../terrain.js';
 import { rockAtJS } from '../rockmask.js';
+import { PREVAILING_WIND } from '../layout.js';
 import { cloudShadowGround } from '../index.js';
 import { VoxelRaster, cellHash, FADE_PX, flowerGlow } from './raster.js';
 import { plantWind } from './wind.js';
@@ -47,8 +48,10 @@ function tilePlants( tx, tz, jose ) {
 		const list = jose.bySp[ sp ];
 		const p = list[ Math.floor( r() * list.length ) ];
 		const lean = JOSE_SPECIES[ sp ].lean * ( 0.4 + 1.2 * r() );
+		// wind-grown plants face their flagged side downwind (±12 deg), the rest any way
+		const ang = JOSE_SPECIES[ sp ].windBaked ? THREE.MathUtils.degToRad( PREVAILING_WIND ) + ( yaw / 6.283 - 0.5 ) * 0.42 : yaw;
 		const s = 0.75 + sz * 0.5;
-		out.push( x, terrainHeightJS( x, z ) - 0.03, z, s, s, yaw, p, Math.min( 0.999, seed ) + Math.floor( lean * 100 ) );
+		out.push( x, terrainHeightJS( x, z ) - 0.03, z, s, s, ang, p, Math.min( 0.999, seed ) + Math.floor( lean * 100 ) );
 
 	}
 

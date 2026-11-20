@@ -760,7 +760,7 @@ async function start() {
 	buildWorld();
 
 	const clock = new THREE.Timer();
-	let firstFrame = true;
+	let warmFrames = 0, firstFrame = true;
 	let adaptT = 0, adaptFrames = 0, adaptStage = 0;
 
 	async function frame() {
@@ -894,7 +894,10 @@ async function start() {
 		if ( PLAINS || settings.bloom || settings.sunShafts || settings.painterly ) pipeline.render();
 		else renderer.render( scene, camera );
 
-		if ( firstFrame ) {
+		// (the loader stays up for a few frames: the near plants' meshes and shaders are built
+		// and compiled behind it)
+		warmFrames ++;
+		if ( firstFrame && warmFrames >= ( PLAINS ? 4 : 1 ) ) {
 
 			firstFrame = false;
 			const l = document.getElementById( 'loading' );

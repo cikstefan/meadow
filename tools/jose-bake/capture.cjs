@@ -27,7 +27,7 @@ const PLANTS = {
 	calafate: { h: 1.6, res: 80, seeds: [ 'calafate-0', 'calafate-2', 'calafate-4' ] },
 	matanegra: { h: 1.1, res: 80, seeds: [ 'matanegra-0', 'matanegra-3' ] },
 	chaura: { h: 0.7, res: 64, seeds: [ 'chaura-0', 'chaura-2' ] },
-	coiron: { h: 0.55, res: 48, seeds: [ 'coiron-0', 'coiron-3' ] },
+	coiron: { h: 0.55, res: 48, seeds: [ 'coiron-2', 'coiron-5', 'coiron-0' ] }, // summer gold, windswept, spring flush
 	sisyrinchium: { h: 0.32, res: 48, seeds: [ 'sisyrinchium-0', 'sisyrinchium-2' ] },
 	echium: { h: 1.8, res: 80, seeds: [ 'echium-0', 'echium-1' ] }, // pride of Madeira (kept)
 };
@@ -847,6 +847,16 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 				unseen[ u ] = 0;
 
 			}
+
+		}
+
+		// still unseen (whole organs too thin for the views to catch, e.g. fine grass blades):
+		// the organ's own material colour, a touch darker
+		for ( let u = 0; u < nvx; u ++ ) if ( unseen[ u ] ) {
+
+			const M = TEXS[ sl[ u ] - 1 ];
+			const c = M && M.base ? M.base.map( ( x, k ) => ( x * 0.6 + ( M.edge ? Math.min( 1, M.edge[ k ] ) : x ) * 0.4 ) * 0.85 ) : [ 0.2, 0.22, 0.12 ];
+			for ( let a = 0; a < 3; a ++ ) C[ u * 4 + a ] = Math.max( 0, Math.min( 255, Math.round( Math.sqrt( c[ a ] ) * 255 ) ) );
 
 		}
 

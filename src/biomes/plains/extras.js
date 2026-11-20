@@ -23,7 +23,7 @@ export async function createPlainsExtras( { scene } ) {
 	const water = buildWater();
 	scene.add( backdrop, water );
 
-	await Loader.stage( 'plants', VEG_RASTER ? 'growing oleanders and olives' : 'growing the scrub' );
+	await Loader.stage( 'plants', VEG_RASTER ? 'growing notros and calafates' : 'growing the scrub' );
 	// voxel mode: the jose flora replaces the original plants (bushes, ghost trees, scrub)
 	const shrubs = VEG_RASTER ? null : await Shrubs.create();
 	if ( shrubs ) scene.add( shrubs.group );
