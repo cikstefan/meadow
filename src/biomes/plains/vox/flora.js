@@ -9,7 +9,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, float, vec3, vec4, attribute, varying, cameraPosition, faceDirection, normalize, length, mix, smoothstep, select, floor,
-	Discard, If, dot, max, sin, cos, texture, uv, uniform, uint, clamp, fwidth, log2, pow
+	Discard, If, dot, max, sin, cos, texture, uv, uniform, uint, clamp, fwidth, log2, pow, dFdx, dFdy, cross, fract
 } from 'three/tsl';
 import { pcg } from '../../../tsl/noise.js';
 import { vnoiseJS } from '../../../tsl/noise.js';
@@ -195,7 +195,32 @@ export class Flora {
 
 			}
 
-			const N = normalize( vN ).mul( faceDirection );
+			const N0 = normalize( vN ).mul( faceDirection );
+			// plasticity: the scan's relief as bump (screen-space derivatives), cards cupped
+			// across their width; leaf veins and bark fissures catch the light
+			let N = N0;
+			if ( tex ) {
+
+				const T2 = texture( tex, uv() );
+				const hgt = mode === 'solid' ? T2.a : dot( T2.rgb, vec3( 0.3, 0.55, 0.15 ) );
+				const dPdx = dFdx( vW ), dPdy = dFdy( vW );
+				const R1 = cross( dPdy, N0 ), R2 = cross( N0, dPdx );
+				const det = dot( dPdx, R1 );
+				const k = mode === 'solid' ? 0.035 : 0.012;
+				const grad = R1.mul( dFdx( hgt ) ).add( R2.mul( dFdy( hgt ) ) ).mul( select( det.lessThan( 0.0 ), float( - 1.0 ), float( 1.0 ) ) ).mul( k );
+				N = normalize( N0.mul( det.abs() ).sub( grad ) );
+				if ( mode !== 'solid' ) {
+
+					// tangent along u, then tilt the normal outward toward the card's edges
+					const duvx = dFdx( uv() ), duvy = dFdy( uv() );
+					const Tg = normalize( dPdx.mul( duvy.y ).sub( dPdy.mul( duvx.y ) ).add( 1e-6 ) );
+					const cu = fract( uv().x.mul( 4.0 ) ).sub( 0.5 );
+					N = normalize( N.add( Tg.mul( cu.mul( 0.9 ) ) ) );
+
+				}
+
+			}
+
 			// (thin photo leaves glow yellow-green when the sun is behind them)
 			const transmit = select( kind.lessThan( 0.5 ), float( 0.0 ), select( kind.lessThan( 1.5 ), float( mode === 'leaf' || mode === 'atlas' ? 0.9 : 0.55 ), float( 0.75 ) ) );
 			// night: some flowers of some plants glow in their own colour, each its own strength
@@ -203,7 +228,13 @@ export class Flora {
 			// self-shadowing inside the crown: leaves the capture found hidden deep inside get
 			// little direct sun as well as little sky (rich shade under the outer shell)
 			const sunOcc = mix( 0.45, 1.0, ao ).mul( sunShadowAt( vW.add( N.mul( 0.04 ) ).add( U.sunDir.mul( 0.03 ) ) ) );
-			return shadeFoliage( albedo, N, vW, mix( 0.3, 1.0, ao ), vI.x.mul( sunOcc ), transmit, float( 0.12 ), float( 0.4 ), emit );
+			// wood: plain Lambert (round trunks, a real terminator); leaves: soft wrap, a glossy
+			// sun-coloured sheen strongest at grazing angles (Fresnel)
+			const isWood = kind.lessThan( 0.5 );
+			const Vv = normalize( cameraPosition.sub( vW ) );
+			const fres = float( 1.0 ).sub( dot( N, Vv ).abs() ).pow( 4.0 );
+			const specK = select( isWood, float( 0.04 ), float( mode === 'solid' ? 0.18 : 0.28 ).mul( fres.mul( 2.5 ).add( 0.35 ) ) );
+			return shadeFoliage( albedo, N, vW, mix( 0.3, 1.0, ao ), vI.x.mul( sunOcc ), transmit, specK, select( isWood, float( 0.0 ), float( 0.3 ) ), emit );
 
 		} )();
 		this.materials.set( key, mat );

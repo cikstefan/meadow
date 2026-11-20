@@ -261,7 +261,8 @@ export class Sky {
 		U.sunColor.value.setRGB( ...p.sun.map( ( v ) => v * ( 1 - overcast * 0.6 ) ) );
 		U.skyAmb.value.setRGB( ...p.amb.map( ( v ) => v * ( 1 + overcast * ( PL ? 1.1 : 0.4 ) ) ) );
 		// ground bounce: grassy, proportional to sun + sky
-		const g = [ 0.09, 0.12, 0.04 ];
+		// (the plains: a warmer, stronger bounce off the golden steppe into the shade)
+		const g = PL ? [ 0.15, 0.15, 0.06 ] : [ 0.09, 0.12, 0.04 ];
 		U.groundAmb.value.setRGB( ...g.map( ( v, i ) => v * ( p.sun[ i ] * 0.12 + p.amb[ i ] * 0.6 ) ) );
 
 		U.clouds.value = cloudiness;

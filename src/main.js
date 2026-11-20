@@ -1,6 +1,10 @@
 import * as THREE from 'three/webgpu';
-import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize, screenCoordinate, uint, floor, bitcast } from 'three/tsl';
+import { pass, vec2, vec3, vec4, uv, smoothstep, length, float, mix, dot, uniform, step, max, Fn, rtt, normalize, select, screenSize, screenCoordinate, uint, floor, bitcast, mrt, output, velocity, min } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { ao } from 'three/addons/tsl/display/GTAONode.js';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
+import { unpackColor } from './biomes/plains/vox/raster.js';
+import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 import { radialBlur } from 'three/addons/tsl/display/radialBlur.js';
 import GUI from 'three/addons/libs/lil-gui.module.min.js';
 
@@ -251,8 +255,22 @@ async function start() {
 
 		if ( pipeline ) pipeline.dispose();
 		pipeline = new THREE.RenderPipeline( renderer );
-		const scenePass = pass( scene, camera );
+		// (the plains resolve edges with TAA instead of MSAA: cheaper, and TAA needs single-sample depth)
+		const scenePass = PLAINS ? pass( scene, camera, { samples: 0 } ) : pass( scene, camera );
+		// the plains: a velocity buffer for temporal anti-aliasing
+		if ( PLAINS ) scenePass.setMRT( mrt( { output, velocity } ) );
 		let color = scenePass.getTextureNode( 'output' );
+		if ( PLAINS ) {
+
+			// ambient occlusion (GTAO, half resolution, normals from depth): contact shade where
+			// grass meets plants and rocks, inside bushes, under branches
+			const aoPass = ao( scenePass.getTextureNode( 'depth' ), null, camera );
+			aoPass.resolutionScale = 0.5;
+			aoPass.radius.value = 0.9; aoPass.samples.value = 12; aoPass.thickness.value = 1.2;
+			post.ao = aoPass;
+			color = vec4( color.rgb.mul( mix( float( 1.0 ), aoPass.getTextureNode().sample( uv() ).r, 0.85 ) ), 1.0 );
+
+		}
 
 		if ( BIOME.postClouds && BIOME.clouds ) {
 
@@ -291,6 +309,8 @@ async function start() {
 		// voxel foliage (compute-shader rasterizer, ?veg=raster): its colour wins
 		// wherever its depth is nearer than the scene's
 		const vr = extras && extras.vox;
+		// (the voxel cull tests plants against this pass's depth from the frame before)
+		if ( vr && reversedDepth ) vr.setOcclusionDepth( scenePass.getTexture( 'depth' ) );
 		if ( vr ) {
 
 			const sc = screenCoordinate;
@@ -304,13 +324,40 @@ async function start() {
 			const sceneD = length( wp.sub( post.camPos ) );
 			const isSky = reversedDepth ? d.lessThan( 1e-7 ) : d.greaterThan( 0.9999999 );
 			const win = bits.greaterThan( uint( 0 ) ).and( isSky.or( vd.lessThan( sceneD ) ) );
-			color = select( win, vec4( vr.colorRead.element( idx ).rgb, 1.0 ), color );
+			color = select( win, vec4( unpackColor( vr.colorRead.element( idx ) ), 1.0 ), color );
 
 		}
 
 
+		if ( PLAINS ) {
+
+			// distance softening: real air smears what is far (and the haze takes its colour),
+			// so the far plain and ridges are not razor-sharp
+			const dD = scenePass.getTextureNode( 'depth' ).sample( uv() ).x;
+			const vv2 = post.invProj.mul( vec4( uv().x.mul( 2.0 ).sub( 1.0 ), float( 1.0 ).sub( uv().y.mul( 2.0 ) ), dD, 1.0 ) );
+			const dist2 = length( vv2.xyz.div( vv2.w ) );
+			const soft = gaussianBlur( color, 1, 2.0 );
+			soft.resolutionScale = 0.5;
+			const skyPx = reversedDepth ? dD.lessThan( 1e-7 ) : dD.greaterThan( 0.9999999 );
+			color = vec4( mix( color.rgb, soft.rgb, select( skyPx, float( 0.0 ), smoothstep( 900.0, 9000.0, dist2 ).mul( 0.5 ) ) ), 1.0 );
+			// temporal anti-aliasing: leaf and blade edges, voxel dither and specular glints resolve
+			// smoothly over frames
+			color = traa( color, scenePass.getTextureNode( 'depth' ), scenePass.getTextureNode( 'velocity' ), camera );
+
+		}
+
 		let col = color.rgb;
-		// (the plains go without bloom: a clean, high-contrast image, glows sit on black)
+		if ( PLAINS ) {
+
+			// by day only a faint halo round the brightest glints (sun on glossy leaves, sunlit
+			// cloud rims); nothing at night
+			const sheen = bloom( color, 0.1, 0.35, 1.5 );
+			post.dayBloom = sheen;
+			col = col.add( sheen.rgb );
+
+		}
+
+		// (the plains go without the meadow's bloom: a clean, high-contrast image)
 		if ( ! PLAINS ) {
 
 			const glow = bloom( color, 0.22, 0.55, 1.1 );
@@ -765,6 +812,7 @@ async function start() {
 
 		// camera for the screen-space cloud pass
 		post.night.value = U.night.value;
+		if ( post.dayBloom ) post.dayBloom.strength.value = 0.1 * ( 1 - U.night.value );
 		post.cloudy.value = THREE.MathUtils.smoothstep( settings.clouds, 0.3, 0.8 );
 		// at night the glowing flowers bloom: a lower threshold and a stronger, wider halo
 		if ( post.bloom && PLAINS ) {
@@ -791,7 +839,7 @@ async function start() {
 
 		}
 
-		if ( settings.bloom || settings.sunShafts || settings.painterly ) pipeline.render();
+		if ( PLAINS || settings.bloom || settings.sunShafts || settings.painterly ) pipeline.render();
 		else renderer.render( scene, camera );
 
 		if ( firstFrame ) {

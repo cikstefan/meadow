@@ -17,7 +17,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, storage, uniform, float, uint, vec2, vec3, vec4, If, Loop, instanceIndex, atomicAdd, atomicMax, atomicStore,
-	bitcast, max, min, clamp, floor, ceil, log2, dot, normalize, length, mix, smoothstep, sin, cos, pow, select, fract, int
+	bitcast, max, min, clamp, floor, ceil, log2, dot, normalize, length, mix, smoothstep, sin, cos, pow, select, fract, int, ivec2, textureLoad
 } from 'three/tsl';
 import { pcg } from '../../../tsl/noise.js';
 import { U, applyFogFrom } from '../../../tsl/world.js';
@@ -34,6 +34,20 @@ const WG = 64, GROUPS = 8192, MAXVIS = 1 << 19, MAXVIS_SH = 1 << 18, GROUPS_SH =
 // mesh or voxel, never both and never neither, and the pattern is fixed to the plant (no
 // screen-door crawl as the camera moves).
 export const FADE_PX = 1.15, FADE_W = 1.3;
+
+// HDR colour in one word: each channel x -> x / (1 + x), 11 / 11 / 10 bits
+export const packColor = ( c ) => {
+
+	const y = c.max( 0.0 ).div( c.max( 0.0 ).add( 1.0 ) );
+	return uint( y.x.mul( 2047.0 ).add( 0.5 ) ).bitOr( uint( y.y.mul( 2047.0 ).add( 0.5 ) ).shiftLeft( uint( 11 ) ) ).bitOr( uint( y.z.mul( 1023.0 ).add( 0.5 ) ).shiftLeft( uint( 22 ) ) );
+
+};
+export const unpackColor = ( w ) => {
+
+	const y = vec3( float( w.bitAnd( uint( 2047 ) ) ).div( 2047.0 ), float( w.shiftRight( uint( 11 ) ).bitAnd( uint( 2047 ) ) ).div( 2047.0 ), float( w.shiftRight( uint( 22 ) ) ).div( 1023.0 ) );
+	return y.div( vec3( 1.0 ).sub( y ).max( 1e-3 ) );
+
+};
 
 // night glow, shared by meshes and voxels: only some plants glow (each its own strength),
 // and on those only some flowers, each a little brighter or dimmer; never leaf greens.
@@ -98,11 +112,13 @@ export class VoxelRaster {
 		this.cntRead = storage( this.cntAttr, 'uint', 4 ).toReadOnly();
 		this.depthAttr = new THREE.StorageBufferAttribute( new Uint32Array( this.maxPix ), 1 );
 		this.depth = storage( this.depthAttr, 'uint', this.maxPix ).toAtomic();
-		this.colorAttr = new THREE.StorageBufferAttribute( new Float32Array( this.maxPix * 4 ), 4 );
-		this.color = storage( this.colorAttr, 'vec4', this.maxPix );
+		// colour: one packed word per pixel (HDR 11-11-10, see packColor): a quarter of the
+		// memory traffic of four floats
+		this.colorAttr = new THREE.StorageBufferAttribute( new Uint32Array( this.maxPix ), 1 );
+		this.color = storage( this.colorAttr, 'uint', this.maxPix );
 		// read-only views for the post pass
 		this.depthRead = storage( this.depthAttr, 'uint', this.maxPix ).toReadOnly();
-		this.colorRead = storage( this.colorAttr, 'vec4', this.maxPix ).toReadOnly();
+		this.colorRead = storage( this.colorAttr, 'uint', this.maxPix ).toReadOnly();
 
 		this.u = {
 			viewProj: uniform( new THREE.Matrix4() ), eye: uniform( new THREE.Vector3() ),
@@ -114,6 +130,86 @@ export class VoxelRaster {
 		this.shVis = storage( new THREE.StorageBufferAttribute( new Uint32Array( MAXVIS_SH ), 1 ), 'uint', MAXVIS_SH );
 		this.build();
 		this.buildShadow();
+
+	}
+
+	// cull: frustum, distance band, and (once setOcclusionDepth gave it last frame's scene
+	// depth) occlusion: a plant whose crown top and both sides all lie behind the terrain
+	// there is skipped
+	buildCull( occ = null ) {
+
+		const { inst, boxes, vis, cnt, u } = this;
+		const box = ( proto ) => [ boxes.element( proto.mul( 3 ) ), boxes.element( proto.mul( 3 ).add( 1 ) ), boxes.element( proto.mul( 3 ).add( 2 ) ) ];
+		const W = u.size.x, H = u.size.y;
+		const hidden = ( p ) => {
+
+			// (reversed depth: bigger is nearer; ~ near / distance, so a ratio is a distance ratio)
+			const cl = u.viewProj.mul( vec4( p, 1.0 ) );
+			const nd = cl.xyz.div( cl.w );
+			const onScreen = cl.w.greaterThan( 0.1 ).and( nd.x.abs().lessThan( 0.98 ) ).and( nd.y.abs().lessThan( 0.98 ) );
+			const px = ivec2( int( nd.x.mul( 0.5 ).add( 0.5 ).mul( W ) ), int( float( 0.5 ).sub( nd.y.mul( 0.5 ) ).mul( H ) ) );
+			const ds = textureLoad( occ, px ).x;
+			return onScreen.and( ds.greaterThan( nd.z.mul( 1.04 ) ) );
+
+		};
+
+		this.cull = Fn( () => {
+
+			const s = instanceIndex;
+			If( s.lessThan( uint( this.slots ) ), () => {
+
+				const A = inst.element( s.mul( 2 ) ), B = inst.element( s.mul( 2 ).add( 1 ) );
+				If( A.w.greaterThan( 0.0 ), () => {
+
+					const [ b0, b1, b2 ] = box( uint( B.z ) );
+					const ext = b1.xyz.mul( b1.w ).mul( vec3( A.w, B.x, A.w ) );
+					const c = A.xyz.add( vec3( 0, b0.y.mul( B.x ).add( ext.y.mul( 0.5 ) ), 0 ) );
+					const d = length( c.sub( u.eye ) );
+					const rr = max( ext.x, max( ext.y, ext.z ) ).mul( 0.75 );
+					// meshes draw it closer than its hand-over distance
+					const near = select( b2.x.greaterThan( 0.5 ), clamp( b1.x.mul( A.w ).mul( u.focal ).div( FADE_PX ), 22.0, 140.0 ), float( 0.0 ) );
+					If( d.greaterThan( near ).and( d.lessThan( u.far ) ), () => {
+
+						const clip = u.viewProj.mul( vec4( c, 1.0 ) );
+						const m = rr.mul( 2.0 );
+						If( clip.w.greaterThan( rr.negate() ).and( clip.x.abs().lessThan( clip.w.add( m ) ) ).and( clip.y.abs().lessThan( clip.w.add( m ) ) ), () => {
+
+							// occlusion against last frame's depth (crown top and its two sides)
+							const top = vec3( c.x, A.y.add( ext.y.mul( 0.95 ) ), c.z );
+							const sideV = vec3( u.viewProj.element( 0 ).x, 0, u.viewProj.element( 2 ).x ).normalize().mul( ext.x.mul( 0.45 ) );
+							const occluded = occ ? hidden( top ).and( hidden( c.add( sideV ) ) ).and( hidden( c.sub( sideV ) ) ) : null;
+							const pushIt = () => {
+
+							// the level whose voxels project to ~1 pixel
+							const px = max( ext.x, ext.y ).mul( u.focal ).div( d );
+							const lv = clamp( log2( b1.w ).sub( ceil( log2( max( px, 1.0 ) ) ) ), 0.0, b0.w.sub( 1.0 ) );
+							const k = atomicAdd( cnt.element( 0 ), uint( 1 ) );
+							If( k.lessThan( uint( MAXVIS ) ), () => {
+
+								vis.element( k ).assign( s.bitOr( uint( lv ).shiftLeft( uint( 28 ) ) ) );
+
+							} );
+
+							};
+							if ( occ ) If( occluded.not(), pushIt );
+							else pushIt();
+
+						} );
+
+					} );
+
+				} );
+
+			} );
+
+		} )().compute( this.slots, [ 256 ] );
+
+	}
+
+	// occlusion culling from last frame's scene depth (reversed depth only)
+	setOcclusionDepth( depthTexture ) {
+
+		this.buildCull( depthTexture );
 
 	}
 
@@ -269,46 +365,7 @@ export class VoxelRaster {
 
 		const box = ( proto ) => [ boxes.element( proto.mul( 3 ) ), boxes.element( proto.mul( 3 ).add( 1 ) ), boxes.element( proto.mul( 3 ).add( 2 ) ) ];
 
-		this.cull = Fn( () => {
-
-			const s = instanceIndex;
-			If( s.lessThan( uint( this.slots ) ), () => {
-
-				const A = inst.element( s.mul( 2 ) ), B = inst.element( s.mul( 2 ).add( 1 ) );
-				If( A.w.greaterThan( 0.0 ), () => {
-
-					const [ b0, b1, b2 ] = box( uint( B.z ) );
-					const ext = b1.xyz.mul( b1.w ).mul( vec3( A.w, B.x, A.w ) );
-					const c = A.xyz.add( vec3( 0, b0.y.mul( B.x ).add( ext.y.mul( 0.5 ) ), 0 ) );
-					const d = length( c.sub( u.eye ) );
-					const rr = max( ext.x, max( ext.y, ext.z ) ).mul( 0.75 );
-					// meshes draw it closer than its hand-over distance
-					const near = select( b2.x.greaterThan( 0.5 ), clamp( b1.x.mul( A.w ).mul( u.focal ).div( FADE_PX ), 22.0, 140.0 ), float( 0.0 ) );
-					If( d.greaterThan( near ).and( d.lessThan( u.far ) ), () => {
-
-						const clip = u.viewProj.mul( vec4( c, 1.0 ) );
-						const m = rr.mul( 2.0 );
-						If( clip.w.greaterThan( rr.negate() ).and( clip.x.abs().lessThan( clip.w.add( m ) ) ).and( clip.y.abs().lessThan( clip.w.add( m ) ) ), () => {
-
-							// the level whose voxels project to ~1 pixel
-							const px = max( ext.x, ext.y ).mul( u.focal ).div( d );
-							const lv = clamp( log2( b1.w ).sub( ceil( log2( max( px, 1.0 ) ) ) ), 0.0, b0.w.sub( 1.0 ) );
-							const k = atomicAdd( cnt.element( 0 ), uint( 1 ) );
-							If( k.lessThan( uint( MAXVIS ) ), () => {
-
-								vis.element( k ).assign( s.bitOr( uint( lv ).shiftLeft( uint( 28 ) ) ) );
-
-							} );
-
-						} );
-
-					} );
-
-				} );
-
-			} );
-
-		} )().compute( this.slots, [ 256 ] );
+		this.buildCull();
 
 		const walk = ( shadePass ) => Fn( () => {
 
@@ -429,7 +486,7 @@ export class VoxelRaster {
 
 									If( depthRead.element( pi ).equal( key ), () => {
 
-										color.element( pi ).assign( vec4( col, 1.0 ) );
+										color.element( pi ).assign( packColor( col ) );
 
 									} );
 
