@@ -34,7 +34,7 @@ const PLANTS = {
 	// (the beeches caught at 0.78 of their year: full summer green; later they colour and drop)
 	lenga: { h: 16, res: 160, stages: [ 0.78, 0.6 ], seeds: [ 'lenga-16@17', 'lenga-14@19', 'lenga-4@8', 'lenga-22@6' ] }, // forest tree, ancient, wind-flagged, young
 	nirre: { h: 5, res: 128, stages: [ 0.78, 0.6 ], seeds: [ 'nirre-0@5.5', 'nirre-2@4', 'nirre-3@3.2' ] },
-	snag: { h: 8, res: 128, seeds: [ 'snag-0@9', 'snag-2@5.5', 'snag-3@7.5', 'snag-6@8', 'snag-12@1x', 'snag-8@1x', 'snag-18@6', 'snag-1@7' ] }, // standing, broken, leaning, many-limbed, fallen log, remnant, wind-snapped, split
+	snag: { h: 8, res: 128, stages: [ 1.0 ], seeds: [ 'snag-0@9', 'snag-2@5.5', 'snag-3@7.5', 'snag-6@8', 'snag-12@1x', 'snag-8@1x', 'snag-18@6', 'snag-1@7' ] }, // standing, broken, leaning, many-limbed, fallen log, remnant, wind-snapped, split
 	sisyrinchium: { h: 0.3, res: 48, seeds: [ 'sisyrinchium-0', 'sisyrinchium-2' ] },
 	anemona: { h: 0.3, res: 48, seeds: [ 'anemona-0', 'anemona-2' ] },
 	chloraea: { h: 0.32, res: 48, seeds: [ 'chloraea-0' ] },
