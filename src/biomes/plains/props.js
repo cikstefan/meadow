@@ -1,6 +1,7 @@
 // Ground debris from scanned models (Fab / Quixel Megascans, Fab Standard License): dead
 // stumps and fallen wood lying among the scrub, most of all on the burnt ghost-tree hills.
-// The models live in src/assets/plains/fab (kept out of the public repository); without
+// The models live in src/assets/plains/fab as .glb.wasm (the preview host serves no .glb;
+// kept out of the public repository); without
 // them this does nothing.
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -9,7 +10,7 @@ import { biomeJS } from './biomes.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS } from './terrain.js';
 import { rockAtJS } from './rockmask.js';
 
-const FILES = import.meta.glob( '../../assets/plains/fab/*.glb', { eager: true, query: '?url', import: 'default' } );
+const FILES = import.meta.glob( '../../assets/plains/fab/*.glb.wasm', { eager: true, query: '?url', import: 'default' } );
 const CELL = 12, R = 140, MAX = 600;
 // chance of a piece per 12 m cell in each landscape
 const DENSITY = { forest: 0.25, scrub: 0.1, ghost: 0.7, steppe: 0.04 };
