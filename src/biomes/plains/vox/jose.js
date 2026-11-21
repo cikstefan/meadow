@@ -17,17 +17,25 @@ const fileUrl = ( name ) => FILES[ `../../../assets/plains/vox/jose-${ name }.wa
 
 // placement: weight in the mix, drift scale (m: each species owns patches), wind lean
 export const JOSE_SPECIES = {
-	// the Torres del Paine scrub and grassland (jose's Patagonia library). `windBaked`: the
-	// plant grew under jose's westerly (windLean), leaning toward its local +x; it is turned
-	// so that lean points downwind on the plains (PREVAILING_WIND), give or take a little
-	notro: { w: 0.55, drift: 95, lean: 0, windBaked: true },
-	calafate: { w: 0.9, drift: 60, lean: 0, windBaked: true },
-	matanegra: { w: 1.2, drift: 75, lean: 0, windBaked: true },
-	chaura: { w: 0.75, drift: 45, lean: 0, windBaked: true },
-	coiron: { w: 1.7, drift: 60, lean: 0, windBaked: true },
-	sisyrinchium: { w: 0.8, drift: 35, lean: 0.03 },
-	echium: { w: 0.35, drift: 80, lean: 0.12 }, // pride of Madeira
+	// jose's Patagonia library. `windBaked`: the plant grew under jose's westerly (windLean),
+	// leaning toward its local +x; it is turned so that lean points downwind on the plains.
+	// size: random scale range; drift: patch size (m) of the species' own drifts; k: its noise id
+	notro: { drift: 70, lean: 0, windBaked: true, size: [ 0.75, 1.2 ] },
+	calafate: { drift: 45, lean: 0, windBaked: true, size: [ 0.7, 1.2 ] },
+	matanegra: { drift: 55, lean: 0, windBaked: true, size: [ 0.7, 1.25 ] },
+	chaura: { drift: 30, lean: 0, windBaked: true, size: [ 0.7, 1.3 ] },
+	neneo: { drift: 40, lean: 0, size: [ 0.7, 1.3 ] },
+	chuquiraga: { drift: 50, lean: 0.05, size: [ 0.75, 1.2 ] },
+	coiron: { drift: 35, lean: 0, windBaked: true, size: [ 0.7, 1.3 ] },
+	lenga: { drift: 60, lean: 0, windBaked: true, size: [ 0.8, 1.15 ] },
+	nirre: { drift: 50, lean: 0, windBaked: true, size: [ 0.75, 1.2 ] },
+	snag: { drift: 45, lean: 0, windBaked: true, size: [ 0.8, 1.2 ] },
+	sisyrinchium: { drift: 22, lean: 0.03, size: [ 0.8, 1.2 ] },
+	anemona: { drift: 25, lean: 0.03, size: [ 0.8, 1.2 ] },
+	chloraea: { drift: 25, lean: 0.02, size: [ 0.8, 1.2 ] },
+	echium: { drift: 80, lean: 0.12, size: [ 0.75, 1.25 ] }, // pride of Madeira
 };
+Object.values( JOSE_SPECIES ).forEach( ( S, i ) => ( S.k = i + 1 ) );
 
 const fetchBuf = ( url ) => fetch( url ).then( ( r ) => r.arrayBuffer() ).then( ( b ) => new Uint8Array( b ) );
 

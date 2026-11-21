@@ -18,40 +18,107 @@ import { rng } from '../grow.js';
 import { terrainHeightJS, trailDistJS, lakeDistJS, mountainHeightJS } from '../terrain.js';
 import { rockAtJS } from '../rockmask.js';
 import { PREVAILING_WIND } from '../layout.js';
+import { biomeJS } from '../biomes.js';
 import { cloudShadowGround } from '../index.js';
 import { VoxelRaster, cellHash, FADE_PX, flowerGlow } from './raster.js';
 import { plantWind } from './wind.js';
 import { sunShadowAt, frameRot } from './sunshadow.js';
-import { JOSE_SPECIES, pickJose, streamJoseMeshes, decodeLOD, scanInfo } from './jose.js';
+import { JOSE_SPECIES, streamJoseMeshes, decodeLOD, scanInfo } from './jose.js';
 
-const TILE_M = 32, FAR = 1000, CAP = 96; // plants per tile (max)
-const LOD_D = [ 9, 22 ], LOD_BAND = 1.25; // mesh LOD0 / LOD1 / LOD2 distances; each switch dissolves over 25 %
+const TILE_M = 32, FAR = 1000, CAP = 168; // plants per tile (max)
+const LOD_D = [ 12, 30 ], LOD_BAND = 1.25; // mesh LOD0 / LOD1 / LOD2 distances; each switch dissolves over 25 %
 const FADE_W = 1.3; // the dissolve runs from d0 to d0 * FADE_W
 // meshes hand over to voxels where a level-0 voxel is about FADE_PX pixels: a plant's
 // own distance, from its voxel size and the screen (Nanite switches at ~1 px too)
 const fadeStart = ( vsz, s, focal ) => THREE.MathUtils.clamp( vsz * s * focal / FADE_PX, 22, 140 );
-const GRID = 7; // candidate points per tile side
+// Plants come in two layers. Trees on a coarse grid (one candidate per 8 m: lengas, ñirres
+// and dead snags have room for their crowns), shrubs, tussocks and flowers on a fine one
+// (2.7 m). Each landscape (biomes.js) has its own occupancy and species mix, and each species
+// gathers in drifts of its own (a slow noise per species), so the scrub is patchy, not uniform.
+const TREE_GRID = 4, GRID = 12;
+const TREES = {
+	forest: { occ: 0.92, mix: { lenga: 1.0, nirre: 0.12, snag: 0.04 } },
+	scrub: { occ: 0.1, mix: { snag: 0.6, nirre: 0.4 } },
+	ghost: { occ: 0.55, mix: { snag: 1.0, nirre: 0.06 } },
+	steppe: { occ: 0.03, mix: { snag: 1.0 } },
+};
+const SHRUBS = {
+	forest: { occ: 0.42, mix: { chaura: 3, calafate: 1.4, coiron: 0.4, anemona: 1.0, chloraea: 0.6, sisyrinchium: 0.3 } },
+	scrub: { occ: 0.8, mix: { notro: 2.2, matanegra: 2.0, calafate: 2.0, chuquiraga: 1.3, chaura: 1.0, coiron: 1.2, neneo: 0.5, sisyrinchium: 0.6, anemona: 0.4, echium: 0.12 } },
+	ghost: { occ: 0.72, mix: { calafate: 2.5, matanegra: 2.0, chaura: 1.6, notro: 0.45, coiron: 1.0, neneo: 0.4, anemona: 0.4 } },
+	steppe: { occ: 0.5, mix: { coiron: 3.0, neneo: 2.0, matanegra: 1.2, calafate: 0.6, chuquiraga: 0.5, sisyrinchium: 1.0, anemona: 0.6, chloraea: 0.3 } },
+};
+const BIOMES = [ 'forest', 'scrub', 'ghost', 'steppe' ];
+
+function pickIn( table, b, x, z, r, bySp ) {
+
+	// occupancy and species weights blended by the landscape weights here
+	let occ = 0;
+	const w = {};
+	for ( const k of BIOMES ) {
+
+		if ( b[ k ] < 1e-3 ) continue;
+		occ += table[ k ].occ * b[ k ];
+		for ( const [ sp, v ] of Object.entries( table[ k ].mix ) ) w[ sp ] = ( w[ sp ] || 0 ) + v * b[ k ];
+
+	}
+	if ( r() > occ ) return null;
+	let sum = 0;
+	for ( const sp of Object.keys( w ) ) {
+
+		const S = JOSE_SPECIES[ sp ];
+		if ( ! S || ! bySp[ sp ] ) { delete w[ sp ]; continue; }
+		const k = S.k;
+		// the species' own drifts: strong where its noise is high, rare elsewhere
+		const f = vnoiseJS( x / S.drift + k * 13.1, z / S.drift + k * 7.7 );
+		w[ sp ] *= 0.15 + 1.7 * ss( 0.3, 0.75, f );
+		sum += w[ sp ];
+
+	}
+	let t = r() * sum;
+	for ( const sp of Object.keys( w ) ) { t -= w[ sp ]; if ( t <= 0 ) return sp; }
+	return null;
+
+}
+const ss = ( a, b, x ) => { const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) ); return t * t * ( 3 - 2 * t ); };
 
 function tilePlants( tx, tz, jose ) {
 
 	const out = [];
 	const r = rng( ( tx * 73856093 ) ^ ( tz * 19349663 ) ^ 0x2c1b3c6d );
+	const trunks = [];
+	const place = ( sp, x, z, yaw, seed, sz ) => {
+
+		if ( trailDistJS( x, z ) < ( sp === 'lenga' || sp === 'snag' || sp === 'nirre' ? 3.5 : 2.0 ) || lakeDistJS( x, z ) < 5 || rockAtJS( x, z ) > 0.1 || mountainHeightJS( x, z ) > 160 ) return false;
+		const list = jose.bySp[ sp ];
+		const p = list[ Math.floor( r() * list.length ) ];
+		const S = JOSE_SPECIES[ sp ];
+		const lean = S.lean * ( 0.4 + 1.2 * r() );
+		// wind-grown plants face their flagged side downwind (+-12 deg), the rest any way
+		const ang = S.windBaked ? THREE.MathUtils.degToRad( PREVAILING_WIND ) + ( yaw / 6.283 - 0.5 ) * 0.42 : yaw;
+		const sc = S.size[ 0 ] + sz * ( S.size[ 1 ] - S.size[ 0 ] );
+		out.push( x, terrainHeightJS( x, z ) - 0.03, z, sc, sc, ang, p, Math.min( 0.999, seed ) + Math.floor( lean * 100 ) );
+		return true;
+
+	};
+	for ( let j = 0; j < TREE_GRID; j ++ ) for ( let i = 0; i < TREE_GRID; i ++ ) {
+
+		const x = ( tx + ( i + 0.15 + r() * 0.7 ) / TREE_GRID ) * TILE_M, z = ( tz + ( j + 0.15 + r() * 0.7 ) / TREE_GRID ) * TILE_M;
+		const yaw = r() * 6.283, seed = r(), sz = r();
+		const sp = pickIn( TREES, biomeJS( x, z ), x, z, r, jose.bySp );
+		if ( sp && place( sp, x, z, yaw, seed, sz ) ) trunks.push( x, z );
+
+	}
 	for ( let j = 0; j < GRID; j ++ ) for ( let i = 0; i < GRID; i ++ ) {
 
 		const x = ( tx + ( i + r() ) / GRID ) * TILE_M, z = ( tz + ( j + r() ) / GRID ) * TILE_M;
-		const yaw = r() * 6.283, seed = r(), sz = r(), pickR = r();
-		// open ground between the drifts (the plain is grassland first)
-		if ( vnoiseJS( x / 23 + 5.1, z / 23 + 9.3 ) * 0.7 + pickR * 0.3 < 0.42 ) continue;
-		const sp = pickJose( x, z, r, jose.bySp );
+		const yaw = r() * 6.283, seed = r(), sz = r();
+		const sp = pickIn( SHRUBS, biomeJS( x, z ), x, z, r, jose.bySp );
 		if ( ! sp ) continue;
-		if ( trailDistJS( x, z ) < 2.0 || lakeDistJS( x, z ) < 5 || rockAtJS( x, z ) > 0.1 || mountainHeightJS( x, z ) > 160 ) continue;
-		const list = jose.bySp[ sp ];
-		const p = list[ Math.floor( r() * list.length ) ];
-		const lean = JOSE_SPECIES[ sp ].lean * ( 0.4 + 1.2 * r() );
-		// wind-grown plants face their flagged side downwind (±12 deg), the rest any way
-		const ang = JOSE_SPECIES[ sp ].windBaked ? THREE.MathUtils.degToRad( PREVAILING_WIND ) + ( yaw / 6.283 - 0.5 ) * 0.42 : yaw;
-		const s = 0.75 + sz * 0.5;
-		out.push( x, terrainHeightJS( x, z ) - 0.03, z, s, s, ang, p, Math.min( 0.999, seed ) + Math.floor( lean * 100 ) );
+		// (not inside a trunk)
+		let clear = true;
+		for ( let k = 0; k < trunks.length; k += 2 ) if ( ( trunks[ k ] - x ) ** 2 + ( trunks[ k + 1 ] - z ) ** 2 < 2.2 ) { clear = false; break; }
+		if ( clear ) place( sp, x, z, yaw, seed, sz );
 
 	}
 

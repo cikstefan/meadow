@@ -19,6 +19,8 @@ import { hash2i, hash2i2, vnoise } from '../../tsl/noise.js';
 import { U, shadeFoliage, windField, cloudShadow } from '../../tsl/world.js';
 import { terrainHeight, grassMask, fieldDry } from './terrain.js';
 import { rng } from './grow.js';
+import { grassBiomeTSL } from './biomes.js';
+import { VEG_RASTER } from './vox/mode.js';
 import { bleed } from './atlas.js';
 
 const T = 256, COLS = 4;
@@ -189,7 +191,9 @@ export class Carpet {
 			const mask = grassMask( xz );
 			// patchy: clumps thin out in drifts, never on the trail
 			const keep = smoothstep( 0.25, 0.45, vnoise( xz.div( 3.3 ) ).mul( 0.6 ).add( h1.mul( 0.4 ) ) ).mul( mask );
-			const size = mix( 0.22, 0.42, h0 ).mul( keep ).mul( smoothstep( u.radius, u.radius.mul( 0.7 ), dist ) ).mul( u.height.mul( 0.25 ).add( 0.75 ) );
+			// (the tufts follow the landscape: few and low in the woods' lawn, full on the steppe)
+			const bK = VEG_RASTER ? grassBiomeTSL( xz ).tussock.mul( 0.8 ).add( 0.2 ) : float( 1.0 );
+			const size = mix( 0.22, 0.42, h0 ).mul( keep ).mul( bK ).mul( smoothstep( u.radius, u.radius.mul( 0.7 ), dist ) ).mul( u.height.mul( 0.25 ).add( 0.75 ) );
 			const yaw = h1.mul( 6.283 );
 			const p = attribute( 'position', 'vec3' );
 			const k = attribute( 'kind', 'float' );

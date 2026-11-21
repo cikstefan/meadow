@@ -10,6 +10,7 @@ import { Rocks } from './rocks.js';
 import { Scrub } from './scrub.js';
 import { VEG_RASTER } from './vox/mode.js';
 import { loadJose } from './vox/jose.js';
+import { Props } from './props.js';
 import { Flora } from './vox/flora.js';
 import { Loader } from '../../ui/loader.js';
 import { cloudFieldJS, cloudShadowCompute, csCenter, CS_N, CS_EXT } from './index.js';
@@ -42,6 +43,8 @@ export async function createPlainsExtras( { scene } ) {
 	await Loader.stage( 'scene' );
 	const flora = jose ? new Flora( jose ) : null;
 	if ( flora ) scene.add( flora.group );
+	const props = VEG_RASTER ? await Props.create().catch( ( e ) => { console.warn( 'props', e ); return null; } ) : null;
+	if ( props ) scene.add( props.group );
 	// first impression (once the sky has set the sun): start the drifting clouds so that the sun breaks through
 	// on the plain ahead while the surroundings stay dappled
 	const placeClouds = () => {
@@ -74,7 +77,7 @@ export async function createPlainsExtras( { scene } ) {
 
 
 	let first = true;
-	const systems = [ shrubs, trees, caps, carpet, rocks, scrub, flora ].filter( Boolean );
+	const systems = [ shrubs, trees, caps, carpet, rocks, scrub, flora, props ].filter( Boolean );
 	return {
 		backdrop, water, shrubs, trees, caps, carpet, rocks, scrub, flora, systems, vox: flora && flora.raster,
 		update( renderer, camera, dt ) {

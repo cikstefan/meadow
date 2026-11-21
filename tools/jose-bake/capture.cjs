@@ -21,27 +21,37 @@ const path = require( 'path' );
 
 // species: mature height (m), voxel resolution, seeds (each a different cultivar where the species has them)
 const PLANTS = {
-	// Torres del Paine species from jose's Patagonia library (wind-shaped growth: each leans
-	// toward local +x, windDir 0; the runtime turns it downwind of the plains' westerly)
-	notro: { h: 3.2, res: 96, seeds: [ 'notro-0', 'notro-1', 'notro-3', 'notro-5' ] },
-	calafate: { h: 1.6, res: 80, seeds: [ 'calafate-0', 'calafate-2', 'calafate-4' ] },
-	matanegra: { h: 1.1, res: 80, seeds: [ 'matanegra-0', 'matanegra-3' ] },
-	chaura: { h: 0.7, res: 64, seeds: [ 'chaura-0', 'chaura-2' ] },
-	coiron: { h: 0.55, res: 48, seeds: [ 'coiron-2', 'coiron-5', 'coiron-0' ] }, // summer gold, windswept, spring flush
-	sisyrinchium: { h: 0.32, res: 48, seeds: [ 'sisyrinchium-0', 'sisyrinchium-2' ] },
-	echium: { h: 1.8, res: 80, seeds: [ 'echium-0', 'echium-1' ] }, // pride of Madeira (kept)
+	// jose's Patagonia library (Torres del Paine and beyond). Wind-grown species lean toward
+	// local +x (jose windDir 0); the runtime turns them downwind of the prevailing westerly.
+	// seeds: 'seed' or 'seed@height m' or 'seed@1x' (jose's own size)
+	notro: { h: 3.0, res: 96, seeds: [ 'notro-0', 'notro-2@2.6', 'notro-4@2.2', 'notro-5@3.4' ] }, // Valle Francés, Norquinco, plain form, Lago Pehoé
+	calafate: { h: 1.5, res: 80, seeds: [ 'calafate-0', 'calafate-1@1.2', 'calafate-5@1.0' ] }, // lakeside, windswept, steppe
+	matanegra: { h: 1.0, res: 80, seeds: [ 'matanegra-0', 'matanegra-2@0.85' ] },
+	chaura: { h: 0.6, res: 64, seeds: [ 'chaura-0', 'chaura-2@0.5', 'chaura-3@0.7' ] },
+	neneo: { h: 0.6, res: 64, seeds: [ 'neneo-0', 'neneo-1@0.45' ] },
+	chuquiraga: { h: 1.0, res: 80, seeds: [ 'chuquiraga-1', 'chuquiraga-4@0.85', 'chuquiraga-0@1.1' ] }, // quilembai: golden orange, amber, late summer
+	coiron: { h: 0.5, res: 48, seeds: [ 'coiron-2', 'coiron-5', 'coiron-0@0.42' ] }, // summer gold, windswept, spring flush
+	// (the beeches caught at 0.78 of their year: full summer green; later they colour and drop)
+	lenga: { h: 16, res: 160, stages: [ 0.78, 0.6 ], seeds: [ 'lenga-16@17', 'lenga-14@19', 'lenga-4@8', 'lenga-22@6' ] }, // forest tree, ancient, wind-flagged, young
+	nirre: { h: 5, res: 128, stages: [ 0.78, 0.6 ], seeds: [ 'nirre-0@5.5', 'nirre-2@4', 'nirre-3@3.2' ] },
+	snag: { h: 8, res: 128, seeds: [ 'snag-0@9', 'snag-2@5.5', 'snag-3@7.5', 'snag-6@8', 'snag-12@1x', 'snag-8@1x' ] }, // standing, broken, leaning, many-limbed, fallen log, remnant
+	sisyrinchium: { h: 0.3, res: 48, seeds: [ 'sisyrinchium-0', 'sisyrinchium-2' ] },
+	anemona: { h: 0.3, res: 48, seeds: [ 'anemona-0', 'anemona-2' ] },
+	chloraea: { h: 0.32, res: 48, seeds: [ 'chloraea-0' ] },
+	echium: { h: 1.8, res: 80, seeds: [ 'echium-0', 'echium-1' ] }, // pride of Madeira
 };
+
 const STAGES = [ 1.0, 0.62 ];
 // near-field leaves and petals as cards carrying jose's own look: for each species /
 // cultivar the bake isolates a few typical leaves (and flat petals), renders each face-on
 // with jose's own shaders into that plant's atlas, and puts a card on every leaf's frame.
 // Grasses (curved blades) and species already drawn with jose's photo cards are left as they are.
-const ATLAS_SPECIES = [ 'echium', 'notro', 'calafate', 'chaura', 'sisyrinchium' ];
+const ATLAS_SPECIES = [ 'echium', 'notro', 'calafate', 'chaura', 'sisyrinchium', 'nirre', 'chuquiraga', 'anemona', 'chloraea' ];
 const ATLAS_KINDS = [ 7, 0 ]; // leaf, petal
 // near-field mesh budgets (triangles) per LOD
-const LOD_TRIS = [ 150000, 40000, 10000 ];
+const LOD_TRIS = [ 150000, 70000, 26000 ];
 
-if ( process.env.ONLY_SEED ) for ( const k of Object.keys( PLANTS ) ) PLANTS[ k ].seeds = PLANTS[ k ].seeds.filter( ( x ) => x === process.env.ONLY_SEED );
+if ( process.env.ONLY_SEED ) for ( const k of Object.keys( PLANTS ) ) PLANTS[ k ].seeds = PLANTS[ k ].seeds.filter( ( x ) => x.split( '@' )[ 0 ] === process.env.ONLY_SEED );
 const url = process.argv[ 2 ], outDir = process.argv[ 3 ], only = process.argv[ 4 ] ? process.argv[ 4 ].split( ',' ) : null;
 const b64 = ( s, T ) => {
 
@@ -75,10 +85,13 @@ const b64 = ( s, T ) => {
 	for ( const [ sp, cfg ] of Object.entries( PLANTS ) ) {
 
 		if ( only && ! only.includes( sp ) ) continue;
-		for ( const seed of cfg.seeds ) {
+		for ( const seedSpec of cfg.seeds ) {
 
+			// 'seed' or 'seed@height' (m) or 'seed@1x' (jose's own size)
+			const [ seed, hs ] = seedSpec.split( '@' );
+			const hT = hs === undefined ? cfg.h : hs === '1x' ? null : + hs;
 			let H1 = null;
-			for ( const t of STAGES ) {
+			for ( const t of cfg.stages || STAGES ) {
 
 				const done = path.join( outDir, `${ sp }_${ seed }_${ Math.round( t * 100 ) }.json` );
 				if ( fs.existsSync( done ) ) {
@@ -105,7 +118,7 @@ const b64 = ( s, T ) => {
 				}
 
 				if ( H1 === null ) H1 = r.height; // the mature plant sets the scale of its younger stage
-				const scale = cfg.h / H1;
+				const scale = hT === null ? 1 : hT / H1;
 				const name = `${ sp }_${ seed }_${ Math.round( t * 100 ) }`;
 				const lods = r.lods.map( ( L ) => ( { pos: b64( L.pos, Float32Array ), nrm: b64( L.nrm, Float32Array ), col: b64( L.col, Uint8Array ), idx: b64( L.idx, Uint32Array ), uv: b64( L.uv, Float32Array ), slot: b64( L.slot, Uint8Array ) } ) );
 				const meta = { sp, seed, t, scale, cultivar: r.cultivar, texs: r.texs, info: r.info, height: r.height, counts: r.levels.map( ( l ) => l.length / 3 ), lods: lods.map( ( L ) => ( { verts: L.pos.length / 3, tris: L.idx.length / 3 } ) ) };
@@ -315,6 +328,30 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 	}
 
 	const vox = grid.build( { fullCount: 10 } );
+	// surface colour per small cell (from the views' samples): thin organs the posed-geometry
+	// views miss take the colour the voxels have there, so near and far agree
+	const cc = vsz * 2, cellKey = ( x, y, z ) => `${ Math.floor( x / cc ) },${ Math.floor( y / cc ) },${ Math.floor( z / cc ) }`;
+	const sCol = new Map();
+	for ( let i = 0; i < S.length; i += 10 ) {
+
+		const k = cellKey( S[ i ], S[ i + 1 ], S[ i + 2 ] );
+		let e = sCol.get( k ); if ( ! e ) sCol.set( k, e = [ 0, 0, 0, 0 ] );
+		e[ 0 ] += S[ i + 3 ] * LIT; e[ 1 ] += S[ i + 4 ] * LIT; e[ 2 ] += S[ i + 5 ] * LIT; e[ 3 ] ++;
+
+	}
+	const colAt = ( x, y, z ) => {
+
+		let r = 0, g = 0, b = 0, n = 0;
+		const fx = Math.floor( x / cc ), fy = Math.floor( y / cc ), fz = Math.floor( z / cc );
+		for ( let dz = - 1; dz <= 1; dz ++ ) for ( let dy = - 1; dy <= 1; dy ++ ) for ( let dx = - 1; dx <= 1; dx ++ ) {
+
+			const e = sCol.get( `${ fx + dx },${ fy + dy },${ fz + dz }` );
+			if ( e ) { const w = dx || dy || dz ? 0.35 : 1; r += e[ 0 ] * w; g += e[ 1 ] * w; b += e[ 2 ] * w; n += e[ 3 ] * w; }
+
+		}
+		return n > 0 ? [ r / n, g / n, b / n ] : null;
+
+	};
 
 	// ---- posed geometry: every vertex to its own pixel ------------------------------------------
 	const meshes = [];
@@ -747,7 +784,8 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 		}
 
 		const keepK = Math.max( 0.03, Math.min( 1, ( LOD_TRIS[ l ] - bark.length / 3 ) / Math.max( 1, organCount ) ) );
-		const grow = Math.min( 1.7, 1 / Math.sqrt( Math.max( keepK, 0.12 ) ) );
+		// (kept organs grow to cover the same area: the crown keeps its fullness and its flowers)
+		const grow = Math.min( 2.6, 1 / Math.sqrt( Math.max( keepK, 0.05 ) ) );
 		const idxL = Array.from( bark ), orgScale = new Map();
 		for ( const [ o, list ] of organTris ) if ( hashO( o ) < keepK ) {
 
@@ -852,8 +890,31 @@ async function capture( { sp, seed, t, RES0, N, LOD_TRIS, LC } ) {
 
 		// still unseen (whole organs too thin for the views to catch, e.g. fine grass blades):
 		// the organ's own material colour, a touch darker
+		// (preferably the mean colour of the seen vertices of the same material: the views do
+		// catch the blade tips, so a gold tussock stays gold up close as it is far away)
+		const slotSum = new Map();
+		for ( let u = 0; u < nvx; u ++ ) if ( ! unseen[ u ] ) {
+
+			const k = sl[ u ]; let e = slotSum.get( k ); if ( ! e ) slotSum.set( k, e = [ 0, 0, 0, 0 ] );
+			e[ 0 ] += C[ u * 4 ]; e[ 1 ] += C[ u * 4 + 1 ]; e[ 2 ] += C[ u * 4 + 2 ]; e[ 3 ] ++;
+
+		}
 		for ( let u = 0; u < nvx; u ++ ) if ( unseen[ u ] ) {
 
+			const vc = colAt( pos[ u * 3 ], pos[ u * 3 + 1 ], pos[ u * 3 + 2 ] );
+			if ( vc ) {
+
+				for ( let a = 0; a < 3; a ++ ) C[ u * 4 + a ] = Math.max( 0, Math.min( 255, Math.round( Math.sqrt( Math.max( 0, vc[ a ] ) ) * 255 ) ) );
+				continue;
+
+			}
+			const e = slotSum.get( sl[ u ] );
+			if ( e && e[ 3 ] >= 8 ) {
+
+				for ( let a = 0; a < 3; a ++ ) C[ u * 4 + a ] = Math.round( e[ a ] / e[ 3 ] * 0.92 );
+				continue;
+
+			}
 			const M = TEXS[ sl[ u ] - 1 ];
 			const c = M && M.base ? M.base.map( ( x, k ) => ( x * 0.6 + ( M.edge ? Math.min( 1, M.edge[ k ] ) : x ) * 0.4 ) * 0.85 ) : [ 0.2, 0.22, 0.12 ];
 			for ( let a = 0; a < 3; a ++ ) C[ u * 4 + a ] = Math.max( 0, Math.min( 255, Math.round( Math.sqrt( c[ a ] ) * 255 ) ) );

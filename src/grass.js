@@ -204,7 +204,9 @@ export class Grass {
 			// (smooth fields at three scales; the clump hash only nudges it)
 			// (smooth, large drifts; the clump hash only nudges it)
 			const tf = G.tussock ? vnoise( xz.div( 38.0 ).add( vec2( 4.2, 1.9 ) ) ).mul( 0.62 ).add( vnoise( xz.div( 12.0 ).add( vec2( 8.8, 3.3 ) ) ).mul( 0.3 ) ).add( cH.mul( 0.08 ) ) : cH;
-			const tus = smoothstep( 0.46, 0.8, tf ).mul( G.tussock || 0 );
+			// (a biome may vary its sward by landscape: lawn in the woods, tussocks on the steppe)
+			const gb = BIOME.grassBiome ? BIOME.grassBiome( xz ) : null;
+			const tus = smoothstep( 0.46, 0.8, tf ).mul( G.tussock || 0 ).mul( gb ? gb.tussock : float( 1.0 ) );
 			// colour regions: greener swales and golden, wind-cured slopes (+ the tussocks' own straw)
 			const region = G.tussock ? vnoise( xz.div( 55.0 ).add( vec2( 17.0, 5.0 ) ) ) : float( 0.5 );
 			const dry = G.tussock ? clamp( dry0.mul( 0.35 ).add( tus.mul( 0.22 ) ).add( region.sub( 0.5 ).mul( 0.7 ) ).sub( 0.05 ), 0.0, 1.0 ) : dry0;
@@ -216,6 +218,7 @@ export class Grass {
 				// blades at the clump centre are taller (tussock dome)
 				.mul( mix( 0.78, 1.0, clamp( float( 1.0 ).sub( dC.mul( 1.1 ) ), 0, 1 ) ) )
 				.mul( u.heightScale )
+				.mul( gb ? gb.tall : float( 1.0 ) )
 				// biome mask (e.g. a trail through the plains)
 				.mul( BIOME.grassMask ? BIOME.grassMask( xz ) : float( 1.0 ) )
 				;

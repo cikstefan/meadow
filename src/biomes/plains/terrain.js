@@ -12,6 +12,8 @@ import { vnoise, vnoiseJS } from '../../tsl/noise.js';
 import { U } from '../../tsl/uniforms.js';
 import { TRAIL, LAKE, PAINE_GRANDE, CUERNOS, VALLEY_HEAD, FAR_HILLS, MOUNTAIN_FREE_RADIUS } from './layout.js';
 import { rockFree } from './rockmask.js';
+import { grassBiomeTSL, grassBiomeJS } from './biomes.js';
+import { VEG_RASTER } from './vox/mode.js';
 import { buildRelief, reliefJS, relief, reliefIdJS } from './relief.js';
 
 const D2R = Math.PI / 180;
@@ -394,6 +396,7 @@ export const fieldTall = Fn( ( [ xz ] ) => {
 
 	const a = smoothstep( 0.3, 0.9, vnoise( xz.div( 31 ).add( vec2( 41.0, 3.0 ) ) ) );
 	const b = vnoise( xz.div( 7.5 ).add( vec2( 9.0, 77.0 ) ) );
+	// (each landscape its own sward: a low lawn in the woods, tussocks on the steppe)
 	return a.mul( 0.62 ).add( b.mul( b ).mul( 0.38 ) );
 
 } );
@@ -403,7 +406,8 @@ export const fieldDry = Fn( ( [ xz ] ) => {
 
 	const a = vnoise( xz.div( 46 ).add( vec2( 101.0, 19.0 ) ) );
 	const b = vnoise( xz.div( 9.0 ).add( vec2( 5.0, 33.0 ) ) );
-	return smoothstep( 0.38, 0.8, a.mul( 0.72 ).add( b.mul( 0.28 ) ) ).mul( U.dry );
+	const d = smoothstep( 0.38, 0.8, a.mul( 0.72 ).add( b.mul( 0.28 ) ) );
+	return VEG_RASTER ? d.mul( U.dry ).add( grassBiomeTSL( xz ).dry ).clamp( 0.0, 1.0 ) : d.mul( U.dry );
 
 } );
 
@@ -420,8 +424,9 @@ export const fieldFlowers = Fn( ( [ xz ] ) => {
 export function fieldsJS( x, z ) {
 
 	const tb = vnoiseJS( x / 7.5 + 9, z / 7.5 + 77 );
-	const tall = ss( 0.3, 0.9, vnoiseJS( x / 31 + 41, z / 31 + 3 ) ) * 0.62 + tb * tb * 0.38;
-	const dry = ss( 0.38, 0.8, vnoiseJS( x / 46 + 101, z / 46 + 19 ) * 0.72 + vnoiseJS( x / 9 + 5, z / 9 + 33 ) * 0.28 ) * U.dry.value;
+	const gb = VEG_RASTER ? grassBiomeJS( x, z ) : { tall: 1, dry: 0 };
+	const tall = ( ss( 0.3, 0.9, vnoiseJS( x / 31 + 41, z / 31 + 3 ) ) * 0.62 + tb * tb * 0.38 ) * gb.tall;
+	const dry = Math.min( 1, Math.max( 0, ss( 0.38, 0.8, vnoiseJS( x / 46 + 101, z / 46 + 19 ) * 0.72 + vnoiseJS( x / 9 + 5, z / 9 + 33 ) * 0.28 ) * U.dry.value + gb.dry ) );
 	const flowers = Math.min( 1, ss( 0.55, 0.92, vnoiseJS( x / 19 + 7, z / 19 + 140 ) * 0.7 + vnoiseJS( x / 4 + 66, z / 4 + 12 ) * 0.3 ) + ss( 4, 0.8, trailDistJS( x, z ) ) * 0.45 );
 	return { tall, dry, flowers };
 
