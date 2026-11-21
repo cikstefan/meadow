@@ -43,10 +43,10 @@ const TREES = {
 	steppe: { occ: 0.03, mix: { snag: 1.0 } },
 };
 const SHRUBS = {
-	forest: { occ: 0.42, mix: { chaura: 3, calafate: 1.4, coiron: 0.4, anemona: 1.0, chloraea: 0.6, sisyrinchium: 0.3 } },
-	scrub: { occ: 0.8, mix: { notro: 2.2, matanegra: 2.0, calafate: 2.0, chuquiraga: 1.3, chaura: 1.0, coiron: 1.2, neneo: 0.5, sisyrinchium: 0.6, anemona: 0.4, echium: 0.12 } },
+	forest: { occ: 0.42, mix: { chaura: 3, calafate: 1.4, coiron: 0.4, anemona: 1.0, chloraea: 0.6, sisyrinchium: 0.3, lupin: 0.2 } },
+	scrub: { occ: 0.8, mix: { notro: 2.2, matanegra: 2.0, calafate: 2.0, chuquiraga: 1.3, chaura: 1.0, coiron: 1.2, neneo: 0.5, sisyrinchium: 0.6, anemona: 0.4, lupin: 0.7 } },
 	ghost: { occ: 0.72, mix: { calafate: 2.5, matanegra: 2.0, chaura: 1.6, notro: 0.45, coiron: 1.0, neneo: 0.4, anemona: 0.4 } },
-	steppe: { occ: 0.5, mix: { coiron: 3.0, neneo: 2.0, matanegra: 1.2, calafate: 0.6, chuquiraga: 0.5, sisyrinchium: 1.0, anemona: 0.6, chloraea: 0.3 } },
+	steppe: { occ: 0.5, mix: { coiron: 3.0, neneo: 2.0, matanegra: 1.2, calafate: 0.6, chuquiraga: 0.5, sisyrinchium: 1.0, anemona: 0.6, chloraea: 0.3, lupin: 0.35 } },
 };
 const BIOMES = [ 'forest', 'scrub', 'ghost', 'steppe' ];
 

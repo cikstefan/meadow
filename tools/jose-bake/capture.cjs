@@ -29,16 +29,16 @@ const PLANTS = {
 	matanegra: { h: 1.0, res: 80, seeds: [ 'matanegra-0', 'matanegra-2@0.85' ] },
 	chaura: { h: 0.6, res: 64, seeds: [ 'chaura-0', 'chaura-2@0.5', 'chaura-3@0.7' ] },
 	neneo: { h: 0.6, res: 64, seeds: [ 'neneo-0', 'neneo-1@0.45' ] },
-	chuquiraga: { h: 1.0, res: 80, seeds: [ 'chuquiraga-1', 'chuquiraga-4@0.85', 'chuquiraga-0@1.1' ] }, // quilembai: golden orange, amber, late summer
+	chuquiraga: { h: 1.0, res: 80, seeds: [ 'chuquiraga-1', 'chuquiraga-4@0.85', 'chuquiraga-0@1.1' ] }, // quilembai: golden, orange, butter yellow
 	coiron: { h: 0.5, res: 48, seeds: [ 'coiron-2', 'coiron-5', 'coiron-0@0.42' ] }, // summer gold, windswept, spring flush
 	// (the beeches caught at 0.78 of their year: full summer green; later they colour and drop)
 	lenga: { h: 16, res: 160, stages: [ 0.78, 0.6 ], seeds: [ 'lenga-16@17', 'lenga-14@19', 'lenga-4@8', 'lenga-22@6' ] }, // forest tree, ancient, wind-flagged, young
 	nirre: { h: 5, res: 128, stages: [ 0.78, 0.6 ], seeds: [ 'nirre-0@5.5', 'nirre-2@4', 'nirre-3@3.2' ] },
-	snag: { h: 8, res: 128, seeds: [ 'snag-0@9', 'snag-2@5.5', 'snag-3@7.5', 'snag-6@8', 'snag-12@1x', 'snag-8@1x' ] }, // standing, broken, leaning, many-limbed, fallen log, remnant
+	snag: { h: 8, res: 128, seeds: [ 'snag-0@9', 'snag-2@5.5', 'snag-3@7.5', 'snag-6@8', 'snag-12@1x', 'snag-8@1x', 'snag-18@6', 'snag-1@7' ] }, // standing, broken, leaning, many-limbed, fallen log, remnant, wind-snapped, split
 	sisyrinchium: { h: 0.3, res: 48, seeds: [ 'sisyrinchium-0', 'sisyrinchium-2' ] },
 	anemona: { h: 0.3, res: 48, seeds: [ 'anemona-0', 'anemona-2' ] },
 	chloraea: { h: 0.32, res: 48, seeds: [ 'chloraea-0' ] },
-	echium: { h: 1.8, res: 80, seeds: [ 'echium-0', 'echium-1' ] }, // pride of Madeira
+	lupin: { h: 1.0, res: 80, seeds: [ 'lupin-0', 'lupin-1@0.9', 'lupin-3@1.1', 'lupin-4@0.85', 'lupin-5' ] }, // lilac, pink, purple, white, magenta (Lupinus polyphyllus, naturalised along Patagonian roads and rivers)
 };
 
 const STAGES = [ 1.0, 0.62 ];
@@ -46,7 +46,7 @@ const STAGES = [ 1.0, 0.62 ];
 // cultivar the bake isolates a few typical leaves (and flat petals), renders each face-on
 // with jose's own shaders into that plant's atlas, and puts a card on every leaf's frame.
 // Grasses (curved blades) and species already drawn with jose's photo cards are left as they are.
-const ATLAS_SPECIES = [ 'echium', 'notro', 'calafate', 'chaura', 'sisyrinchium', 'nirre', 'chuquiraga', 'anemona', 'chloraea' ];
+const ATLAS_SPECIES = [ 'lupin', 'notro', 'calafate', 'chaura', 'sisyrinchium', 'nirre', 'chuquiraga', 'anemona', 'chloraea' ];
 const ATLAS_KINDS = [ 7, 0 ]; // leaf, petal
 // near-field mesh budgets (triangles) per LOD
 const LOD_TRIS = [ 150000, 70000, 26000 ];

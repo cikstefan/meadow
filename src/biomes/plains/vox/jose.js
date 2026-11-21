@@ -33,7 +33,7 @@ export const JOSE_SPECIES = {
 	sisyrinchium: { drift: 22, lean: 0.03, size: [ 0.8, 1.2 ] },
 	anemona: { drift: 25, lean: 0.03, size: [ 0.8, 1.2 ] },
 	chloraea: { drift: 25, lean: 0.02, size: [ 0.8, 1.2 ] },
-	echium: { drift: 80, lean: 0.12, size: [ 0.75, 1.25 ] }, // pride of Madeira
+	lupin: { drift: 40, lean: 0.06, size: [ 0.75, 1.25 ] }, // naturalised lupins: drifts of lilac, pink, purple and white spires
 };
 Object.values( JOSE_SPECIES ).forEach( ( S, i ) => ( S.k = i + 1 ) );
 
